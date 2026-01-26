@@ -112,7 +112,7 @@ export function DataTable<T extends Record<string, unknown>>({
   };
 
   return (
-    <div className="card overflow-hidden">
+    <div className="card">
       {/* Search bar */}
       {searchable && (
         <div className="p-4 border-b border-dark-700">

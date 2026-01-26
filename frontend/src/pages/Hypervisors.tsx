@@ -227,73 +227,88 @@ export function Hypervisors() {
     },
   ];
 
-  const renderActions = (hypervisor: Hypervisor) => (
-    <div className="relative">
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => setActiveDropdown(activeDropdown === hypervisor.id ? null : hypervisor.id)}
-        className="!p-1.5"
-      >
-        <MoreVertical size={16} />
-      </Button>
-      {activeDropdown === hypervisor.id && (
-        <>
-          <div
-            className="fixed inset-0 z-10"
-            onClick={() => setActiveDropdown(null)}
-          />
-          <div className="absolute right-0 top-full mt-1 z-20 w-48 bg-dark-700 border border-dark-600 rounded-lg shadow-lg py-1">
-            <button
-              onClick={() => handleTestConnection(hypervisor)}
-              className="w-full flex items-center gap-2 px-4 py-2 text-sm text-dark-200 hover:bg-dark-600 transition-colors"
+  const renderActions = (hypervisor: Hypervisor) => {
+    const isOpen = activeDropdown === hypervisor.id;
+    
+    return (
+      <div className="relative">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            setActiveDropdown(isOpen ? null : hypervisor.id);
+          }}
+          className="!p-1.5"
+        >
+          <MoreVertical size={16} />
+        </Button>
+        {isOpen && (
+          <>
+            <div
+              className="fixed inset-0"
+              style={{ zIndex: 9998 }}
+              onClick={() => setActiveDropdown(null)}
+            />
+            <div 
+              className="absolute right-0 mt-1 w-48 bg-dark-700 border border-dark-600 rounded-lg shadow-xl py-1"
+              style={{ zIndex: 9999, top: '100%' }}
             >
-              <Plug size={16} />
-              Tester la connexion
-            </button>
-            <button
-              onClick={() => handleOpenModal(hypervisor)}
-              className="w-full flex items-center gap-2 px-4 py-2 text-sm text-dark-200 hover:bg-dark-600 transition-colors"
-            >
-              <Pencil size={16} />
-              Modifier
-            </button>
-            <button
-              onClick={() => handleDelete(hypervisor)}
-              className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-500 hover:bg-dark-600 transition-colors"
-            >
-              <Trash2 size={16} />
-              Supprimer
-            </button>
-          </div>
-        </>
-      )}
-    </div>
-  );
+              <button
+                onClick={() => handleTestConnection(hypervisor)}
+                className="w-full flex items-center gap-2 px-4 py-2 text-sm text-dark-200 hover:bg-dark-600 transition-colors"
+              >
+                <Plug size={16} />
+                Tester la connexion
+              </button>
+              <button
+                onClick={() => handleOpenModal(hypervisor)}
+                className="w-full flex items-center gap-2 px-4 py-2 text-sm text-dark-200 hover:bg-dark-600 transition-colors"
+              >
+                <Pencil size={16} />
+                Modifier
+              </button>
+              <button
+                onClick={() => handleDelete(hypervisor)}
+                className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-500 hover:bg-dark-600 transition-colors"
+              >
+                <Trash2 size={16} />
+                Supprimer
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-dark-900">
       <Header title="Hyperviseurs" />
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         {/* Header actions */}
-        <div className="flex items-center justify-between mb-6">
-          <p className="text-dark-400">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+          <p className="text-dark-400 text-sm sm:text-base">
             Gérez vos connexions aux serveurs Hyper-V et VMware
           </p>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             <Button
               variant="secondary"
               leftIcon={<RefreshCw size={18} />}
               onClick={() => refetch()}
               isLoading={isLoading}
+              className="flex-1 sm:flex-none"
             >
-              Actualiser
+              <span className="hidden sm:inline">Actualiser</span>
+              <span className="sm:hidden">Refresh</span>
             </Button>
             <Button
               leftIcon={<Plus size={18} />}
               onClick={() => handleOpenModal()}
+              className="flex-1 sm:flex-none"
             >
-              Ajouter un hyperviseur
+              <span className="hidden sm:inline">Ajouter un hyperviseur</span>
+              <span className="sm:hidden">Ajouter</span>
             </Button>
           </div>
         </div>

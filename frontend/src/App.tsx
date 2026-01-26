@@ -10,6 +10,7 @@ import {
   VirtualMachines,
   Templates,
   Deployments,
+  NewDeployment,
   Settings,
   Help,
   Login,
@@ -49,6 +50,7 @@ function App() {
                 <Route path="/vms" element={<VirtualMachines />} />
                 <Route path="/templates" element={<Templates />} />
                 <Route path="/deployments" element={<Deployments />} />
+                <Route path="/deployments/new" element={<NewDeployment />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/help" element={<Help />} />
               </Route>

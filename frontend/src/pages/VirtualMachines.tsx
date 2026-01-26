@@ -212,64 +212,75 @@ export function VirtualMachines() {
     },
   ];
 
-  const renderActions = (vm: VirtualMachine) => (
-    <div className="relative">
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => setActiveDropdown(activeDropdown === vm.id ? null : vm.id)}
-        className="!p-1.5"
-      >
-        <MoreVertical size={16} />
-      </Button>
-      {activeDropdown === vm.id && (
-        <>
-          <div
-            className="fixed inset-0 z-10"
-            onClick={() => setActiveDropdown(null)}
-          />
-          <div className="absolute right-0 top-full mt-1 z-20 w-44 bg-dark-700 border border-dark-600 rounded-lg shadow-lg py-1">
-            {vm.state !== 'running' && (
-              <button
-                onClick={() => handleStart(vm)}
-                disabled={startMutation.isPending}
-                className="w-full flex items-center gap-2 px-4 py-2 text-sm text-green-500 hover:bg-dark-600 transition-colors disabled:opacity-50"
-              >
-                <Play size={16} />
-                Démarrer
-              </button>
-            )}
-            {vm.state === 'running' && (
-              <>
-                <button
-                  onClick={() => openActionModal('stop', vm)}
-                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-yellow-500 hover:bg-dark-600 transition-colors"
-                >
-                  <Square size={16} />
-                  Arrêter
-                </button>
-                <button
-                  onClick={() => openActionModal('restart', vm)}
-                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-blue-500 hover:bg-dark-600 transition-colors"
-                >
-                  <RotateCw size={16} />
-                  Redémarrer
-                </button>
-              </>
-            )}
-            <div className="border-t border-dark-600 my-1" />
-            <button
-              onClick={() => openActionModal('delete', vm)}
-              className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-500 hover:bg-dark-600 transition-colors"
+  const renderActions = (vm: VirtualMachine) => {
+    const isOpen = activeDropdown === vm.id;
+    
+    return (
+      <div className="relative">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            setActiveDropdown(isOpen ? null : vm.id);
+          }}
+          className="!p-1.5"
+        >
+          <MoreVertical size={16} />
+        </Button>
+        {isOpen && (
+          <>
+            <div
+              className="fixed inset-0"
+              style={{ zIndex: 9998 }}
+              onClick={() => setActiveDropdown(null)}
+            />
+            <div 
+              className="absolute right-0 mt-1 w-44 bg-dark-700 border border-dark-600 rounded-lg shadow-xl py-1"
+              style={{ zIndex: 9999, top: '100%' }}
             >
-              <Trash2 size={16} />
-              Supprimer
-            </button>
-          </div>
-        </>
-      )}
-    </div>
-  );
+              {vm.state !== 'running' && (
+                <button
+                  onClick={() => handleStart(vm)}
+                  disabled={startMutation.isPending}
+                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-green-500 hover:bg-dark-600 transition-colors disabled:opacity-50"
+                >
+                  <Play size={16} />
+                  Démarrer
+                </button>
+              )}
+              {vm.state === 'running' && (
+                <>
+                  <button
+                    onClick={() => openActionModal('stop', vm)}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-yellow-500 hover:bg-dark-600 transition-colors"
+                  >
+                    <Square size={16} />
+                    Arrêter
+                  </button>
+                  <button
+                    onClick={() => openActionModal('restart', vm)}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-blue-500 hover:bg-dark-600 transition-colors"
+                  >
+                    <RotateCw size={16} />
+                    Redémarrer
+                  </button>
+                </>
+              )}
+              <div className="border-t border-dark-600 my-1" />
+              <button
+                onClick={() => openActionModal('delete', vm)}
+                className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-500 hover:bg-dark-600 transition-colors"
+              >
+                <Trash2 size={16} />
+                Supprimer
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
 
   const getModalConfig = () => {
     const vm = actionModal.vm;
@@ -345,23 +356,21 @@ export function VirtualMachines() {
         </div>
 
         {/* Filters and actions */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <Server size={18} className="text-dark-400" />
-              <select
-                value={selectedHypervisor}
-                onChange={(e) => setSelectedHypervisor(e.target.value)}
-                className="bg-dark-700 border border-dark-600 rounded-lg px-3 py-2 text-dark-100 focus:outline-none focus:border-primary-500"
-              >
-                <option value="all">Tous les hyperviseurs</option>
-                {hypervisors.map((h) => (
-                  <option key={h.id} value={h.id}>
-                    {h.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+          <div className="flex items-center gap-2">
+            <Server size={18} className="text-dark-400 hidden sm:block" />
+            <select
+              value={selectedHypervisor}
+              onChange={(e) => setSelectedHypervisor(e.target.value)}
+              className="flex-1 sm:flex-none bg-dark-700 border border-dark-600 rounded-lg px-3 py-2 text-dark-100 text-sm focus:outline-none focus:border-primary-500"
+            >
+              <option value="all">Tous les hyperviseurs</option>
+              {hypervisors.map((h) => (
+                <option key={h.id} value={h.id}>
+                  {h.name}
+                </option>
+              ))}
+            </select>
           </div>
           <Button
             variant="secondary"

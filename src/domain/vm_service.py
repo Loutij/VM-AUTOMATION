@@ -71,9 +71,9 @@ class VMService:
             if not hypervisor:
                 raise NotFoundError("Hypervisor", str(hypervisor_id))
             
-            if hypervisor.hypervisor_type != HypervisorType.HYPERV:
+            if hypervisor.type != HypervisorType.HYPERV:
                 raise ValidationError(
-                    f"Unsupported hypervisor type: {hypervisor.hypervisor_type}"
+                    f"Unsupported hypervisor type: {hypervisor.type}"
                 )
             
             self._hypervisor_clients[hypervisor_id] = HyperVClient(

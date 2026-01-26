@@ -170,6 +170,12 @@ class Hypervisor(Base, TimestampMixin):
         cascade="all, delete-orphan",
     )
 
+    @property
+    def password(self) -> str:
+        """Retourne le mot de passe (à décrypter si nécessaire)."""
+        # TODO: Implémenter le déchiffrement si password_encrypted est chiffré
+        return self.password_encrypted
+
     def __repr__(self) -> str:
         return f"<Hypervisor(id={self.id}, name={self.name}, type={self.type})>"
 

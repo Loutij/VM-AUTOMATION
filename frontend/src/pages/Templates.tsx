@@ -283,9 +283,10 @@ export function Templates() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() =>
-                      setActiveDropdown(activeDropdown === template.id ? null : template.id)
-                    }
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setActiveDropdown(activeDropdown === template.id ? null : template.id);
+                    }}
                     className="!p-1.5 opacity-0 group-hover:opacity-100 transition-opacity"
                   >
                     <MoreVertical size={16} />
@@ -293,10 +294,14 @@ export function Templates() {
                   {activeDropdown === template.id && (
                     <>
                       <div
-                        className="fixed inset-0 z-10"
+                        className="fixed inset-0"
+                        style={{ zIndex: 9998 }}
                         onClick={() => setActiveDropdown(null)}
                       />
-                      <div className="absolute right-0 top-full mt-1 z-20 w-40 bg-dark-700 border border-dark-600 rounded-lg shadow-lg py-1">
+                      <div 
+                        className="absolute right-0 mt-1 w-40 bg-dark-700 border border-dark-600 rounded-lg shadow-xl py-1"
+                        style={{ zIndex: 9999, top: '100%' }}
+                      >
                         <button
                           onClick={() => handleOpenModal(template)}
                           className="w-full flex items-center gap-2 px-4 py-2 text-sm text-dark-200 hover:bg-dark-600 transition-colors"

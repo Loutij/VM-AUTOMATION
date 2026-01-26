@@ -250,11 +250,6 @@ export function Deployments() {
               icon={Rocket}
               title="Aucun déploiement"
               description="Lancez votre premier déploiement pour créer une machine virtuelle automatiquement."
-              action={{
-                label: 'Nouveau déploiement',
-                onClick: () => {},
-                icon: Plus,
-              }}
             />
           </div>
         ) : (

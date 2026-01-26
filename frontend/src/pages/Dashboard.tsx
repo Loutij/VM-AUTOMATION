@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Monitor,
   Server,
@@ -15,6 +16,7 @@ import { vmsApi, hypervisorsApi, deploymentsApi } from '../services/api';
 import type { VirtualMachine, Hypervisor, Deployment } from '../types';
 
 export function Dashboard() {
+  const navigate = useNavigate();
   const [vms, setVms] = useState<VirtualMachine[]>([]);
   const [hypervisors, setHypervisors] = useState<Hypervisor[]>([]);
   const [deployments, setDeployments] = useState<Deployment[]>([]);
@@ -224,15 +226,24 @@ export function Dashboard() {
         <div className="mt-6 card p-6">
           <h2 className="text-lg font-semibold text-white mb-4">Actions rapides</h2>
           <div className="flex flex-wrap gap-3">
-            <button className="btn-primary flex items-center gap-2">
+            <button 
+              className="btn-primary flex items-center gap-2"
+              onClick={() => navigate('/deployments/new')}
+            >
               <Rocket size={18} />
               Nouveau déploiement
             </button>
-            <button className="btn-secondary flex items-center gap-2">
+            <button 
+              className="btn-secondary flex items-center gap-2"
+              onClick={() => navigate('/vms')}
+            >
               <Monitor size={18} />
               Voir toutes les VMs
             </button>
-            <button className="btn-secondary flex items-center gap-2">
+            <button 
+              className="btn-secondary flex items-center gap-2"
+              onClick={() => navigate('/hypervisors')}
+            >
               <Server size={18} />
               Ajouter un hyperviseur
             </button>
