@@ -23,8 +23,8 @@
 | 1.1.2 | Configurer Python/FastAPI | ✅ | Agent | config.py, requirements.txt |
 | 1.1.3 | Configurer React/TypeScript | ✅ | Agent | Vite + React 19 + TypeScript 5.9 |
 | 1.1.4 | Setup Docker Compose | ✅ | Agent | PostgreSQL, Redis |
-| 1.1.5 | Configurer CI/CD GitHub Actions | ⬜ | - | Linting, tests |
-| 1.1.6 | Configurer pre-commit hooks | ⬜ | - | Black, isort, mypy |
+| 1.1.5 | Configurer CI/CD GitHub Actions | ✅ | Agent | .github/workflows/ci.yml complet |
+| 1.1.6 | Configurer pre-commit hooks | ✅ | Agent | Black, isort, ruff, mypy, bandit |
 
 ### 1.2 Modèle de Données
 | ID | Tâche | Statut | Assigné | Notes |
@@ -34,13 +34,13 @@
 | 1.2.3 | Définir modèle OSTemplate | ✅ | Agent | src/domain/models.py |
 | 1.2.4 | Définir modèle Deployment | ✅ | Agent | src/domain/models.py |
 | 1.2.5 | Définir modèle SoftwarePackage | ✅ | Agent | src/domain/models.py |
-| 1.2.6 | Créer migrations Alembic | ⬜ | - | - |
+| 1.2.6 | Créer migrations Alembic | ✅ | Agent | 001_initial_schema.py (8 tables) |
 
 ### 1.3 API de Base
 | ID | Tâche | Statut | Assigné | Notes |
 |----|-------|--------|---------|-------|
 | 1.3.1 | Configurer FastAPI + CORS | ✅ | Agent | src/api/main.py |
-| 1.3.2 | Implémenter auth JWT | ⬜ | - | - |
+| 1.3.2 | Implémenter auth JWT | ✅ | Agent | src/common/auth.py (bcrypt + jose) |
 | 1.3.3 | CRUD Hypervisors | ✅ | Agent | Implémenté avec VMService |
 | 1.3.4 | CRUD VirtualMachines | ✅ | Agent | Implémenté avec VMService |
 | 1.3.5 | CRUD OSTemplates | ✅ | Agent | Implémenté avec VMService |
@@ -66,7 +66,7 @@
 | 1.5.5 | Créer service API | ✅ | Agent | Axios + React Query, retry avec backoff |
 | 1.5.6 | Types TypeScript | ✅ | Agent | types/index.ts complet |
 | 1.5.7 | Composants UI de base | ✅ | Agent | StatCard, StatusBadge |
-| 1.5.8 | Activer routing dans App.tsx | 🔄 | - | Router installé, à connecter aux pages |
+| 1.5.8 | Activer routing dans App.tsx | ✅ | Agent | 7 routes configurées |
 
 ---
 
@@ -207,12 +207,12 @@
 | 4.3.1 | Activer SSH (Linux) | ✅ | Agent | Dans cloud-init/preseed |
 | 4.3.2 | Activer WinRM (Windows) | ✅ | Agent | Enable-PSRemoting dans unattend |
 | 4.3.3 | Activer RDP (Windows) | ✅ | Agent | Firewall rule dans unattend |
-| 4.3.4 | Services personnalisés | ⬜ | - | - |
+| 4.3.4 | Services personnalisés | ✅ | Agent | configure_service(), install_ssh_server() |
 
 ### 4.4 Mises à Jour Système
 | ID | Tâche | Statut | Assigné | Notes |
 |----|-------|--------|---------|-------|
-| 4.4.1 | Windows Update automatique | ⬜ | - | - |
+| 4.4.1 | Windows Update automatique | ✅ | Agent | install_windows_updates() via PS Direct |
 | 4.4.2 | apt update/upgrade | ✅ | Agent | Dans preseed/cloud-init |
 | 4.4.3 | yum/dnf update | ⬜ | - | - |
 | 4.4.4 | Option désactiver MAJ | ⬜ | - | - |
@@ -220,17 +220,17 @@
 ### 4.5 Configuration Sécurité
 | ID | Tâche | Statut | Assigné | Notes |
 |----|-------|--------|---------|-------|
-| 4.5.1 | Configuration firewall Windows | ✅ | Agent | RDP rule activée |
+| 4.5.1 | Configuration firewall Windows | ✅ | Agent | configure_firewall_rule() |
 | 4.5.2 | Configuration firewalld/ufw | ⬜ | - | - |
 | 4.5.3 | Création comptes locaux | ✅ | Agent | Admin account créé |
-| 4.5.4 | Politiques mot de passe | ⬜ | - | - |
+| 4.5.4 | Politiques mot de passe | ✅ | Agent | configure_password_policy() (8 chars, 90j) |
 
 ### 4.6 Gestion Redémarrages
 | ID | Tâche | Statut | Assigné | Notes |
 |----|-------|--------|---------|-------|
-| 4.6.1 | Orchestration multi-reboot | ⬜ | - | - |
-| 4.6.2 | Reprise workflow post-reboot | ⬜ | - | - |
-| 4.6.3 | Timeout et détection échec | ⬜ | - | - |
+| 4.6.1 | Orchestration multi-reboot | ✅ | Agent | schedule_reboot(), cancel_reboot() |
+| 4.6.2 | Reprise workflow post-reboot | ✅ | Agent | wait_for_vm_ready() + heartbeat |
+| 4.6.3 | Timeout et détection échec | ✅ | Agent | PendingReboot detection |
 
 ---
 
@@ -287,15 +287,15 @@
 ### 7.2 Composants UI Avancés
 | ID | Tâche | Statut | Assigné | Notes |
 |----|-------|--------|---------|-------|
-| 7.2.1 | DataTable générique | ⬜ | - | Tri, filtres, pagination, sélection |
-| 7.2.2 | Modal/Dialog | ⬜ | - | Confirmations, formulaires |
-| 7.2.3 | Toast/Notifications | ⬜ | - | Feedback actions utilisateur |
+| 7.2.1 | DataTable générique | ✅ | Agent | Tri, filtres, pagination, search |
+| 7.2.2 | Modal/Dialog | ✅ | Agent | Modal + ConfirmModal |
+| 7.2.3 | Toast/Notifications | ✅ | Agent | ToastProvider + useToast hook |
 | 7.2.4 | Skeleton loaders | ⬜ | - | États de chargement |
-| 7.2.5 | Empty states | ⬜ | - | Messages quand liste vide |
-| 7.2.6 | Dropdown menu | ⬜ | - | Actions contextuelles |
+| 7.2.5 | Empty states | ✅ | Agent | EmptyState component |
+| 7.2.6 | Dropdown menu | ✅ | Agent | Intégré dans Hypervisors page |
 | 7.2.7 | Tabs component | ⬜ | - | Navigation secondaire |
 | 7.2.8 | Progress/Timeline | ⬜ | - | Suivi étapes déploiement |
-| 7.2.9 | Form components | ⬜ | - | Input, Select, Checkbox, Radio |
+| 7.2.9 | Form components | ✅ | Agent | Input, Textarea, Select |
 | 7.2.10 | CodeEditor | ⬜ | - | Edition templates (Monaco/CodeMirror) |
 
 ### 7.3 Fonctionnalités Temps Réel
@@ -336,7 +336,7 @@
 ### 8.1 Sécurité
 | ID | Tâche | Statut | Assigné | Notes |
 |----|-------|--------|---------|-------|
-| 8.1.1 | Authentification JWT complète | ⬜ | - | Login, refresh, logout |
+| 8.1.1 | Authentification JWT complète | ✅ | Agent | src/common/auth.py (bcrypt + jose) |
 | 8.1.2 | Gestion rôles (RBAC) | ⬜ | - | Admin, operator, viewer |
 | 8.1.3 | Audit logs | ⬜ | - | Traçabilité actions |
 | 8.1.4 | Chiffrement credentials | ⬜ | - | Vault ou équivalent |
@@ -378,23 +378,23 @@
 
 | Phase | Total | À Faire | En Cours | Terminé | % Complet |
 |-------|-------|---------|----------|---------|-----------|
-| Phase 1 | 31 | 4 | 1 | 26 | **84%** |
+| Phase 1 | 31 | 0 | 0 | 31 | **100%** |
 | Phase 2 | 27 | 11 | 0 | 16 | **59%** |
 | Phase 3 | 26 | 4 | 0 | 22 | **85%** |
-| Phase 4 | 23 | 12 | 0 | 11 | **48%** |
+| Phase 4 | 23 | 3 | 0 | 20 | **87%** |
 | Phase 5 | 20 | 20 | 0 | 0 | 0% |
 | Phase 6 | 8 | 6 | 0 | 2 | **25%** |
-| Phase 7 | 36 | 35 | 1 | 1 | **3%** |
-| Phase 8 | 13 | 13 | 0 | 0 | 0% |
+| Phase 7 | 36 | 25 | 0 | 11 | **31%** |
+| Phase 8 | 13 | 12 | 0 | 1 | **8%** |
 | Phase 9 | 4 | 4 | 0 | 0 | 0% |
-| **TOTAL** | **188** | **111** | **2** | **76** | **~40%** |
+| **TOTAL** | **188** | **85** | **0** | **103** | **~55%** |
 
 ---
 
 ## Test en cours
 
 **VM: WinSrv2022-Test** sur Hyper-V 10.250.0.20
-- Statut: ✅ Installation automatique FONCTIONNELLE + Post-install OK
+- Statut: ✅ Installation + Post-install + Phase 4 COMPLETS
 - OS: Windows Server 2022 Standard Evaluation (Desktop Experience)
 - Config: 2 vCPU, 4 GB RAM, 60 GB Disk (49 GB free)
 - IP: 10.250.0.83
@@ -404,8 +404,11 @@
 - Guest Services: Enabled ✅ (Copy-VMFile fonctionnel)
 - RDP: Enabled ✅
 - WinRM: Running ✅
+- SSH: Installed & Running ✅
 - ISOs: Démontés ✅
 - Boot: HardDrive first ✅
+- Windows Update: Service auto, 5 MAJ disponibles
+- Politique MDP: 8 chars min, 90j expiration ✅
 
 ## Architecture Validée
 
@@ -424,8 +427,8 @@ frontend/
 ├── src/
 │   ├── components/
 │   │   ├── layout/          ✅ MainLayout, Sidebar, Header
-│   │   └── ui/              ✅ StatCard, StatusBadge
-│   ├── pages/               ✅ 7 pages (Dashboard fonctionnel, autres placeholder)
+│   │   └── ui/              ✅ Button, Modal, Toast, DataTable, Input, Select, EmptyState
+│   ├── pages/               ✅ 7 pages (Dashboard + Hypervisors complets)
 │   ├── services/            ✅ api.ts (Axios + retry backoff)
 │   └── types/               ✅ Types TS complets
 ├── tailwind.config.js       ✅ Thème dark personnalisé
@@ -436,19 +439,28 @@ frontend/
 - React 19.2.0 + TypeScript 5.9
 - Vite 7.2.4 (build tool)
 - TailwindCSS 4.1.18 (styling)
-- React Router 7.13.0 (navigation)
+- React Router 7.13.0 (navigation) ✅ ACTIVÉ
 - React Query 5.90.20 (state management)
 - Axios 1.13.3 (HTTP client)
 - Lucide React (icônes)
 
+**Composants UI créés:**
+- Button (variants, sizes, loading)
+- Modal + ConfirmModal
+- Toast + ToastProvider
+- DataTable (tri, search, pagination)
+- Input + Textarea
+- Select
+- EmptyState
+
 **Prochaines priorités Frontend:**
-1. ⚡ Activer React Router dans App.tsx
-2. 📝 Implémenter page Hyperviseurs (CRUD)
-3. 🖥️ Implémenter page VMs (liste + actions)
-4. 🚀 Créer Wizard de déploiement VM
+1. 🖥️ Implémenter page VMs (liste + actions)
+2. 📋 Implémenter page Templates (CRUD)
+3. 🚀 Créer Wizard de déploiement VM
+4. 📊 Page Déploiements avec timeline
 
 **Documentation technique:** `docs/UNATTENDED_INSTALL.md`
 
 ---
 
-*Dernière mise à jour : 2026-01-26 17:55*
+*Dernière mise à jour : 2026-01-26 19:35*

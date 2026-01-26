@@ -87,6 +87,43 @@ class DiskInfo:
     format: str = "VHDX"
     type: str = "Dynamic"
     attached_to: str | None = None
+    controller_number: int = 0
+    controller_location: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convertit en dictionnaire."""
+        return {
+            "path": self.path,
+            "size_gb": self.size_gb,
+            "format": self.format,
+            "type": self.type,
+            "attached_to": self.attached_to,
+            "controller_number": self.controller_number,
+            "controller_location": self.controller_location,
+        }
+
+
+@dataclass
+class NetworkAdapterInfo:
+    """Informations sur un adaptateur réseau virtuel."""
+
+    name: str
+    switch_name: str | None
+    mac_address: str | None = None
+    vlan_id: int | None = None
+    ip_addresses: list[str] = field(default_factory=list)
+    is_management_os: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convertit en dictionnaire."""
+        return {
+            "name": self.name,
+            "switch_name": self.switch_name,
+            "mac_address": self.mac_address,
+            "vlan_id": self.vlan_id,
+            "ip_addresses": self.ip_addresses,
+            "is_management_os": self.is_management_os,
+        }
 
 
 @dataclass

@@ -61,12 +61,12 @@ Outil interne d'automatisation complète du déploiement de machines virtuelles.
 | Structure projet | TERMINÉ | Vite + React 19 + TypeScript 5.9 |
 | Design system | TERMINÉ | TailwindCSS 4, thème dark |
 | Layout application | TERMINÉ | Sidebar, Header, MainLayout |
-| Composants UI base | TERMINÉ | StatCard, StatusBadge |
+| Composants UI avancés | TERMINÉ | Button, Modal, Toast, DataTable, Input, Select, EmptyState |
 | Service API | TERMINÉ | Axios avec retry backoff |
 | Types TypeScript | TERMINÉ | Interfaces complètes |
+| React Router | TERMINÉ | 7 routes configurées dans App.tsx |
 | Dashboard principal | TERMINÉ | Stats, déploiements récents |
-| React Router | EN COURS | Installé, à activer dans App.tsx |
-| Page Hyperviseurs | À FAIRE | CRUD hyperviseurs |
+| Page Hyperviseurs | TERMINÉ | CRUD complet + test connexion |
 | Page VMs | À FAIRE | Liste, actions, détails |
 | Page Templates | À FAIRE | CRUD templates OS |
 | Page Déploiements | À FAIRE | Suivi temps réel |

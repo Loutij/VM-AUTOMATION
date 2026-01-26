@@ -26,6 +26,7 @@ from src.integrations.hypervisors.base import (
     BaseHypervisor,
     DiskInfo,
     IntegrationService,
+    NetworkAdapterInfo,
     PowerShellDirectResult,
     VirtualSwitch,
     VMHealthStatus,
@@ -1088,3 +1089,741 @@ class HyperVClient(BaseHypervisor):
             timeout=timeout,
         )
         return False
+
+    # =========================================================================
+    # Gestion VLAN (2.2.3)
+    # =========================================================================
+
+    async def set_vm_vlan(
+        self,
+        vm_id: str,
+        vlan_id: int,
+        adapter_name: str | None = None,
+    ) -> bool:
+        """
+        Configure le VLAN sur un adaptateur réseau d'une VM.
+
+        Args:
+            vm_id: ID ou nom de la VM
+            vlan_id: ID du VLAN (1-4094)
+            adapter_name: Nom de l'adaptateur (si None, applique au premier)
+        """
+        if adapter_name:
+            script = f"""
+            $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+            if (-not $vm) {{
+                $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+            }}
+            if ($vm) {{
+                $nic = Get-VMNetworkAdapter -VM $vm | Where-Object {{ $_.Name -eq '{adapter_name}' }}
+                if ($nic) {{
+                    Set-VMNetworkAdapterVlan -VMNetworkAdapter $nic -Access -VlanId {vlan_id}
+                    Write-Output "VLAN {vlan_id} set on adapter {adapter_name}"
+                }} else {{
+                    throw "Adapter '{adapter_name}' not found"
+                }}
+            }} else {{
+                throw "VM not found"
+            }}
+            """
+        else:
+            script = f"""
+            $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+            if (-not $vm) {{
+                $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+            }}
+            if ($vm) {{
+                Set-VMNetworkAdapterVlan -VM $vm -Access -VlanId {vlan_id}
+                Write-Output "VLAN {vlan_id} set"
+            }} else {{
+                throw "VM not found"
+            }}
+            """
+
+        result = await self._execute(script)
+
+        if not result.success:
+            raise VMOperationError(vm_id, "set_vlan", result.stderr)
+
+        logger.info("hyperv_vlan_set", vm_id=vm_id, vlan_id=vlan_id, adapter=adapter_name)
+        return True
+
+    async def remove_vm_vlan(
+        self,
+        vm_id: str,
+        adapter_name: str | None = None,
+    ) -> bool:
+        """
+        Supprime la configuration VLAN d'un adaptateur.
+
+        Args:
+            vm_id: ID ou nom de la VM
+            adapter_name: Nom de l'adaptateur (si None, applique à tous)
+        """
+        if adapter_name:
+            script = f"""
+            $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+            if (-not $vm) {{
+                $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+            }}
+            if ($vm) {{
+                $nic = Get-VMNetworkAdapter -VM $vm | Where-Object {{ $_.Name -eq '{adapter_name}' }}
+                if ($nic) {{
+                    Set-VMNetworkAdapterVlan -VMNetworkAdapter $nic -Untagged
+                    Write-Output "VLAN removed from adapter {adapter_name}"
+                }}
+            }} else {{
+                throw "VM not found"
+            }}
+            """
+        else:
+            script = f"""
+            $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+            if (-not $vm) {{
+                $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+            }}
+            if ($vm) {{
+                Set-VMNetworkAdapterVlan -VM $vm -Untagged
+                Write-Output "VLAN removed"
+            }} else {{
+                throw "VM not found"
+            }}
+            """
+
+        result = await self._execute(script)
+
+        if not result.success:
+            raise VMOperationError(vm_id, "remove_vlan", result.stderr)
+
+        logger.info("hyperv_vlan_removed", vm_id=vm_id, adapter=adapter_name)
+        return True
+
+    async def get_vm_vlan(
+        self,
+        vm_id: str,
+        adapter_name: str | None = None,
+    ) -> int | None:
+        """
+        Récupère l'ID VLAN configuré sur un adaptateur.
+
+        Args:
+            vm_id: ID ou nom de la VM
+            adapter_name: Nom de l'adaptateur
+
+        Returns:
+            ID du VLAN ou None si non configuré
+        """
+        script = f"""
+        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        if (-not $vm) {{
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+        }}
+        if ($vm) {{
+            $nics = Get-VMNetworkAdapter -VM $vm
+            {f"$nics = $nics | Where-Object {{ $_.Name -eq '{adapter_name}' }}" if adapter_name else ""}
+            $nic = $nics | Select-Object -First 1
+            if ($nic) {{
+                $vlan = Get-VMNetworkAdapterVlan -VMNetworkAdapter $nic
+                if ($vlan.AccessVlanId -gt 0) {{
+                    Write-Output $vlan.AccessVlanId
+                }}
+            }}
+        }}
+        """
+
+        result = await self._execute(script)
+
+        if result.success and result.stdout.strip():
+            try:
+                return int(result.stdout.strip())
+            except ValueError:
+                return None
+        return None
+
+    # =========================================================================
+    # Support multi-NIC (2.2.5)
+    # =========================================================================
+
+    async def list_network_adapters(self, vm_id: str) -> list[NetworkAdapterInfo]:
+        """
+        Liste tous les adaptateurs réseau d'une VM.
+
+        Args:
+            vm_id: ID ou nom de la VM
+
+        Returns:
+            Liste des adaptateurs réseau
+        """
+        script = f"""
+        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        if (-not $vm) {{
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+        }}
+        if ($vm) {{
+            Get-VMNetworkAdapter -VM $vm | ForEach-Object {{
+                $vlan = Get-VMNetworkAdapterVlan -VMNetworkAdapter $_
+                @{{
+                    Name = $_.Name
+                    SwitchName = $_.SwitchName
+                    MacAddress = $_.MacAddress
+                    VlanId = if ($vlan.AccessVlanId -gt 0) {{ $vlan.AccessVlanId }} else {{ $null }}
+                    IPAddresses = $_.IPAddresses
+                    IsManagementOs = $_.IsManagementOs
+                }}
+            }} | ConvertTo-Json -Depth 2
+        }}
+        """
+
+        result = await self._execute(script)
+
+        if not result.success:
+            raise HypervisorError(
+                f"Failed to list network adapters: {result.stderr}",
+                {"vm_id": vm_id},
+            )
+
+        data = self._parse_json_output(result.stdout)
+
+        if data is None:
+            return []
+
+        if isinstance(data, dict):
+            data = [data]
+
+        adapters = []
+        for nic_data in data:
+            ip_addresses = nic_data.get("IPAddresses", [])
+            if isinstance(ip_addresses, str):
+                ip_addresses = [ip_addresses] if ip_addresses else []
+
+            adapters.append(NetworkAdapterInfo(
+                name=nic_data.get("Name", ""),
+                switch_name=nic_data.get("SwitchName"),
+                mac_address=nic_data.get("MacAddress"),
+                vlan_id=nic_data.get("VlanId"),
+                ip_addresses=ip_addresses or [],
+                is_management_os=nic_data.get("IsManagementOs", False),
+            ))
+
+        logger.info("hyperv_network_adapters_listed", vm_id=vm_id, count=len(adapters))
+        return adapters
+
+    async def add_network_adapter(
+        self,
+        vm_id: str,
+        switch_name: str,
+        adapter_name: str | None = None,
+        vlan_id: int | None = None,
+        static_mac: str | None = None,
+    ) -> NetworkAdapterInfo:
+        """
+        Ajoute un adaptateur réseau à une VM.
+
+        Args:
+            vm_id: ID ou nom de la VM
+            switch_name: Nom du switch virtuel
+            adapter_name: Nom de l'adaptateur (généré automatiquement si None)
+            vlan_id: ID VLAN optionnel
+            static_mac: Adresse MAC statique optionnelle
+
+        Returns:
+            Informations sur l'adaptateur créé
+        """
+        name_param = f"-Name '{adapter_name}'" if adapter_name else ""
+        mac_param = f"-StaticMacAddress '{static_mac}'" if static_mac else ""
+
+        script = f"""
+        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        if (-not $vm) {{
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+        }}
+        if ($vm) {{
+            $nic = Add-VMNetworkAdapter -VM $vm -SwitchName '{switch_name}' {name_param} {mac_param} -Passthru
+            {f"Set-VMNetworkAdapterVlan -VMNetworkAdapter $nic -Access -VlanId {vlan_id}" if vlan_id else ""}
+            $vlan = Get-VMNetworkAdapterVlan -VMNetworkAdapter $nic
+            @{{
+                Name = $nic.Name
+                SwitchName = $nic.SwitchName
+                MacAddress = $nic.MacAddress
+                VlanId = if ($vlan.AccessVlanId -gt 0) {{ $vlan.AccessVlanId }} else {{ $null }}
+            }} | ConvertTo-Json
+        }} else {{
+            throw "VM not found"
+        }}
+        """
+
+        result = await self._execute(script)
+
+        if not result.success:
+            raise VMOperationError(vm_id, "add_network_adapter", result.stderr)
+
+        data = self._parse_json_output(result.stdout)
+
+        if data is None:
+            raise VMOperationError(vm_id, "add_network_adapter", "No adapter data returned")
+
+        adapter = NetworkAdapterInfo(
+            name=data.get("Name", ""),
+            switch_name=data.get("SwitchName"),
+            mac_address=data.get("MacAddress"),
+            vlan_id=data.get("VlanId"),
+        )
+
+        logger.info(
+            "hyperv_network_adapter_added",
+            vm_id=vm_id,
+            adapter_name=adapter.name,
+            switch=switch_name,
+        )
+        return adapter
+
+    async def remove_network_adapter(
+        self,
+        vm_id: str,
+        adapter_name: str,
+    ) -> bool:
+        """
+        Supprime un adaptateur réseau d'une VM.
+
+        Args:
+            vm_id: ID ou nom de la VM
+            adapter_name: Nom de l'adaptateur à supprimer
+
+        Returns:
+            True si supprimé
+        """
+        script = f"""
+        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        if (-not $vm) {{
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+        }}
+        if ($vm) {{
+            $nic = Get-VMNetworkAdapter -VM $vm | Where-Object {{ $_.Name -eq '{adapter_name}' }}
+            if ($nic) {{
+                Remove-VMNetworkAdapter -VMNetworkAdapter $nic
+                Write-Output "Adapter removed"
+            }} else {{
+                throw "Adapter '{adapter_name}' not found"
+            }}
+        }} else {{
+            throw "VM not found"
+        }}
+        """
+
+        result = await self._execute(script)
+
+        if not result.success:
+            raise VMOperationError(vm_id, "remove_network_adapter", result.stderr)
+
+        logger.info("hyperv_network_adapter_removed", vm_id=vm_id, adapter_name=adapter_name)
+        return True
+
+    async def connect_network_adapter(
+        self,
+        vm_id: str,
+        adapter_name: str,
+        switch_name: str,
+    ) -> bool:
+        """
+        Connecte un adaptateur à un switch.
+
+        Args:
+            vm_id: ID ou nom de la VM
+            adapter_name: Nom de l'adaptateur
+            switch_name: Nom du switch
+
+        Returns:
+            True si connecté
+        """
+        script = f"""
+        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        if (-not $vm) {{
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+        }}
+        if ($vm) {{
+            $nic = Get-VMNetworkAdapter -VM $vm | Where-Object {{ $_.Name -eq '{adapter_name}' }}
+            if ($nic) {{
+                Connect-VMNetworkAdapter -VMNetworkAdapter $nic -SwitchName '{switch_name}'
+                Write-Output "Adapter connected"
+            }} else {{
+                throw "Adapter '{adapter_name}' not found"
+            }}
+        }} else {{
+            throw "VM not found"
+        }}
+        """
+
+        result = await self._execute(script)
+
+        if not result.success:
+            raise VMOperationError(vm_id, "connect_network_adapter", result.stderr)
+
+        logger.info(
+            "hyperv_network_adapter_connected",
+            vm_id=vm_id,
+            adapter_name=adapter_name,
+            switch=switch_name,
+        )
+        return True
+
+    async def disconnect_network_adapter(
+        self,
+        vm_id: str,
+        adapter_name: str,
+    ) -> bool:
+        """
+        Déconnecte un adaptateur de son switch.
+
+        Args:
+            vm_id: ID ou nom de la VM
+            adapter_name: Nom de l'adaptateur
+
+        Returns:
+            True si déconnecté
+        """
+        script = f"""
+        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        if (-not $vm) {{
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+        }}
+        if ($vm) {{
+            $nic = Get-VMNetworkAdapter -VM $vm | Where-Object {{ $_.Name -eq '{adapter_name}' }}
+            if ($nic) {{
+                Disconnect-VMNetworkAdapter -VMNetworkAdapter $nic
+                Write-Output "Adapter disconnected"
+            }} else {{
+                throw "Adapter '{adapter_name}' not found"
+            }}
+        }} else {{
+            throw "VM not found"
+        }}
+        """
+
+        result = await self._execute(script)
+
+        if not result.success:
+            raise VMOperationError(vm_id, "disconnect_network_adapter", result.stderr)
+
+        logger.info("hyperv_network_adapter_disconnected", vm_id=vm_id, adapter_name=adapter_name)
+        return True
+
+    # =========================================================================
+    # Support multi-disques (2.3.4)
+    # =========================================================================
+
+    async def list_hard_disks(self, vm_id: str) -> list[DiskInfo]:
+        """
+        Liste tous les disques durs attachés à une VM.
+
+        Args:
+            vm_id: ID ou nom de la VM
+
+        Returns:
+            Liste des disques
+        """
+        script = f"""
+        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        if (-not $vm) {{
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+        }}
+        if ($vm) {{
+            Get-VMHardDiskDrive -VM $vm | ForEach-Object {{
+                $vhd = Get-VHD -Path $_.Path -ErrorAction SilentlyContinue
+                @{{
+                    Path = $_.Path
+                    ControllerNumber = $_.ControllerNumber
+                    ControllerLocation = $_.ControllerLocation
+                    SizeGB = if ($vhd) {{ [math]::Round($vhd.Size/1GB, 2) }} else {{ 0 }}
+                    Format = if ($vhd) {{ $vhd.VhdFormat.ToString() }} else {{ 'Unknown' }}
+                    Type = if ($vhd) {{ $vhd.VhdType.ToString() }} else {{ 'Unknown' }}
+                }}
+            }} | ConvertTo-Json -Depth 2
+        }}
+        """
+
+        result = await self._execute(script)
+
+        if not result.success:
+            raise HypervisorError(
+                f"Failed to list hard disks: {result.stderr}",
+                {"vm_id": vm_id},
+            )
+
+        data = self._parse_json_output(result.stdout)
+
+        if data is None:
+            return []
+
+        if isinstance(data, dict):
+            data = [data]
+
+        disks = []
+        for disk_data in data:
+            disks.append(DiskInfo(
+                path=disk_data.get("Path", ""),
+                size_gb=disk_data.get("SizeGB", 0),
+                format=disk_data.get("Format", "VHDX"),
+                type=disk_data.get("Type", "Dynamic"),
+                attached_to=vm_id,
+                controller_number=disk_data.get("ControllerNumber", 0),
+                controller_location=disk_data.get("ControllerLocation", 0),
+            ))
+
+        logger.info("hyperv_hard_disks_listed", vm_id=vm_id, count=len(disks))
+        return disks
+
+    async def add_hard_disk(
+        self,
+        vm_id: str,
+        size_gb: int,
+        vhdx_path: str | None = None,
+        disk_type: str = "Dynamic",
+    ) -> DiskInfo:
+        """
+        Ajoute un nouveau disque dur à une VM.
+
+        Args:
+            vm_id: ID ou nom de la VM
+            size_gb: Taille du disque en GB
+            vhdx_path: Chemin du fichier VHDX (généré automatiquement si None)
+            disk_type: Type de disque ("Dynamic" ou "Fixed")
+
+        Returns:
+            Informations sur le disque créé
+        """
+        script = f"""
+        $ErrorActionPreference = 'Stop'
+        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        if (-not $vm) {{
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+        }}
+        if ($vm) {{
+            # Déterminer le chemin du disque
+            $vhdxPath = '{vhdx_path}'
+            if (-not $vhdxPath) {{
+                $vmPath = Split-Path $vm.Path
+                $diskCount = (Get-VMHardDiskDrive -VM $vm).Count
+                $vhdxPath = Join-Path $vmPath "$($vm.Name)_disk$($diskCount + 1).vhdx"
+            }}
+
+            # Créer le disque
+            $vhdParams = @{{
+                Path = $vhdxPath
+                SizeBytes = {size_gb}GB
+                {"Dynamic = $true" if disk_type == "Dynamic" else "Fixed = $true"}
+            }}
+            $vhd = New-VHD @vhdParams
+
+            # Trouver le prochain emplacement disponible
+            $existingDisks = Get-VMHardDiskDrive -VM $vm
+            $controller = 0
+            $location = 0
+
+            if ($existingDisks) {{
+                # Trouver le prochain emplacement libre sur SCSI controller 0
+                $usedLocations = $existingDisks | Where-Object {{ $_.ControllerNumber -eq 0 }} | Select-Object -ExpandProperty ControllerLocation
+                while ($usedLocations -contains $location) {{
+                    $location++
+                }}
+            }}
+
+            # Attacher le disque
+            Add-VMHardDiskDrive -VM $vm -Path $vhdxPath -ControllerType SCSI -ControllerNumber $controller -ControllerLocation $location
+
+            @{{
+                Path = $vhdxPath
+                SizeGB = {size_gb}
+                Format = 'VHDX'
+                Type = '{disk_type}'
+                ControllerNumber = $controller
+                ControllerLocation = $location
+            }} | ConvertTo-Json
+        }} else {{
+            throw "VM not found"
+        }}
+        """
+
+        result = await self._execute(script, timeout=120)
+
+        if not result.success:
+            raise VMOperationError(vm_id, "add_hard_disk", result.stderr)
+
+        data = self._parse_json_output(result.stdout)
+
+        if data is None:
+            raise VMOperationError(vm_id, "add_hard_disk", "No disk data returned")
+
+        disk = DiskInfo(
+            path=data.get("Path", ""),
+            size_gb=data.get("SizeGB", size_gb),
+            format=data.get("Format", "VHDX"),
+            type=data.get("Type", disk_type),
+            attached_to=vm_id,
+            controller_number=data.get("ControllerNumber", 0),
+            controller_location=data.get("ControllerLocation", 0),
+        )
+
+        logger.info(
+            "hyperv_hard_disk_added",
+            vm_id=vm_id,
+            path=disk.path,
+            size_gb=size_gb,
+        )
+        return disk
+
+    async def remove_hard_disk(
+        self,
+        vm_id: str,
+        disk_path: str | None = None,
+        controller_number: int | None = None,
+        controller_location: int | None = None,
+        delete_vhdx: bool = False,
+    ) -> bool:
+        """
+        Supprime un disque dur d'une VM.
+
+        Args:
+            vm_id: ID ou nom de la VM
+            disk_path: Chemin du disque (prioritaire)
+            controller_number: Numéro du contrôleur
+            controller_location: Emplacement sur le contrôleur
+            delete_vhdx: Si True, supprime aussi le fichier VHDX
+
+        Returns:
+            True si supprimé
+        """
+        if disk_path:
+            filter_clause = f"$_.Path -eq '{disk_path}'"
+        elif controller_number is not None and controller_location is not None:
+            filter_clause = f"$_.ControllerNumber -eq {controller_number} -and $_.ControllerLocation -eq {controller_location}"
+        else:
+            raise ValueError("Spécifiez disk_path ou controller_number+controller_location")
+
+        script = f"""
+        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        if (-not $vm) {{
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+        }}
+        if ($vm) {{
+            $disk = Get-VMHardDiskDrive -VM $vm | Where-Object {{ {filter_clause} }}
+            if ($disk) {{
+                $diskPath = $disk.Path
+                Remove-VMHardDiskDrive -VMHardDiskDrive $disk
+                {"Remove-Item -Path $diskPath -Force -ErrorAction SilentlyContinue" if delete_vhdx else ""}
+                Write-Output "Disk removed"
+            }} else {{
+                throw "Disk not found"
+            }}
+        }} else {{
+            throw "VM not found"
+        }}
+        """
+
+        result = await self._execute(script)
+
+        if not result.success:
+            raise VMOperationError(vm_id, "remove_hard_disk", result.stderr)
+
+        logger.info(
+            "hyperv_hard_disk_removed",
+            vm_id=vm_id,
+            disk_path=disk_path,
+            delete_vhdx=delete_vhdx,
+        )
+        return True
+
+    async def resize_hard_disk(
+        self,
+        vm_id: str,
+        disk_path: str,
+        new_size_gb: int,
+    ) -> bool:
+        """
+        Redimensionne un disque dur (augmentation uniquement).
+
+        Args:
+            vm_id: ID ou nom de la VM
+            disk_path: Chemin du disque
+            new_size_gb: Nouvelle taille en GB
+
+        Returns:
+            True si redimensionné
+        """
+        script = f"""
+        $ErrorActionPreference = 'Stop'
+        $vhd = Get-VHD -Path '{disk_path}'
+        $currentSizeGB = [math]::Round($vhd.Size/1GB)
+
+        if ({new_size_gb} -le $currentSizeGB) {{
+            throw "New size ({new_size_gb} GB) must be greater than current size ($currentSizeGB GB)"
+        }}
+
+        Resize-VHD -Path '{disk_path}' -SizeBytes {new_size_gb}GB
+        Write-Output "Disk resized from $currentSizeGB GB to {new_size_gb} GB"
+        """
+
+        result = await self._execute(script, timeout=120)
+
+        if not result.success:
+            raise VMOperationError(vm_id, "resize_hard_disk", result.stderr)
+
+        logger.info(
+            "hyperv_hard_disk_resized",
+            vm_id=vm_id,
+            disk_path=disk_path,
+            new_size_gb=new_size_gb,
+        )
+        return True
+
+    async def attach_existing_disk(
+        self,
+        vm_id: str,
+        disk_path: str,
+        controller_number: int = 0,
+        controller_location: int | None = None,
+    ) -> bool:
+        """
+        Attache un disque VHDX existant à une VM.
+
+        Args:
+            vm_id: ID ou nom de la VM
+            disk_path: Chemin du fichier VHDX
+            controller_number: Numéro du contrôleur SCSI
+            controller_location: Emplacement (auto si None)
+
+        Returns:
+            True si attaché
+        """
+        if controller_location is not None:
+            location_param = f"-ControllerLocation {controller_location}"
+        else:
+            location_param = ""
+
+        script = f"""
+        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        if (-not $vm) {{
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+        }}
+        if ($vm) {{
+            if (-not (Test-Path '{disk_path}')) {{
+                throw "Disk file not found: {disk_path}"
+            }}
+
+            Add-VMHardDiskDrive -VM $vm -Path '{disk_path}' -ControllerType SCSI -ControllerNumber {controller_number} {location_param}
+            Write-Output "Disk attached"
+        }} else {{
+            throw "VM not found"
+        }}
+        """
+
+        result = await self._execute(script)
+
+        if not result.success:
+            raise VMOperationError(vm_id, "attach_existing_disk", result.stderr)
+
+        logger.info(
+            "hyperv_disk_attached",
+            vm_id=vm_id,
+            disk_path=disk_path,
+        )
+        return True
