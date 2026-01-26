@@ -24,7 +24,7 @@ import {
   useToast,
 } from '../components/ui';
 import { deploymentsApi } from '../services/api';
-import type { Deployment, DeploymentStatus } from '../types';
+import type { Deployment, DeploymentStatus, DeploymentLog } from '../types';
 
 const statusOrder: DeploymentStatus[] = [
   'pending',
@@ -45,6 +45,9 @@ export function Deployments() {
   const [selectedDeployment, setSelectedDeployment] = useState<Deployment | null>(null);
   const [isLogsModalOpen, setIsLogsModalOpen] = useState(false);
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
+  const [deploymentLogs, setDeploymentLogs] = useState<DeploymentLog[]>([]);
+  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+  const [logsError, setLogsError] = useState<string | null>(null);
 
   // Fetch deployments
   const { data: deployments = [], isLoading, refetch } = useQuery({
@@ -79,9 +82,22 @@ export function Deployments() {
     },
   });
 
-  const handleViewLogs = (deployment: Deployment) => {
+  const handleViewLogs = async (deployment: Deployment) => {
     setSelectedDeployment(deployment);
     setIsLogsModalOpen(true);
+    setDeploymentLogs([]);
+    setLogsError(null);
+    setIsLoadingLogs(true);
+    
+    try {
+      const logs = await deploymentsApi.getLogs(deployment.id);
+      setDeploymentLogs(logs || []);
+    } catch (error) {
+      console.error('Erreur lors de la récupération des logs:', error);
+      setLogsError('Impossible de charger les logs');
+    } finally {
+      setIsLoadingLogs(false);
+    }
   };
 
   const handleCancel = (deployment: Deployment) => {
@@ -364,13 +380,33 @@ export function Deployments() {
           onClose={() => {
             setIsLogsModalOpen(false);
             setSelectedDeployment(null);
+            setDeploymentLogs([]);
+            setLogsError(null);
           }}
           title={`Logs - ${selectedDeployment?.name}`}
           size="lg"
         >
-          {selectedDeployment?.logs && selectedDeployment.logs.length > 0 ? (
+          {isLoadingLogs ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 size={32} className="text-primary-500 animate-spin" />
+              <span className="ml-3 text-dark-400">Chargement des logs...</span>
+            </div>
+          ) : logsError ? (
+            <div className="text-center py-8">
+              <XCircle size={40} className="mx-auto mb-3 text-red-500" />
+              <p className="text-red-400">{logsError}</p>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="mt-4"
+                onClick={() => selectedDeployment && handleViewLogs(selectedDeployment)}
+              >
+                Réessayer
+              </Button>
+            </div>
+          ) : deploymentLogs.length > 0 ? (
             <div className="space-y-2 max-h-96 overflow-y-auto">
-              {selectedDeployment.logs.map((log) => (
+              {deploymentLogs.map((log) => (
                 <div
                   key={log.id}
                   className={`p-3 rounded-lg text-sm ${
@@ -406,7 +442,13 @@ export function Deployments() {
               ))}
             </div>
           ) : (
-            <p className="text-dark-400 text-center py-8">Aucun log disponible</p>
+            <div className="text-center py-8">
+              <FileText size={40} className="mx-auto mb-3 text-dark-500" />
+              <p className="text-dark-400">Aucun log disponible pour ce déploiement</p>
+              <p className="text-dark-500 text-sm mt-2">
+                Les logs apparaîtront une fois le déploiement démarré
+              </p>
+            </div>
           )}
         </Modal>
 
