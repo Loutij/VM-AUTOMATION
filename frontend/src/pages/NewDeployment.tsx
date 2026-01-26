@@ -23,6 +23,7 @@ import {
   Plus,
   Loader2,
   Wifi,
+  FolderOpen,
 } from 'lucide-react';
 import { Header } from '../components/layout';
 import { Button, Input, Select, Switch, Modal, useToast } from '../components/ui';
@@ -56,6 +57,7 @@ interface DeploymentFormData {
   cpu_count: number;
   memory_mb: number;
   disk_size_gb: number;
+  vhdx_path: string; // Emplacement du disque virtuel
   // Étape 3: Réseau
   network_switch: string;
   vlan_id: number | null;
@@ -95,7 +97,8 @@ const defaultFormData: DeploymentFormData = {
   cpu_count: 2,
   memory_mb: 4096,
   disk_size_gb: 60,
-  network_switch: 'Default Switch',
+  vhdx_path: '', // Vide = utiliser le chemin par défaut de l'hyperviseur
+  network_switch: '',
   vlan_id: null,
   use_static_ip: false,
   ip_address: '',
@@ -679,6 +682,31 @@ export function NewDeployment() {
                       { value: '500', label: '500 GB' },
                     ]}
                   />
+                </div>
+              </div>
+
+              {/* Emplacement du disque virtuel */}
+              <div className="border border-dark-600 rounded-lg p-4">
+                <h3 className="text-sm font-medium text-dark-200 mb-4 flex items-center gap-2">
+                  <FolderOpen size={16} />
+                  Emplacement du disque virtuel
+                </h3>
+                <Input
+                  label="Chemin du fichier VHDX"
+                  value={formData.vhdx_path}
+                  onChange={(e) => setFormData({ ...formData, vhdx_path: e.target.value })}
+                  placeholder="C:\Hyper-V\Virtual Hard Disks"
+                  helperText="Laissez vide pour utiliser l'emplacement par défaut de l'hyperviseur. Le fichier sera nommé automatiquement d'après le nom de la VM."
+                />
+                <div className="mt-3 p-3 bg-dark-700/50 rounded-lg">
+                  <p className="text-xs text-dark-400">
+                    <strong className="text-dark-300">Exemple :</strong> Si le chemin est{' '}
+                    <code className="bg-dark-600 px-1 rounded">C:\Hyper-V\Disks</code> et le nom de la VM est{' '}
+                    <code className="bg-dark-600 px-1 rounded">{formData.vm_name || 'ma-vm'}</code>, le disque sera créé à{' '}
+                    <code className="bg-dark-600 px-1 rounded">
+                      {formData.vhdx_path || 'C:\\Hyper-V\\Disks'}\\{formData.vm_name || 'ma-vm'}.vhdx
+                    </code>
+                  </p>
                 </div>
               </div>
             </div>

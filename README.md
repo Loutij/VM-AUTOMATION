@@ -13,7 +13,7 @@ Supprimer **100% de l'intervention humaine** lors de la création, de l'installa
 
 ---
 
-## Avancement Global : **~76%**
+## Avancement Global : **~79%**
 
 | Phase | Description | Avancement |
 |-------|-------------|------------|
@@ -23,7 +23,7 @@ Supprimer **100% de l'intervention humaine** lors de la création, de l'installa
 | Phase 4 | Post-installation (AD, services) | ✅ **87%** |
 | Phase 5 | Installation logiciels | 🔄 **65%** |
 | Phase 6 | Orchestration & monitoring | 🔄 **75%** |
-| Phase 7 | Interface web React | 🔄 **58%** |
+| Phase 7 | Interface web React | ✅ **76%** |
 | Phase 8 | Industrialisation | ⬜ **8%** |
 | Phase 9 | Support VMware | ⬜ **0%** |
 

@@ -331,28 +331,30 @@
 | 7.2.1 | DataTable générique | ✅ | Agent | Tri, filtres, pagination, search |
 | 7.2.2 | Modal/Dialog | ✅ | Agent | Modal + ConfirmModal |
 | 7.2.3 | Toast/Notifications | ✅ | Agent | ToastProvider + useToast hook |
-| 7.2.4 | Skeleton loaders | ⬜ | - | États de chargement |
+| 7.2.4 | Skeleton loaders | ✅ | Agent | Skeleton, SkeletonCard, SkeletonTable, SkeletonStats, SkeletonForm, SkeletonList |
 | 7.2.5 | Empty states | ✅ | Agent | EmptyState component |
 | 7.2.6 | Dropdown menu | ✅ | Agent | Intégré dans Hypervisors page |
 | 7.2.7 | Tabs component | ⬜ | - | Navigation secondaire |
-| 7.2.8 | Progress/Timeline | ⬜ | - | Suivi étapes déploiement |
-| 7.2.9 | Form components | ✅ | Agent | Input, Textarea, Select |
+| 7.2.8 | Progress/Timeline | ✅ | Agent | ProgressBar, ProgressTimeline, ProgressCircle |
+| 7.2.9 | Form components | ✅ | Agent | Input, Textarea, Select, Switch |
 | 7.2.10 | CodeEditor | ⬜ | - | Edition templates (Monaco/CodeMirror) |
 
 ### 7.3 Fonctionnalités Temps Réel
 | ID | Tâche | Statut | Assigné | Notes |
 |----|-------|--------|---------|-------|
-| 7.3.1 | Hook useWebSocket | ⬜ | - | Connexion persistante |
-| 7.3.2 | Mise à jour auto déploiements | ⬜ | - | Progress bar temps réel |
-| 7.3.3 | Logs streaming | ⬜ | - | Console déploiement live |
-| 7.3.4 | Refresh auto listes | ⬜ | - | Polling ou WS |
-| 7.3.5 | Indicateur connexion | ⬜ | - | Online/offline status |
+| 7.3.1 | Hook useWebSocket | ✅ | Agent | Connexion persistante avec reconnexion auto |
+| 7.3.2 | Hook useDeploymentEvents | ✅ | Agent | Suivi progression déploiement temps réel |
+| 7.3.3 | Hook useVMEvents | ✅ | Agent | Changements état VM temps réel |
+| 7.3.4 | Hook useNotifications | ✅ | Agent | Notifications temps réel |
+| 7.3.5 | Subscribe/Unsubscribe rooms | ✅ | Agent | Système de rooms WebSocket |
+| 7.3.6 | Logs streaming | ⬜ | - | Console déploiement live |
+| 7.3.7 | Indicateur connexion | ✅ | Agent | Status connected/disconnected/error |
 
 ### 7.4 UX et Polish
 | ID | Tâche | Statut | Assigné | Notes |
 |----|-------|--------|---------|-------|
-| 7.4.1 | Responsive design | ⬜ | - | Mobile, tablet, desktop |
-| 7.4.2 | Keyboard shortcuts | ⬜ | - | Navigation rapide |
+| 7.4.1 | Responsive design | ✅ | Agent | Mobile, tablet, desktop (Tailwind) |
+| 7.4.2 | Keyboard shortcuts | ✅ | Agent | Ctrl+K, Ctrl+N, Ctrl+, Esc, ? |
 | 7.4.3 | Dark/Light mode toggle | ⬜ | - | Préférence utilisateur |
 | 7.4.4 | Animations/Transitions | ⬜ | - | Framer Motion |
 | 7.4.5 | Breadcrumbs | ⬜ | - | Navigation contexte |
@@ -425,10 +427,10 @@
 | Phase 4 : Post-Installation | 23 | 3 | 0 | 20 | **87%** |
 | Phase 5 : Logiciels | 20 | 7 | 0 | 13 | **65%** |
 | Phase 6 : Orchestration | 8 | 2 | 0 | 6 | **75%** |
-| Phase 7 : Interface Web | 36 | 15 | 0 | 21 | **58%** |
+| Phase 7 : Interface Web | 38 | 9 | 0 | 29 | **76%** |
 | Phase 8 : Industrialisation | 13 | 12 | 0 | 1 | **8%** |
 | Phase 9 : VMware (futur) | 4 | 4 | 0 | 0 | **0%** |
-| **TOTAL** | **193** | **47** | **0** | **146** | **~76%** |
+| **TOTAL** | **195** | **41** | **0** | **154** | **~79%** |
 
 ---
 

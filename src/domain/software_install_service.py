@@ -91,7 +91,7 @@ class BatchInstallResult:
         }
 
 
-# Profils de logiciels prédéfinis
+# Profils de logiciels prédéfinis - Windows
 SOFTWARE_PROFILES = {
     "webserver": [
         SoftwarePackage("iis-webserver", package_manager=PackageManager.CHOCOLATEY),
@@ -118,6 +118,90 @@ SOFTWARE_PROFILES = {
     "minimal": [
         SoftwarePackage("7zip", package_manager=PackageManager.CHOCOLATEY),
         SoftwarePackage("notepadplusplus", package_manager=PackageManager.CHOCOLATEY),
+    ],
+}
+
+# Profils de logiciels Linux - APT (Debian/Ubuntu)
+LINUX_APT_PROFILES = {
+    "webserver": [
+        SoftwarePackage("nginx", package_manager=PackageManager.APT),
+        SoftwarePackage("apache2", package_manager=PackageManager.APT),
+        SoftwarePackage("php-fpm", package_manager=PackageManager.APT),
+        SoftwarePackage("certbot", package_manager=PackageManager.APT),
+    ],
+    "development": [
+        SoftwarePackage("git", package_manager=PackageManager.APT),
+        SoftwarePackage("build-essential", package_manager=PackageManager.APT),
+        SoftwarePackage("python3-pip", package_manager=PackageManager.APT),
+        SoftwarePackage("nodejs", package_manager=PackageManager.APT),
+        SoftwarePackage("npm", package_manager=PackageManager.APT),
+    ],
+    "tools": [
+        SoftwarePackage("vim", package_manager=PackageManager.APT),
+        SoftwarePackage("htop", package_manager=PackageManager.APT),
+        SoftwarePackage("tmux", package_manager=PackageManager.APT),
+        SoftwarePackage("curl", package_manager=PackageManager.APT),
+        SoftwarePackage("wget", package_manager=PackageManager.APT),
+        SoftwarePackage("net-tools", package_manager=PackageManager.APT),
+    ],
+    "monitoring": [
+        SoftwarePackage("zabbix-agent", package_manager=PackageManager.APT),
+        SoftwarePackage("prometheus-node-exporter", package_manager=PackageManager.APT),
+    ],
+    "database": [
+        SoftwarePackage("postgresql", package_manager=PackageManager.APT),
+        SoftwarePackage("postgresql-contrib", package_manager=PackageManager.APT),
+        SoftwarePackage("mariadb-server", package_manager=PackageManager.APT),
+    ],
+    "docker": [
+        SoftwarePackage("docker.io", package_manager=PackageManager.APT),
+        SoftwarePackage("docker-compose", package_manager=PackageManager.APT),
+    ],
+    "minimal": [
+        SoftwarePackage("vim", package_manager=PackageManager.APT),
+        SoftwarePackage("curl", package_manager=PackageManager.APT),
+        SoftwarePackage("wget", package_manager=PackageManager.APT),
+    ],
+}
+
+# Profils de logiciels Linux - DNF (RHEL/Rocky/Fedora)
+LINUX_DNF_PROFILES = {
+    "webserver": [
+        SoftwarePackage("nginx", package_manager=PackageManager.DNF),
+        SoftwarePackage("httpd", package_manager=PackageManager.DNF),
+        SoftwarePackage("php-fpm", package_manager=PackageManager.DNF),
+        SoftwarePackage("certbot", package_manager=PackageManager.DNF),
+    ],
+    "development": [
+        SoftwarePackage("git", package_manager=PackageManager.DNF),
+        SoftwarePackage("gcc", package_manager=PackageManager.DNF),
+        SoftwarePackage("make", package_manager=PackageManager.DNF),
+        SoftwarePackage("python3-pip", package_manager=PackageManager.DNF),
+        SoftwarePackage("nodejs", package_manager=PackageManager.DNF),
+    ],
+    "tools": [
+        SoftwarePackage("vim-enhanced", package_manager=PackageManager.DNF),
+        SoftwarePackage("htop", package_manager=PackageManager.DNF),
+        SoftwarePackage("tmux", package_manager=PackageManager.DNF),
+        SoftwarePackage("curl", package_manager=PackageManager.DNF),
+        SoftwarePackage("wget", package_manager=PackageManager.DNF),
+        SoftwarePackage("net-tools", package_manager=PackageManager.DNF),
+    ],
+    "monitoring": [
+        SoftwarePackage("zabbix-agent", package_manager=PackageManager.DNF),
+    ],
+    "database": [
+        SoftwarePackage("postgresql-server", package_manager=PackageManager.DNF),
+        SoftwarePackage("mariadb-server", package_manager=PackageManager.DNF),
+    ],
+    "docker": [
+        SoftwarePackage("docker-ce", package_manager=PackageManager.DNF),
+        SoftwarePackage("docker-compose-plugin", package_manager=PackageManager.DNF),
+    ],
+    "minimal": [
+        SoftwarePackage("vim-enhanced", package_manager=PackageManager.DNF),
+        SoftwarePackage("curl", package_manager=PackageManager.DNF),
+        SoftwarePackage("wget", package_manager=PackageManager.DNF),
     ],
 }
 
@@ -672,4 +756,166 @@ class SoftwareInstallService:
         return {
             profile: [p.name for p in packages]
             for profile, packages in SOFTWARE_PROFILES.items()
+        }
+
+    @staticmethod
+    def get_linux_apt_profiles() -> dict[str, list[str]]:
+        """Retourne les profils Linux APT disponibles."""
+        return {
+            profile: [p.name for p in packages]
+            for profile, packages in LINUX_APT_PROFILES.items()
+        }
+
+    @staticmethod
+    def get_linux_dnf_profiles() -> dict[str, list[str]]:
+        """Retourne les profils Linux DNF disponibles."""
+        return {
+            profile: [p.name for p in packages]
+            for profile, packages in LINUX_DNF_PROFILES.items()
+        }
+
+    @staticmethod
+    def generate_apt_install_script(
+        profile_name: str | None = None,
+        packages: list[str] | None = None,
+        update_first: bool = True,
+        upgrade_system: bool = False,
+    ) -> str:
+        """
+        Génère un script bash pour installer des packages via apt.
+        
+        Peut être utilisé dans cloud-init ou preseed.
+        
+        Args:
+            profile_name: Nom du profil à installer
+            packages: Liste de packages supplémentaires
+            update_first: Exécuter apt update avant
+            upgrade_system: Exécuter apt upgrade après update
+            
+        Returns:
+            Script bash prêt à l'exécution
+        """
+        script_lines = ["#!/bin/bash", "set -e", ""]
+        
+        if update_first:
+            script_lines.append("# Mise à jour des sources")
+            script_lines.append("apt-get update -y")
+            script_lines.append("")
+        
+        if upgrade_system:
+            script_lines.append("# Mise à jour du système")
+            script_lines.append("DEBIAN_FRONTEND=noninteractive apt-get upgrade -y")
+            script_lines.append("")
+        
+        # Packages du profil
+        profile_packages: list[str] = []
+        if profile_name and profile_name in LINUX_APT_PROFILES:
+            profile_packages = [p.name for p in LINUX_APT_PROFILES[profile_name]]
+        
+        # Packages supplémentaires
+        all_packages = profile_packages + (packages or [])
+        
+        if all_packages:
+            script_lines.append("# Installation des packages")
+            packages_str = " ".join(all_packages)
+            script_lines.append(
+                f"DEBIAN_FRONTEND=noninteractive apt-get install -y {packages_str}"
+            )
+            script_lines.append("")
+        
+        script_lines.append("# Nettoyage")
+        script_lines.append("apt-get autoremove -y")
+        script_lines.append("apt-get clean")
+        script_lines.append("")
+        script_lines.append("echo 'Installation terminée'")
+        
+        return "\n".join(script_lines)
+
+    @staticmethod
+    def generate_dnf_install_script(
+        profile_name: str | None = None,
+        packages: list[str] | None = None,
+        update_first: bool = True,
+        enable_epel: bool = True,
+    ) -> str:
+        """
+        Génère un script bash pour installer des packages via dnf.
+        
+        Peut être utilisé dans kickstart ou cloud-init.
+        
+        Args:
+            profile_name: Nom du profil à installer
+            packages: Liste de packages supplémentaires
+            update_first: Exécuter dnf update avant
+            enable_epel: Activer le repository EPEL
+            
+        Returns:
+            Script bash prêt à l'exécution
+        """
+        script_lines = ["#!/bin/bash", "set -e", ""]
+        
+        if enable_epel:
+            script_lines.append("# Activer EPEL")
+            script_lines.append("dnf install -y epel-release || true")
+            script_lines.append("")
+        
+        if update_first:
+            script_lines.append("# Mise à jour du système")
+            script_lines.append("dnf update -y")
+            script_lines.append("")
+        
+        # Packages du profil
+        profile_packages: list[str] = []
+        if profile_name and profile_name in LINUX_DNF_PROFILES:
+            profile_packages = [p.name for p in LINUX_DNF_PROFILES[profile_name]]
+        
+        # Packages supplémentaires
+        all_packages = profile_packages + (packages or [])
+        
+        if all_packages:
+            script_lines.append("# Installation des packages")
+            packages_str = " ".join(all_packages)
+            script_lines.append(f"dnf install -y {packages_str}")
+            script_lines.append("")
+        
+        script_lines.append("# Nettoyage")
+        script_lines.append("dnf clean all")
+        script_lines.append("")
+        script_lines.append("echo 'Installation terminée'")
+        
+        return "\n".join(script_lines)
+
+    @staticmethod
+    def generate_cloud_init_packages(
+        profile_name: str | None = None,
+        packages: list[str] | None = None,
+        package_manager: PackageManager = PackageManager.APT,
+    ) -> dict[str, Any]:
+        """
+        Génère la section packages pour cloud-init.
+        
+        Args:
+            profile_name: Nom du profil
+            packages: Packages supplémentaires
+            package_manager: apt ou dnf
+            
+        Returns:
+            Dict pour inclusion dans cloud-config YAML
+        """
+        all_packages: list[str] = []
+        
+        if package_manager == PackageManager.APT:
+            if profile_name and profile_name in LINUX_APT_PROFILES:
+                all_packages.extend(p.name for p in LINUX_APT_PROFILES[profile_name])
+        elif package_manager in (PackageManager.DNF, PackageManager.YUM):
+            if profile_name and profile_name in LINUX_DNF_PROFILES:
+                all_packages.extend(p.name for p in LINUX_DNF_PROFILES[profile_name])
+        
+        if packages:
+            all_packages.extend(packages)
+        
+        return {
+            "package_update": True,
+            "package_upgrade": True,
+            "packages": all_packages,
         }
