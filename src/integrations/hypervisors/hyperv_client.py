@@ -25,7 +25,10 @@ from src.common.powershell import (
 from src.integrations.hypervisors.base import (
     BaseHypervisor,
     DiskInfo,
+    IntegrationService,
+    PowerShellDirectResult,
     VirtualSwitch,
+    VMHealthStatus,
     VMInfo,
     VMSpecs,
 )
@@ -564,3 +567,343 @@ class HyperVClient(BaseHypervisor):
         """Ferme les connexions."""
         if self._executor:
             self._executor.close()
+
+    # =========================================================================
+    # Méthodes de monitoring
+    # =========================================================================
+
+    async def get_vm_health(self, vm_id: str) -> VMHealthStatus | None:
+        """Récupère l'état de santé complet d'une VM."""
+        script = f"""
+        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        if (-not $vm) {{
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+        }}
+        if ($vm) {{
+            $intServices = Get-VMIntegrationService -VM $vm | Select-Object Name, Enabled, 
+                @{{N='Status';E={{$_.PrimaryOperationalStatus.ToString()}}}}
+            
+            $nic = Get-VMNetworkAdapter -VM $vm
+            
+            @{{
+                VMName = $vm.Name
+                State = $vm.State.ToString()
+                Heartbeat = $vm.Heartbeat.ToString()
+                Uptime = $vm.Uptime.ToString()
+                CPUUsage = $vm.CPUUsage
+                MemoryMB = [math]::Round($vm.MemoryAssigned/1MB)
+                IPAddresses = $nic.IPAddresses
+                IntegrationServices = $intServices | ForEach-Object {{
+                    @{{
+                        Name = $_.Name
+                        Enabled = $_.Enabled
+                        Status = $_.Status
+                    }}
+                }}
+            }} | ConvertTo-Json -Depth 3
+        }}
+        """
+        
+        result = await self._execute(script)
+        
+        if not result.success:
+            logger.warning(
+                "hyperv_get_vm_health_failed",
+                vm_id=vm_id,
+                error=result.stderr,
+            )
+            return None
+        
+        data = self._parse_json_output(result.stdout)
+        
+        if data is None:
+            return None
+        
+        # Parser les services d'intégration
+        int_services = []
+        for svc in data.get("IntegrationServices", []):
+            if svc:
+                int_services.append(IntegrationService(
+                    name=svc.get("Name", ""),
+                    enabled=svc.get("Enabled", False),
+                    status=svc.get("Status", "Unknown"),
+                ))
+        
+        # Parser les adresses IP (peut être une string ou une liste)
+        ip_addresses = data.get("IPAddresses", [])
+        if isinstance(ip_addresses, str):
+            ip_addresses = [ip_addresses] if ip_addresses else []
+        
+        return VMHealthStatus(
+            vm_name=data.get("VMName", vm_id),
+            state=data.get("State", "Unknown"),
+            heartbeat=data.get("Heartbeat", "Unknown"),
+            uptime=data.get("Uptime"),
+            cpu_usage=data.get("CPUUsage", 0),
+            memory_mb=data.get("MemoryMB", 0),
+            ip_addresses=ip_addresses,
+            integration_services=int_services,
+        )
+
+    async def get_vm_heartbeat(self, vm_id: str) -> str | None:
+        """Récupère le statut heartbeat d'une VM."""
+        script = f"""
+        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        if (-not $vm) {{
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+        }}
+        if ($vm) {{
+            Write-Output $vm.Heartbeat.ToString()
+        }}
+        """
+        
+        result = await self._execute(script)
+        
+        if result.success and result.stdout:
+            heartbeat = result.stdout.strip()
+            logger.debug("hyperv_heartbeat", vm_id=vm_id, heartbeat=heartbeat)
+            return heartbeat
+        return None
+
+    async def get_vm_integration_services(
+        self,
+        vm_id: str,
+    ) -> list[IntegrationService]:
+        """Récupère la liste des services d'intégration d'une VM."""
+        script = f"""
+        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        if (-not $vm) {{
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+        }}
+        if ($vm) {{
+            Get-VMIntegrationService -VM $vm | Select-Object Name, Enabled, 
+                @{{N='Status';E={{$_.PrimaryOperationalStatus.ToString()}}}} | ConvertTo-Json
+        }}
+        """
+        
+        result = await self._execute(script)
+        
+        if not result.success:
+            logger.warning(
+                "hyperv_get_integration_services_failed",
+                vm_id=vm_id,
+                error=result.stderr,
+            )
+            return []
+        
+        data = self._parse_json_output(result.stdout)
+        
+        if data is None:
+            return []
+        
+        if isinstance(data, dict):
+            data = [data]
+        
+        services = []
+        for svc in data:
+            services.append(IntegrationService(
+                name=svc.get("Name", ""),
+                enabled=svc.get("Enabled", False),
+                status=svc.get("Status", "Unknown"),
+            ))
+        
+        logger.info(
+            "hyperv_integration_services_listed",
+            vm_id=vm_id,
+            count=len(services),
+        )
+        return services
+
+    async def get_vm_ip_addresses(self, vm_id: str) -> list[str]:
+        """Récupère les adresses IP d'une VM."""
+        script = f"""
+        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        if (-not $vm) {{
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+        }}
+        if ($vm) {{
+            $nic = Get-VMNetworkAdapter -VM $vm
+            $nic.IPAddresses | ConvertTo-Json
+        }}
+        """
+        
+        result = await self._execute(script)
+        
+        if not result.success:
+            return []
+        
+        data = self._parse_json_output(result.stdout)
+        
+        if data is None:
+            return []
+        
+        if isinstance(data, str):
+            return [data] if data else []
+        
+        return list(data) if data else []
+
+    async def execute_in_vm(
+        self,
+        vm_id: str,
+        script: str,
+        vm_credentials: tuple[str, str],
+        timeout: int = 300,
+    ) -> PowerShellDirectResult:
+        """
+        Exécute un script PowerShell dans une VM via PowerShell Direct.
+        
+        Args:
+            vm_id: ID ou nom de la VM
+            script: Script PowerShell à exécuter
+            vm_credentials: Tuple (username, password) pour la VM
+            timeout: Timeout en secondes
+        """
+        username, password = vm_credentials
+        
+        # Échapper les caractères spéciaux dans le script
+        escaped_script = script.replace("'", "''").replace('"', '`"')
+        
+        ps_script = f"""
+        $ErrorActionPreference = 'Stop'
+        $vmName = '{vm_id}'
+        $cred = New-Object System.Management.Automation.PSCredential(
+            '{username}',
+            (ConvertTo-SecureString '{password}' -AsPlainText -Force)
+        )
+        
+        try {{
+            $result = Invoke-Command -VMName $vmName -Credential $cred -ScriptBlock {{
+                {escaped_script}
+            }} -ErrorAction Stop
+            
+            @{{
+                Success = $true
+                Output = $result
+                Error = $null
+            }} | ConvertTo-Json -Depth 5
+        }} catch {{
+            @{{
+                Success = $false
+                Output = $null
+                Error = $_.Exception.Message
+            }} | ConvertTo-Json -Depth 5
+        }}
+        """
+        
+        logger.info(
+            "hyperv_execute_in_vm",
+            vm_id=vm_id,
+            script_length=len(script),
+        )
+        
+        result = await self._execute(ps_script, timeout=timeout)
+        
+        if not result.success:
+            return PowerShellDirectResult(
+                success=False,
+                output=None,
+                error=result.stderr or "PowerShell execution failed",
+            )
+        
+        data = self._parse_json_output(result.stdout)
+        
+        if data is None:
+            return PowerShellDirectResult(
+                success=False,
+                output=None,
+                error="Failed to parse PowerShell Direct result",
+            )
+        
+        return PowerShellDirectResult(
+            success=data.get("Success", False),
+            output=data.get("Output"),
+            error=data.get("Error"),
+        )
+
+    async def wait_for_vm_ready(
+        self,
+        vm_id: str,
+        vm_credentials: tuple[str, str] | None = None,
+        timeout: int = 600,
+        check_interval: int = 10,
+    ) -> bool:
+        """
+        Attend qu'une VM soit prête (heartbeat OK et optionnellement accessible).
+        
+        Args:
+            vm_id: ID ou nom de la VM
+            vm_credentials: Credentials pour tester l'accès PowerShell Direct
+            timeout: Timeout total en secondes
+            check_interval: Intervalle entre les vérifications
+        """
+        import asyncio
+        import time
+        
+        start_time = time.time()
+        
+        logger.info(
+            "hyperv_waiting_for_vm",
+            vm_id=vm_id,
+            timeout=timeout,
+            with_credentials=vm_credentials is not None,
+        )
+        
+        while (time.time() - start_time) < timeout:
+            try:
+                # Vérifier le heartbeat
+                heartbeat = await self.get_vm_heartbeat(vm_id)
+                
+                if heartbeat in ("OkApplicationsHealthy", "OkApplicationsUnknown"):
+                    logger.info(
+                        "hyperv_vm_heartbeat_ok",
+                        vm_id=vm_id,
+                        heartbeat=heartbeat,
+                    )
+                    
+                    # Si des credentials sont fournis, tester PowerShell Direct
+                    if vm_credentials:
+                        result = await self.execute_in_vm(
+                            vm_id,
+                            "$env:COMPUTERNAME",
+                            vm_credentials,
+                            timeout=30,
+                        )
+                        
+                        if result.success:
+                            logger.info(
+                                "hyperv_vm_ready",
+                                vm_id=vm_id,
+                                hostname=result.output,
+                            )
+                            return True
+                        else:
+                            logger.debug(
+                                "hyperv_ps_direct_not_ready",
+                                vm_id=vm_id,
+                                error=result.error,
+                            )
+                    else:
+                        # Pas de credentials, heartbeat OK suffit
+                        return True
+                else:
+                    logger.debug(
+                        "hyperv_vm_not_ready",
+                        vm_id=vm_id,
+                        heartbeat=heartbeat,
+                    )
+                
+            except Exception as e:
+                logger.debug(
+                    "hyperv_wait_check_failed",
+                    vm_id=vm_id,
+                    error=str(e),
+                )
+            
+            await asyncio.sleep(check_interval)
+        
+        logger.warning(
+            "hyperv_vm_ready_timeout",
+            vm_id=vm_id,
+            timeout=timeout,
+        )
+        return False

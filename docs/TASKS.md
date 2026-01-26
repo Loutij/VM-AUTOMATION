@@ -159,10 +159,10 @@
 ### 3.5 Monitoring Installation
 | ID | Tâche | Statut | Assigné | Notes |
 |----|-------|--------|---------|-------|
-| 3.5.1 | Détection heartbeat | 🔄 | Agent | Get-VMIntegrationService |
-| 3.5.2 | Polling PowerShell Direct | 🔄 | Agent | Invoke-Command -VMName |
+| 3.5.1 | Détection heartbeat | ✅ | Agent | get_vm_heartbeat(), get_vm_health() |
+| 3.5.2 | Polling PowerShell Direct | ✅ | Agent | execute_in_vm(), wait_for_vm_ready() |
 | 3.5.3 | Callback HTTP | ⬜ | - | Script post-install |
-| 3.5.4 | Timeout et gestion erreurs | ⬜ | - | - |
+| 3.5.4 | Timeout et gestion erreurs | ✅ | Agent | Intégré dans wait_for_vm_ready() |
 
 ### 3.6 Gestion Partitionnement
 | ID | Tâche | Statut | Assigné | Notes |
@@ -273,23 +273,26 @@
 |-------|-------|---------|----------|---------|-----------|
 | Phase 1 | 30 | 8 | 0 | 22 | **73%** |
 | Phase 2 | 24 | 9 | 0 | 15 | **63%** |
-| Phase 3 | 26 | 8 | 2 | 16 | **62%** |
+| Phase 3 | 26 | 5 | 0 | 21 | **81%** |
 | Phase 4 | 23 | 12 | 0 | 11 | **48%** |
 | Phase 5 | 20 | 20 | 0 | 0 | 0% |
 | Phase 6 | 16 | 14 | 0 | 2 | **13%** |
 | Phase 7 | 16 | 16 | 0 | 0 | 0% |
 | Phase 8 | 7 | 7 | 0 | 0 | 0% |
-| **TOTAL** | **162** | **94** | **2** | **66** | **~41%** |
+| **TOTAL** | **162** | **91** | **0** | **71** | **~44%** |
 
 ---
 
 ## Test en cours
 
 **VM: WinSrv2022-Test** sur Hyper-V 10.250.0.20
-- Statut: ✅ Installation automatique FONCTIONNELLE
-- OS: Windows Server 2022 Standard (Desktop Experience)
+- Statut: ✅ Installation automatique FONCTIONNELLE + Monitoring OK
+- OS: Windows Server 2022 Standard Evaluation (Desktop Experience)
 - Config: 2 vCPU, 4 GB RAM, 60 GB Disk
+- IP: 10.250.0.83
 - Credentials: Administrateur / Admin123!
+- Heartbeat: OkApplicationsUnknown ✅
+- PowerShell Direct: Fonctionnel ✅
 
 ## Architecture Validée
 
@@ -305,4 +308,4 @@ ISO OEMDRV (374 KB) ────────┘
 
 ---
 
-*Dernière mise à jour : 2026-01-26 16:40*
+*Dernière mise à jour : 2026-01-26 17:45*

@@ -89,6 +89,76 @@ class DiskInfo:
     attached_to: str | None = None
 
 
+@dataclass
+class IntegrationService:
+    """Informations sur un service d'intégration Hyper-V."""
+
+    name: str
+    enabled: bool
+    status: str
+    
+    def to_dict(self) -> dict[str, Any]:
+        """Convertit en dictionnaire."""
+        return {
+            "name": self.name,
+            "enabled": self.enabled,
+            "status": self.status,
+        }
+
+
+@dataclass
+class VMHealthStatus:
+    """État de santé d'une VM."""
+
+    vm_name: str
+    state: str
+    heartbeat: str
+    uptime: str | None
+    cpu_usage: int
+    memory_mb: int
+    ip_addresses: list[str] = field(default_factory=list)
+    integration_services: list[IntegrationService] = field(default_factory=list)
+    
+    @property
+    def is_healthy(self) -> bool:
+        """Vérifie si la VM est en bonne santé."""
+        return (
+            self.state == "Running"
+            and self.heartbeat in ("OkApplicationsHealthy", "OkApplicationsUnknown", "Ok")
+        )
+    
+    def to_dict(self) -> dict[str, Any]:
+        """Convertit en dictionnaire."""
+        return {
+            "vm_name": self.vm_name,
+            "state": self.state,
+            "heartbeat": self.heartbeat,
+            "uptime": self.uptime,
+            "cpu_usage": self.cpu_usage,
+            "memory_mb": self.memory_mb,
+            "ip_addresses": self.ip_addresses,
+            "integration_services": [s.to_dict() for s in self.integration_services],
+            "is_healthy": self.is_healthy,
+        }
+
+
+@dataclass
+class PowerShellDirectResult:
+    """Résultat d'une exécution PowerShell Direct dans une VM."""
+
+    success: bool
+    output: Any
+    error: str | None = None
+    
+    def to_dict(self) -> dict[str, Any]:
+        """Convertit en dictionnaire."""
+        return {
+            "success": self.success,
+            "output": self.output,
+            "error": self.error,
+        }
+
+
 class BaseHypervisor(ABC):
     """
     Interface abstraite pour les clients hyperviseurs.
@@ -263,5 +333,108 @@ class BaseHypervisor(ABC):
             
         Returns:
             True si la configuration a réussi
+        """
+        pass
+
+    # =========================================================================
+    # Méthodes de monitoring
+    # =========================================================================
+
+    @abstractmethod
+    async def get_vm_health(self, vm_id: str) -> VMHealthStatus | None:
+        """
+        Récupère l'état de santé complet d'une VM.
+        
+        Args:
+            vm_id: ID ou nom de la VM
+            
+        Returns:
+            État de santé de la VM ou None si non trouvée
+        """
+        pass
+
+    @abstractmethod
+    async def get_vm_heartbeat(self, vm_id: str) -> str | None:
+        """
+        Récupère le statut heartbeat d'une VM.
+        
+        Args:
+            vm_id: ID ou nom de la VM
+            
+        Returns:
+            Statut heartbeat (OkApplicationsHealthy, NoContact, etc.) ou None
+        """
+        pass
+
+    @abstractmethod
+    async def get_vm_integration_services(
+        self,
+        vm_id: str,
+    ) -> list[IntegrationService]:
+        """
+        Récupère la liste des services d'intégration d'une VM.
+        
+        Args:
+            vm_id: ID ou nom de la VM
+            
+        Returns:
+            Liste des services d'intégration
+        """
+        pass
+
+    @abstractmethod
+    async def get_vm_ip_addresses(self, vm_id: str) -> list[str]:
+        """
+        Récupère les adresses IP d'une VM.
+        
+        Args:
+            vm_id: ID ou nom de la VM
+            
+        Returns:
+            Liste des adresses IP
+        """
+        pass
+
+    @abstractmethod
+    async def execute_in_vm(
+        self,
+        vm_id: str,
+        script: str,
+        vm_credentials: tuple[str, str],
+        timeout: int = 300,
+    ) -> PowerShellDirectResult:
+        """
+        Exécute un script PowerShell dans une VM via PowerShell Direct.
+        
+        Args:
+            vm_id: ID ou nom de la VM
+            script: Script PowerShell à exécuter
+            vm_credentials: Tuple (username, password) pour la VM
+            timeout: Timeout en secondes
+            
+        Returns:
+            Résultat de l'exécution
+        """
+        pass
+
+    @abstractmethod
+    async def wait_for_vm_ready(
+        self,
+        vm_id: str,
+        vm_credentials: tuple[str, str] | None = None,
+        timeout: int = 600,
+        check_interval: int = 10,
+    ) -> bool:
+        """
+        Attend qu'une VM soit prête (heartbeat OK et optionnellement accessible).
+        
+        Args:
+            vm_id: ID ou nom de la VM
+            vm_credentials: Credentials pour tester l'accès PowerShell Direct
+            timeout: Timeout total en secondes
+            check_interval: Intervalle entre les vérifications
+            
+        Returns:
+            True si la VM est prête, False si timeout
         """
         pass

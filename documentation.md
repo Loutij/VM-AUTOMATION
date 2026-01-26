@@ -13,9 +13,10 @@ Outil interne d'automatisation complète du déploiement de machines virtuelles.
 ### Module 1 : Gestion des Hyperviseurs
 | Fonctionnalité | Statut | Description |
 |----------------|--------|-------------|
-| Connexion Hyper-V | À FAIRE | Client PowerShell pour Hyper-V |
-| Liste des VMs | À FAIRE | Récupération des VMs existantes |
-| Gestion Virtual Switches | À FAIRE | CRUD switches réseau |
+| Connexion Hyper-V | TERMINÉ | Client PowerShell/WinRM pour Hyper-V |
+| Liste des VMs | TERMINÉ | Récupération des VMs existantes |
+| Gestion Virtual Switches | TERMINÉ | CRUD switches réseau |
+| Monitoring VM | TERMINÉ | Heartbeat, Integration Services, PowerShell Direct |
 | Support VMware | À FAIRE | Client pyVmomi (futur) |
 
 ### Module 2 : Création de VMs
@@ -248,13 +249,16 @@ docker-compose -f docker-compose.prod.yml up -d
   - Client Hyper-V complet (PowerShell/WinRM)
   - Wrapper PowerShell avec support mock pour dev
 
-- **Phase 3 - Templates OS** : 38% complète
+- **Phase 3 - Templates OS & Monitoring** : 81% complète
   - Moteur de templates Jinja2
   - Template Windows Server 2022 (unattend.xml)
   - Template Ubuntu 24.04 (autoinstall)
   - Template Debian 12 (preseed)
   - Template Cloud-init générique
   - Injection dynamique : hostname, réseau, password, locale, timezone
+  - **Monitoring VM** : get_vm_health(), get_vm_heartbeat(), get_vm_integration_services()
+  - **PowerShell Direct** : execute_in_vm(), wait_for_vm_ready()
+  - VM WinSrv2022-Test validée avec installation 100% automatique
 
 ### v0.1.0 (2026-01-26)
 - Initialisation du projet
