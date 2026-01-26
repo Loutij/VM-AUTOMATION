@@ -328,7 +328,7 @@ class DeploymentService:
             "Installation started. Monitoring in background.",
         )
         
-        # 8. Marquer comme complété (l'attente réelle sera gérée par un worker)
+        # 8. Marquer comme en cours d'installation (l'attente réelle sera gérée par un worker)
         await self._update_deployment_status(
             deployment,
             DeploymentStatus.INSTALLING,

@@ -90,10 +90,11 @@ class DeploymentStatus(str, enum.Enum):
     """États possibles d'un déploiement."""
 
     PENDING = "pending"
-    VM_CREATING = "vm_creating"
-    OS_INSTALLING = "os_installing"
-    POST_CONFIGURING = "post_configuring"
-    SOFTWARE_INSTALLING = "software_installing"
+    IN_PROGRESS = "in_progress"
+    CREATING_VM = "creating_vm"
+    INSTALLING = "installing_os"
+    POST_INSTALL = "post_install"
+    INSTALLING_SOFTWARE = "installing_software"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -305,17 +306,34 @@ class Deployment(Base, TimestampMixin):
         default=uuid4,
     )
     
+    # VM info
+    vm_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    
     # Foreign keys
-    vm_id: Mapped[UUID] = mapped_column(
+    hypervisor_id: Mapped[UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("hypervisors.id"),
+        nullable=False,
+    )
+    os_template_id: Mapped[UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("os_templates.id"),
+        nullable=False,
+    )
+    vm_id: Mapped[UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("virtual_machines.id"),
-        nullable=False,
+        nullable=True,
+        comment="ID de la VM créée (rempli après création)",
     )
     created_by: Mapped[UUID | None] = mapped_column(
         UUID(as_uuid=True),
         nullable=True,
         comment="ID de l'utilisateur ayant créé le déploiement",
     )
+    
+    # Configuration
+    config: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     
     # Status
     status: Mapped[DeploymentStatus] = mapped_column(
@@ -336,7 +354,9 @@ class Deployment(Base, TimestampMixin):
     )
     
     # Relations
-    virtual_machine: Mapped["VirtualMachine"] = relationship(
+    hypervisor: Mapped["Hypervisor"] = relationship()
+    os_template: Mapped["OSTemplate"] = relationship()
+    virtual_machine: Mapped["VirtualMachine | None"] = relationship(
         back_populates="deployments"
     )
     logs: Mapped[list["DeploymentLog"]] = relationship(
