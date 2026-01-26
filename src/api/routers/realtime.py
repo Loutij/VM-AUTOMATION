@@ -24,7 +24,7 @@ from src.api.websocket import (
     ws_manager,
     emit_system_notification,
 )
-from src.common.database import get_db
+from src.api.dependencies import get_db_session as get_db
 from src.common.logging import get_logger
 from src.domain.models import (
     Deployment,
