@@ -61,6 +61,19 @@ class UserResponse(BaseModel):
     class Config:
         from_attributes = True
 
+    @classmethod
+    def from_orm(cls, obj):
+        """Convertit l'objet ORM en réponse avec id comme string."""
+        return cls(
+            id=str(obj.id),
+            username=obj.username,
+            email=obj.email,
+            full_name=obj.full_name,
+            is_active=obj.is_active,
+            is_superuser=obj.is_superuser,
+            created_at=obj.created_at,
+        )
+
 
 class RefreshTokenRequest(BaseModel):
     """Schéma pour rafraîchir un token."""
@@ -164,7 +177,7 @@ async def get_current_superuser(
 async def register(
     user_data: UserCreate,
     db: AsyncSession = Depends(get_db),
-) -> User:
+) -> UserResponse:
     """
     Enregistre un nouvel utilisateur.
 
@@ -203,7 +216,7 @@ async def register(
     await db.commit()
     await db.refresh(user)
 
-    return user
+    return UserResponse.from_orm(user)
 
 
 @router.post("/login", response_model=Token)
@@ -285,7 +298,7 @@ async def refresh_token(
 @router.get("/me", response_model=UserResponse)
 async def get_me(
     current_user: Annotated[User, Depends(get_current_user)],
-) -> User:
+) -> UserResponse:
     """
     Retourne les informations de l'utilisateur courant.
 
@@ -295,7 +308,7 @@ async def get_me(
     Returns:
         Informations utilisateur
     """
-    return current_user
+    return UserResponse.from_orm(current_user)
 
 
 @router.post("/change-password")

@@ -9,8 +9,8 @@ Gère la création et validation des tokens JWT.
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import bcrypt
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from pydantic import BaseModel
 
 from src.common.config import settings
@@ -20,8 +20,8 @@ from src.common.exceptions import AuthenticationError
 # Configuration
 # =============================================================================
 
-# Contexte de hachage des mots de passe (bcrypt)
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Limite bcrypt
+MAX_PASSWORD_BYTES = 72
 
 # Configuration JWT
 ALGORITHM = "HS256"
@@ -78,7 +78,10 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     Returns:
         True si le mot de passe est correct
     """
-    return pwd_context.verify(plain_password, hashed_password)
+    # Tronquer à 72 bytes (limite bcrypt) pour cohérence avec hash_password
+    password_bytes = plain_password.encode('utf-8')[:MAX_PASSWORD_BYTES]
+    hashed_bytes = hashed_password.encode('utf-8')
+    return bcrypt.checkpw(password_bytes, hashed_bytes)
 
 
 def hash_password(password: str) -> str:
@@ -92,11 +95,12 @@ def hash_password(password: str) -> str:
         Hash du mot de passe
     
     Note:
-        bcrypt a une limite de 72 bytes. Le mot de passe est tronqué si nécessaire.
+        bcrypt a une limite de 72 bytes. Les mots de passe plus longs sont tronqués.
     """
-    # bcrypt limite à 72 bytes - on tronque si nécessaire
-    password_bytes = password.encode('utf-8')[:72]
-    return pwd_context.hash(password_bytes.decode('utf-8', errors='ignore'))
+    # Tronquer à 72 bytes (limite bcrypt) pour éviter l'erreur
+    password_bytes = password.encode('utf-8')[:MAX_PASSWORD_BYTES]
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(password_bytes, salt).decode('utf-8')
 
 
 # =============================================================================
@@ -132,7 +136,7 @@ def create_access_token(
         "type": "access",
     }
 
-    return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
+    return jwt.encode(payload, settings.api_secret_key.get_secret_value(), algorithm=ALGORITHM)
 
 
 def create_refresh_token(user_id: str) -> str:
@@ -154,7 +158,7 @@ def create_refresh_token(user_id: str) -> str:
         "type": "refresh",
     }
 
-    return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
+    return jwt.encode(payload, settings.api_secret_key.get_secret_value(), algorithm=ALGORITHM)
 
 
 def create_tokens(user_id: str) -> Token:
@@ -189,7 +193,7 @@ def decode_token(token: str, expected_type: str = "access") -> TokenPayload:
         AuthenticationError: Si le token est invalide ou expiré
     """
     try:
-        payload = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, settings.api_secret_key.get_secret_value(), algorithms=[ALGORITHM])
 
         # Vérification du type
         token_type = payload.get("type")
