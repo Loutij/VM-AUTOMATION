@@ -13,17 +13,17 @@ Supprimer **100% de l'intervention humaine** lors de la création, de l'installa
 
 ---
 
-## Avancement Global : **~70%**
+## Avancement Global : **~76%**
 
 | Phase | Description | Avancement |
 |-------|-------------|------------|
 | Phase 1 | Fondations (API, DB, Hyper-V) | ✅ **100%** |
-| Phase 2 | Création VMs (CPU, RAM, réseau) | ✅ **71%** |
+| Phase 2 | Création VMs (CPU, RAM, réseau, wizard) | ✅ **100%** |
 | Phase 3 | Installation OS automatique | ✅ **85%** |
 | Phase 4 | Post-installation (AD, services) | ✅ **87%** |
 | Phase 5 | Installation logiciels | 🔄 **65%** |
 | Phase 6 | Orchestration & monitoring | 🔄 **75%** |
-| Phase 7 | Interface web React | 🔄 **53%** |
+| Phase 7 | Interface web React | 🔄 **58%** |
 | Phase 8 | Industrialisation | ⬜ **8%** |
 | Phase 9 | Support VMware | ⬜ **0%** |
 
@@ -37,6 +37,7 @@ Supprimer **100% de l'intervention humaine** lors de la création, de l'installa
 |--------|-----------------|--------|
 | **Client Hyper-V** | Connexion WinRM, CRUD VMs, start/stop/restart | ✅ |
 | **Gestion Réseau** | Switches, VLAN, multi-NIC, infos réseau complètes (IP, MAC, gateway, DNS) | ✅ |
+| **Gestion Switches** | CRUD switches virtuels (Internal/External/Private), adaptateurs physiques | ✅ |
 | **Gestion Stockage** | VHDX dynamique/fixe, multi-disques, resize | ✅ |
 | **Installation OS** | Templates Windows Server 2022, Ubuntu, Debian | ✅ |
 | **Génération Templates** | Moteur Jinja2, injection hostname/réseau/password | ✅ |
@@ -55,8 +56,9 @@ Supprimer **100% de l'intervention humaine** lors de la création, de l'installa
 | **VMs** | Liste, filtres, actions (start/stop/restart/delete) | ✅ |
 | **Templates** | CRUD, grille, filtres par OS, duplication | ✅ |
 | **Déploiements** | Timeline, logs modal, cancel/retry, auto-refresh | ✅ |
-| **Wizard création** | Multi-étapes | ⬜ En cours |
-| **Paramètres** | Configuration | ⬜ À faire |
+| **Nouveau Déploiement** | Wizard 5 étapes (infra, ressources, réseau, options, résumé) | ✅ |
+| **Paramètres** | Configuration multi-sections complète | ✅ |
+| **Aide** | Documentation, FAQ, raccourcis, dépannage | ✅ |
 
 ### Composants UI
 
@@ -64,8 +66,10 @@ Supprimer **100% de l'intervention humaine** lors de la création, de l'installa
 - Modal + ConfirmModal
 - Toast + ToastProvider + useToast
 - DataTable (tri, search, pagination, actions)
-- Input, Textarea, Select
+- Input, Textarea, Select, Switch
 - EmptyState, StatusBadge, StatCard
+- StepIndicator (wizard navigation)
+- FAQAccordion (aide interactive)
 
 ---
 
@@ -356,4 +360,4 @@ ClickUp: Tâche VM-AUTOMATION (869bxaf8k)
 
 ---
 
-*Dernière mise à jour : 2026-01-26*
+*Dernière mise à jour : 2026-01-26 18:00*

@@ -91,6 +91,8 @@ export interface DeploymentConfig {
   admin_password?: string;
   domain_join?: {
     domain: string;
+    user?: string;
+    password?: string;
     ou_path?: string;
   };
   network?: {
@@ -140,6 +142,32 @@ export interface HealthCheck {
     name: string;
     connected: boolean;
   }[];
+}
+
+// Types pour les switches virtuels
+export type SwitchType = 'Internal' | 'External' | 'Private';
+
+export interface VirtualSwitch {
+  name: string;
+  switch_type: SwitchType;
+  interface_description?: string;
+  notes?: string;
+}
+
+export interface CreateSwitchRequest {
+  name: string;
+  switch_type: SwitchType;
+  net_adapter_name?: string;
+  allow_management_os?: boolean;
+  notes?: string;
+}
+
+export interface PhysicalAdapter {
+  name: string;
+  description: string;
+  status: string;
+  link_speed: string;
+  mac_address: string;
 }
 
 // Types pour les paramètres de l'application

@@ -109,17 +109,25 @@
 | 2.4.3 | Configurer boot order | ✅ | Agent | Set-VMFirmware -FirstBootDevice |
 | 2.4.4 | Démonter ISO post-install | ✅ | Agent | unmount_iso(), cleanup_post_install() |
 
-### 2.5 Interface Création VM
+### 2.5 Interface Création VM (Wizard)
 | ID | Tâche | Statut | Assigné | Notes |
 |----|-------|--------|---------|-------|
-| 2.5.1 | Wizard étape 1 : Sélection Template OS | ⬜ | - | Liste templates, preview config |
-| 2.5.2 | Wizard étape 2 : Configuration Ressources | ⬜ | - | CPU, RAM, disque avec sliders |
-| 2.5.3 | Wizard étape 3 : Configuration Réseau | ⬜ | - | Switch, VLAN, IP statique/DHCP |
-| 2.5.4 | Wizard étape 4 : Options Avancées | ⬜ | - | Domaine AD, hostname, timezone |
-| 2.5.5 | Wizard étape 5 : Résumé et Validation | ⬜ | - | Récapitulatif, estimation temps |
-| 2.5.6 | Composant StepIndicator | ⬜ | - | Navigation wizard |
-| 2.5.7 | Validation formulaires (Zod/React Hook Form) | ⬜ | - | - |
-| 2.5.8 | Preview configuration JSON | ⬜ | - | Mode debug/avancé |
+| 2.5.1 | Wizard étape 1 : Sélection Infrastructure | ✅ | Agent | Hyperviseur + Template OS |
+| 2.5.2 | Wizard étape 2 : Configuration Ressources | ✅ | Agent | CPU slider, RAM select, disque select |
+| 2.5.3 | Wizard étape 3 : Configuration Réseau | ✅ | Agent | Switch, VLAN, IP statique/DHCP, création switch |
+| 2.5.4 | Wizard étape 4 : Options Avancées | ✅ | Agent | Password, services, Windows Update, logiciels, AD |
+| 2.5.5 | Wizard étape 5 : Résumé et Validation | ✅ | Agent | Récapitulatif complet avant lancement |
+| 2.5.6 | Composant StepIndicator | ✅ | Agent | Navigation wizard avec icônes et statut |
+| 2.5.7 | Validation par étape | ✅ | Agent | Validation progressive avant navigation |
+| 2.5.8 | Création switch depuis wizard | ✅ | Agent | Modal création switch (Internal/External/Private) |
+
+### 2.6 Gestion Switches (CRUD)
+| ID | Tâche | Statut | Assigné | Notes |
+|----|-------|--------|---------|-------|
+| 2.6.1 | Lister adaptateurs physiques | ✅ | Agent | list_physical_adapters() |
+| 2.6.2 | Créer switch virtuel | ✅ | Agent | create_switch() (Internal/External/Private) |
+| 2.6.3 | Supprimer switch virtuel | ✅ | Agent | delete_switch() |
+| 2.6.4 | API endpoints switches | ✅ | Agent | POST/DELETE /hypervisors/{id}/switches |
 
 ---
 
@@ -314,8 +322,8 @@
 | 7.1.8 | Page Templates - CRUD | ✅ | Agent | Modal create/edit + duplicate |
 | 7.1.9 | Page Déploiements - Liste | ✅ | Agent | Timeline, filtres statut, auto-refresh |
 | 7.1.10 | Page Déploiements - Logs | ✅ | Agent | Modal logs, cancel/retry |
-| 7.1.11 | Page Paramètres | ⬜ | - | Config connexions, préférences |
-| 7.1.12 | Page Aide/Documentation | ⬜ | - | Guide utilisateur intégré |
+| 7.1.11 | Page Paramètres | ✅ | Agent | Config multi-sections complète |
+| 7.1.12 | Page Aide/Documentation | ✅ | Agent | FAQ, raccourcis, dépannage, guide démarrage |
 
 ### 7.2 Composants UI Avancés
 | ID | Tâche | Statut | Assigné | Notes |
@@ -412,15 +420,15 @@
 | Phase | Total | À Faire | En Cours | Terminé | % Complet |
 |-------|-------|---------|----------|---------|-----------|
 | Phase 1 : Fondations | 31 | 0 | 0 | 31 | **100%** |
-| Phase 2 : Création VMs | 28 | 8 | 0 | 20 | **71%** |
+| Phase 2 : Création VMs | 32 | 0 | 0 | 32 | **100%** |
 | Phase 3 : Installation OS | 26 | 4 | 0 | 22 | **85%** |
 | Phase 4 : Post-Installation | 23 | 3 | 0 | 20 | **87%** |
 | Phase 5 : Logiciels | 20 | 7 | 0 | 13 | **65%** |
 | Phase 6 : Orchestration | 8 | 2 | 0 | 6 | **75%** |
-| Phase 7 : Interface Web | 36 | 17 | 0 | 19 | **53%** |
+| Phase 7 : Interface Web | 36 | 15 | 0 | 21 | **58%** |
 | Phase 8 : Industrialisation | 13 | 12 | 0 | 1 | **8%** |
 | Phase 9 : VMware (futur) | 4 | 4 | 0 | 0 | **0%** |
-| **TOTAL** | **189** | **57** | **0** | **132** | **~70%** |
+| **TOTAL** | **193** | **47** | **0** | **146** | **~76%** |
 
 ---
 
@@ -507,4 +515,4 @@ frontend/
 
 ---
 
-*Dernière mise à jour : 2026-01-26 17:45*
+*Dernière mise à jour : 2026-01-26 18:00*

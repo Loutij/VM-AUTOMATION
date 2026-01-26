@@ -340,3 +340,115 @@ async def list_hypervisor_switches(
     switches = await client.list_switches()
     
     return [sw.to_dict() for sw in switches]
+
+
+class SwitchCreate(BaseModel):
+    """Schéma pour créer un switch virtuel."""
+    
+    name: str = Field(..., min_length=1, max_length=100, description="Nom du switch")
+    switch_type: str = Field(
+        ..., 
+        pattern="^(Internal|External|Private)$",
+        description="Type de switch: Internal, External, ou Private"
+    )
+    net_adapter_name: str | None = Field(
+        None,
+        description="Nom de l'adaptateur réseau (requis pour External)"
+    )
+    allow_management_os: bool = Field(
+        True,
+        description="Permettre à l'OS hôte d'utiliser l'adaptateur (External uniquement)"
+    )
+    notes: str | None = Field(None, max_length=500, description="Notes/description")
+
+
+class SwitchResponse(BaseModel):
+    """Schéma de réponse pour un switch virtuel."""
+    
+    name: str
+    switch_type: str
+    interface_description: str | None = None
+    notes: str | None = None
+
+
+@router.post(
+    "/{hypervisor_id}/switches",
+    response_model=SwitchResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Créer un switch virtuel",
+    description="Crée un nouveau switch virtuel sur l'hyperviseur.",
+)
+async def create_hypervisor_switch(
+    db: DbSession,
+    hypervisor_id: UUID,
+    switch_data: SwitchCreate,
+) -> SwitchResponse:
+    """Crée un switch virtuel sur l'hyperviseur."""
+    logger.info(
+        "creating_hypervisor_switch",
+        hypervisor_id=str(hypervisor_id),
+        name=switch_data.name,
+        switch_type=switch_data.switch_type,
+    )
+    
+    service = VMService(db)
+    client = await service._get_hypervisor_client(hypervisor_id)
+    
+    switch = await client.create_switch(
+        name=switch_data.name,
+        switch_type=switch_data.switch_type,
+        net_adapter_name=switch_data.net_adapter_name,
+        allow_management_os=switch_data.allow_management_os,
+        notes=switch_data.notes,
+    )
+    
+    return SwitchResponse(
+        name=switch.name,
+        switch_type=switch.switch_type,
+        interface_description=switch.interface_description,
+        notes=switch.notes,
+    )
+
+
+@router.delete(
+    "/{hypervisor_id}/switches/{switch_name}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Supprimer un switch virtuel",
+    description="Supprime un switch virtuel de l'hyperviseur.",
+)
+async def delete_hypervisor_switch(
+    db: DbSession,
+    hypervisor_id: UUID,
+    switch_name: str,
+) -> None:
+    """Supprime un switch virtuel."""
+    logger.info(
+        "deleting_hypervisor_switch",
+        hypervisor_id=str(hypervisor_id),
+        switch_name=switch_name,
+    )
+    
+    service = VMService(db)
+    client = await service._get_hypervisor_client(hypervisor_id)
+    
+    await client.delete_switch(switch_name)
+
+
+@router.get(
+    "/{hypervisor_id}/physical-adapters",
+    summary="Lister les adaptateurs réseau physiques",
+    description="Liste les adaptateurs réseau physiques disponibles pour créer des switches externes.",
+)
+async def list_physical_adapters(
+    db: DbSession,
+    hypervisor_id: UUID,
+) -> list[dict]:
+    """Liste les adaptateurs réseau physiques de l'hyperviseur."""
+    logger.info("listing_physical_adapters", hypervisor_id=str(hypervisor_id))
+    
+    service = VMService(db)
+    client = await service._get_hypervisor_client(hypervisor_id)
+    
+    adapters = await client.list_physical_adapters()
+    
+    return adapters

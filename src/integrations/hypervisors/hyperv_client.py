@@ -469,6 +469,149 @@ class HyperVClient(BaseHypervisor):
         logger.info("hyperv_switches_listed", count=len(switches))
         return switches
 
+    async def list_physical_adapters(self) -> list[dict[str, Any]]:
+        """Liste les adaptateurs réseau physiques disponibles pour créer des switches externes."""
+        script = """
+        Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and $_.Virtual -eq $false } |
+        Select-Object Name, InterfaceDescription, Status, LinkSpeed, MacAddress |
+        ConvertTo-Json
+        """
+        
+        result = await self._execute(script)
+        
+        if not result.success:
+            logger.warning("Failed to list physical adapters", error=result.stderr)
+            return []
+        
+        data = self._parse_json_output(result.stdout)
+        
+        if data is None:
+            return []
+        
+        if isinstance(data, dict):
+            data = [data]
+        
+        adapters = []
+        for adapter in data:
+            adapters.append({
+                "name": adapter.get("Name", ""),
+                "description": adapter.get("InterfaceDescription", ""),
+                "status": adapter.get("Status", ""),
+                "link_speed": adapter.get("LinkSpeed", ""),
+                "mac_address": adapter.get("MacAddress", ""),
+            })
+        
+        logger.info("hyperv_physical_adapters_listed", count=len(adapters))
+        return adapters
+
+    async def create_switch(
+        self,
+        name: str,
+        switch_type: str,
+        net_adapter_name: str | None = None,
+        allow_management_os: bool = True,
+        notes: str | None = None,
+    ) -> VirtualSwitch:
+        """
+        Crée un nouveau switch virtuel.
+        
+        Args:
+            name: Nom du switch
+            switch_type: Type de switch ('Internal', 'External', 'Private')
+            net_adapter_name: Nom de l'adaptateur réseau (requis pour External)
+            allow_management_os: Permettre à l'OS hôte d'utiliser l'adaptateur (External uniquement)
+            notes: Notes/description du switch
+            
+        Returns:
+            VirtualSwitch créé
+        """
+        # Valider le type
+        valid_types = ["Internal", "External", "Private"]
+        if switch_type not in valid_types:
+            raise HypervisorError(
+                f"Invalid switch type '{switch_type}'. Must be one of: {valid_types}",
+                {"switch_type": switch_type},
+            )
+        
+        # Construire la commande
+        if switch_type == "External":
+            if not net_adapter_name:
+                raise HypervisorError(
+                    "net_adapter_name is required for External switch",
+                    {"switch_type": switch_type},
+                )
+            mgmt_param = "-AllowManagementOS $true" if allow_management_os else "-AllowManagementOS $false"
+            script = f"""
+            $switch = New-VMSwitch -Name '{name}' -NetAdapterName '{net_adapter_name}' {mgmt_param}
+            {f"Set-VMSwitch -VMSwitch $switch -Notes '{notes}'" if notes else ""}
+            Get-VMSwitch -Name '{name}' | Select-Object Name,
+                @{{N='switch_type';E={{$_.SwitchType.ToString()}}}},
+                @{{N='interface_description';E={{$_.NetAdapterInterfaceDescription}}}},
+                Notes | ConvertTo-Json
+            """
+        else:
+            script = f"""
+            $switch = New-VMSwitch -Name '{name}' -SwitchType {switch_type}
+            {f"Set-VMSwitch -VMSwitch $switch -Notes '{notes}'" if notes else ""}
+            Get-VMSwitch -Name '{name}' | Select-Object Name,
+                @{{N='switch_type';E={{$_.SwitchType.ToString()}}}},
+                @{{N='interface_description';E={{$_.NetAdapterInterfaceDescription}}}},
+                Notes | ConvertTo-Json
+            """
+        
+        result = await self._execute(script)
+        
+        if not result.success:
+            raise HypervisorError(
+                f"Failed to create switch '{name}': {result.stderr}",
+                {"name": name, "switch_type": switch_type},
+            )
+        
+        data = self._parse_json_output(result.stdout)
+        
+        if not data:
+            raise HypervisorError(
+                f"Failed to create switch '{name}': No data returned",
+                {"name": name},
+            )
+        
+        switch = VirtualSwitch(
+            name=data.get("Name", name),
+            switch_type=data.get("switch_type", switch_type),
+            interface_description=data.get("interface_description"),
+            notes=data.get("Notes"),
+        )
+        
+        logger.info(
+            "hyperv_switch_created",
+            name=name,
+            switch_type=switch_type,
+        )
+        return switch
+
+    async def delete_switch(self, name: str) -> bool:
+        """Supprime un switch virtuel."""
+        script = f"""
+        $switch = Get-VMSwitch -Name '{name}' -ErrorAction SilentlyContinue
+        if ($switch) {{
+            Remove-VMSwitch -VMSwitch $switch -Force
+            Write-Output "Switch deleted"
+        }} else {{
+            throw "Switch '{name}' not found"
+        }}
+        """
+        
+        result = await self._execute(script)
+        
+        if not result.success:
+            raise HypervisorError(
+                f"Failed to delete switch '{name}': {result.stderr}",
+                {"name": name},
+            )
+        
+        logger.info("hyperv_switch_deleted", name=name)
+        return True
+
     async def mount_iso(self, vm_id: str, iso_path: str) -> bool:
         """Monte une ISO sur le lecteur DVD d'une VM."""
         script = f"""

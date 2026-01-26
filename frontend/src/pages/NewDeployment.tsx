@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Rocket,
   ArrowLeft,
@@ -20,11 +20,14 @@ import {
   Shield,
   RefreshCw,
   Building2,
+  Plus,
+  Loader2,
+  Wifi,
 } from 'lucide-react';
 import { Header } from '../components/layout';
-import { Button, Input, Select, Switch, useToast } from '../components/ui';
+import { Button, Input, Select, Switch, Modal, useToast } from '../components/ui';
 import { hypervisorsApi, templatesApi, deploymentsApi } from '../services/api';
-import type { DeploymentConfig } from '../types';
+import type { DeploymentConfig, SwitchType } from '../types';
 
 // Profils logiciels disponibles
 const SOFTWARE_PROFILES = [
@@ -130,6 +133,18 @@ export function NewDeployment() {
   const [currentStep, setCurrentStep] = useState(1);
   const [formData, setFormData] = useState<DeploymentFormData>(defaultFormData);
 
+  const queryClient = useQueryClient();
+
+  // State pour le modal de création de switch
+  const [isCreateSwitchModalOpen, setIsCreateSwitchModalOpen] = useState(false);
+  const [newSwitchData, setNewSwitchData] = useState({
+    name: '',
+    switch_type: 'Internal' as SwitchType,
+    net_adapter_name: '',
+    allow_management_os: true,
+    notes: '',
+  });
+
   // Fetch hyperviseurs
   const { data: hypervisors = [], isLoading: hypervisorsLoading } = useQuery({
     queryKey: ['hypervisors'],
@@ -141,6 +156,55 @@ export function NewDeployment() {
     queryKey: ['templates'],
     queryFn: templatesApi.list,
   });
+
+  // Fetch switches (dépend de l'hyperviseur sélectionné)
+  const { data: switches = [], isLoading: switchesLoading } = useQuery({
+    queryKey: ['switches', formData.hypervisor_id],
+    queryFn: () => hypervisorsApi.listSwitches(formData.hypervisor_id),
+    enabled: !!formData.hypervisor_id,
+  });
+
+  // Fetch adaptateurs physiques (pour créer des switches externes)
+  const { data: physicalAdapters = [], isLoading: adaptersLoading } = useQuery({
+    queryKey: ['physical-adapters', formData.hypervisor_id],
+    queryFn: () => hypervisorsApi.listPhysicalAdapters(formData.hypervisor_id),
+    enabled: !!formData.hypervisor_id && isCreateSwitchModalOpen,
+  });
+
+  // Mutation pour créer un switch
+  const createSwitchMutation = useMutation({
+    mutationFn: (data: typeof newSwitchData) =>
+      hypervisorsApi.createSwitch(formData.hypervisor_id, {
+        name: data.name,
+        switch_type: data.switch_type,
+        net_adapter_name: data.switch_type === 'External' ? data.net_adapter_name : undefined,
+        allow_management_os: data.allow_management_os,
+        notes: data.notes || undefined,
+      }),
+    onSuccess: (createdSwitch) => {
+      addToast({ type: 'success', title: 'Switch créé', message: `Le switch "${createdSwitch.name}" a été créé.` });
+      queryClient.invalidateQueries({ queryKey: ['switches', formData.hypervisor_id] });
+      setFormData({ ...formData, network_switch: createdSwitch.name });
+      setIsCreateSwitchModalOpen(false);
+      setNewSwitchData({
+        name: '',
+        switch_type: 'Internal',
+        net_adapter_name: '',
+        allow_management_os: true,
+        notes: '',
+      });
+    },
+    onError: (error: Error) => {
+      addToast({ type: 'error', title: 'Erreur', message: error.message || 'Impossible de créer le switch.' });
+    },
+  });
+
+  // Sélectionner automatiquement le premier switch si disponible
+  useEffect(() => {
+    if (switches.length > 0 && !formData.network_switch) {
+      setFormData((prev) => ({ ...prev, network_switch: switches[0].name }));
+    }
+  }, [switches]);
 
   // Mutation pour créer le déploiement
   const createMutation = useMutation({
@@ -277,7 +341,7 @@ export function NewDeployment() {
         domain: formData.domain_name,
         user: formData.domain_user,
         password: formData.domain_password,
-        ou: formData.domain_ou || undefined,
+        ou_path: formData.domain_ou || undefined,
       };
     }
 
@@ -632,15 +696,93 @@ export function NewDeployment() {
                 </p>
               </div>
 
+              {/* Sélection du switch */}
+              <div className="border border-dark-600 rounded-lg p-4">
+                <h3 className="text-sm font-medium text-dark-200 mb-4 flex items-center gap-2">
+                  <Wifi size={16} />
+                  Switch virtuel
+                </h3>
+                
+                {switchesLoading ? (
+                  <div className="flex items-center gap-2 text-dark-400">
+                    <Loader2 size={16} className="animate-spin" />
+                    Chargement des switches...
+                  </div>
+                ) : switches.length === 0 ? (
+                  <div className="text-center py-4">
+                    <Network size={32} className="mx-auto mb-2 text-dark-500" />
+                    <p className="text-dark-400 mb-3">Aucun switch virtuel trouvé</p>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      leftIcon={<Plus size={16} />}
+                      onClick={() => setIsCreateSwitchModalOpen(true)}
+                    >
+                      Créer un switch
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {switches.map((sw) => (
+                        <label
+                          key={sw.name}
+                          className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                            formData.network_switch === sw.name
+                              ? 'border-primary-500 bg-primary-500/10'
+                              : 'border-dark-600 hover:border-dark-500'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="network_switch"
+                            value={sw.name}
+                            checked={formData.network_switch === sw.name}
+                            onChange={(e) =>
+                              setFormData({ ...formData, network_switch: e.target.value })
+                            }
+                            className="sr-only"
+                          />
+                          <div className="flex items-center gap-2">
+                            <Network size={16} className={formData.network_switch === sw.name ? 'text-primary-500' : 'text-dark-400'} />
+                            <span className="font-medium text-white">{sw.name}</span>
+                          </div>
+                          <div className="mt-1 flex items-center gap-2">
+                            <span className={`text-xs px-2 py-0.5 rounded ${
+                              sw.switch_type === 'External' ? 'bg-green-500/20 text-green-400' :
+                              sw.switch_type === 'Internal' ? 'bg-blue-500/20 text-blue-400' :
+                              'bg-purple-500/20 text-purple-400'
+                            }`}>
+                              {sw.switch_type}
+                            </span>
+                          </div>
+                          {sw.notes && (
+                            <p className="text-xs text-dark-400 mt-1 truncate">{sw.notes}</p>
+                          )}
+                        </label>
+                      ))}
+                      
+                      {/* Option pour créer un nouveau switch */}
+                      <button
+                        type="button"
+                        onClick={() => setIsCreateSwitchModalOpen(true)}
+                        className="p-3 rounded-lg border border-dashed border-dark-500 hover:border-primary-500 hover:bg-primary-500/5 transition-colors text-left"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Plus size={16} className="text-primary-500" />
+                          <span className="font-medium text-primary-400">Créer un switch</span>
+                        </div>
+                        <p className="text-xs text-dark-400 mt-1">
+                          Ajouter un nouveau switch virtuel
+                        </p>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* VLAN */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <Input
-                  label="Switch réseau"
-                  value={formData.network_switch}
-                  onChange={(e) => setFormData({ ...formData, network_switch: e.target.value })}
-                  placeholder="Default Switch"
-                  leftIcon={<Network size={18} />}
-                  helperText="Nom du switch virtuel Hyper-V"
-                />
                 <Input
                   label="VLAN ID (optionnel)"
                   type="number"
@@ -1112,6 +1254,94 @@ export function NewDeployment() {
           </div>
         </div>
       </div>
+
+      {/* Modal de création de switch */}
+      <Modal
+        isOpen={isCreateSwitchModalOpen}
+        onClose={() => setIsCreateSwitchModalOpen(false)}
+        title="Créer un switch virtuel"
+        size="md"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setIsCreateSwitchModalOpen(false)}>
+              Annuler
+            </Button>
+            <Button
+              onClick={() => createSwitchMutation.mutate(newSwitchData)}
+              isLoading={createSwitchMutation.isPending}
+              disabled={!newSwitchData.name || (newSwitchData.switch_type === 'External' && !newSwitchData.net_adapter_name)}
+            >
+              Créer le switch
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <Input
+            label="Nom du switch"
+            value={newSwitchData.name}
+            onChange={(e) => setNewSwitchData({ ...newSwitchData, name: e.target.value })}
+            placeholder="Mon-Switch"
+            required
+          />
+
+          <Select
+            label="Type de switch"
+            value={newSwitchData.switch_type}
+            onChange={(e) => setNewSwitchData({ ...newSwitchData, switch_type: e.target.value as SwitchType })}
+            options={[
+              { value: 'Internal', label: 'Interne - Communication entre VMs et l\'hôte' },
+              { value: 'External', label: 'Externe - Accès au réseau physique' },
+              { value: 'Private', label: 'Privé - Communication entre VMs uniquement' },
+            ]}
+            helperText={
+              newSwitchData.switch_type === 'External'
+                ? 'Les VMs pourront accéder au réseau physique'
+                : newSwitchData.switch_type === 'Internal'
+                ? 'Les VMs pourront communiquer entre elles et avec l\'hôte'
+                : 'Les VMs pourront uniquement communiquer entre elles'
+            }
+          />
+
+          {newSwitchData.switch_type === 'External' && (
+            <>
+              <Select
+                label="Adaptateur réseau physique"
+                value={newSwitchData.net_adapter_name}
+                onChange={(e) => setNewSwitchData({ ...newSwitchData, net_adapter_name: e.target.value })}
+                options={
+                  adaptersLoading
+                    ? [{ value: '', label: 'Chargement...', disabled: true }]
+                    : physicalAdapters.length === 0
+                    ? [{ value: '', label: 'Aucun adaptateur disponible', disabled: true }]
+                    : [
+                        { value: '', label: 'Sélectionner un adaptateur...', disabled: true },
+                        ...physicalAdapters.map((adapter) => ({
+                          value: adapter.name,
+                          label: `${adapter.name} - ${adapter.description} (${adapter.link_speed})`,
+                        })),
+                      ]
+                }
+                required
+              />
+
+              <Switch
+                label="Autoriser l'OS hôte à utiliser l'adaptateur"
+                description="Permet à l'hôte Hyper-V de partager l'adaptateur réseau avec les VMs"
+                checked={newSwitchData.allow_management_os}
+                onChange={(checked) => setNewSwitchData({ ...newSwitchData, allow_management_os: checked })}
+              />
+            </>
+          )}
+
+          <Input
+            label="Notes (optionnel)"
+            value={newSwitchData.notes}
+            onChange={(e) => setNewSwitchData({ ...newSwitchData, notes: e.target.value })}
+            placeholder="Description du switch..."
+          />
+        </div>
+      </Modal>
     </div>
   );
 }

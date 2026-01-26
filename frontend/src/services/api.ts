@@ -8,6 +8,9 @@ import type {
   DeploymentConfig,
   DashboardStats,
   HealthCheck,
+  VirtualSwitch,
+  CreateSwitchRequest,
+  PhysicalAdapter,
 } from '../types';
 
 // Configuration de base
@@ -149,6 +152,26 @@ export const hypervisorsApi = {
   testConnection: async (id: string): Promise<{ connected: boolean; message: string }> => {
     const response = await apiClient.post<{ success: boolean; message: string }>(`/hypervisors/${id}/test`);
     return { connected: response.data.success, message: response.data.message };
+  },
+
+  // Switches
+  listSwitches: async (id: string): Promise<VirtualSwitch[]> => {
+    const response = await apiClient.get<VirtualSwitch[]>(`/hypervisors/${id}/switches`);
+    return response.data;
+  },
+
+  createSwitch: async (hypervisorId: string, data: CreateSwitchRequest): Promise<VirtualSwitch> => {
+    const response = await apiClient.post<VirtualSwitch>(`/hypervisors/${hypervisorId}/switches`, data);
+    return response.data;
+  },
+
+  deleteSwitch: async (hypervisorId: string, switchName: string): Promise<void> => {
+    await apiClient.delete(`/hypervisors/${hypervisorId}/switches/${encodeURIComponent(switchName)}`);
+  },
+
+  listPhysicalAdapters: async (id: string): Promise<PhysicalAdapter[]> => {
+    const response = await apiClient.get<PhysicalAdapter[]>(`/hypervisors/${id}/physical-adapters`);
+    return response.data;
   },
 };
 
