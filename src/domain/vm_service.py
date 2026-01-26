@@ -189,6 +189,7 @@ class VMService:
         ram_gb: int = 4,
         disk_gb: int = 60,
         network_switch: str | None = None,
+        vhdx_path: str | None = None,
         template_id: UUID | None = None,
         **kwargs: Any,
     ) -> VirtualMachine:
@@ -202,6 +203,7 @@ class VMService:
             ram_gb: RAM en GB
             disk_gb: Disque en GB
             network_switch: Switch réseau (optionnel)
+            vhdx_path: Chemin du dossier pour le disque VHDX (optionnel)
             template_id: ID du template OS (optionnel)
             
         Returns:
@@ -223,6 +225,7 @@ class VMService:
             ram_gb=ram_gb,
             disk_gb=disk_gb,
             network_switch=network_switch or settings.hyperv_default_switch,
+            vhdx_path=vhdx_path,  # Emplacement personnalisé du disque virtuel
         )
         
         # Si template spécifié, récupérer les infos ISO

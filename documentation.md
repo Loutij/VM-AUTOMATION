@@ -25,7 +25,7 @@ Outil interne d'automatisation complète du déploiement de machines virtuelles.
 |----------------|--------|-------------|
 | Création VM basique | TERMINÉ | Nom, génération, emplacement |
 | Configuration CPU/RAM | TERMINÉ | Allocation ressources dynamique |
-| Création disque VHDX | TERMINÉ | Taille, format dynamique |
+| Création disque VHDX | TERMINÉ | Taille, format dynamique, emplacement personnalisé |
 | Configuration réseau | TERMINÉ | Virtual Switch, MAC auto |
 | Montage ISO | TERMINÉ | Attachement ISO + OEMDRV |
 

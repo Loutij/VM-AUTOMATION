@@ -75,7 +75,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
   
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttemptsRef = useRef(0);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const subscribedRoomsRef = useRef<Set<string>>(new Set());
 
   // Nettoyer le timeout de reconnexion

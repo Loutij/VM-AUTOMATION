@@ -367,6 +367,7 @@ class DeploymentService:
             ram_gb=config.get("ram_gb", 4),
             disk_gb=config.get("disk_gb", 60),
             network_switch=config.get("network_switch"),
+            vhdx_path=config.get("vhdx_path"),  # Emplacement personnalisé du disque
             template_id=deployment.os_template_id,
         )
         
