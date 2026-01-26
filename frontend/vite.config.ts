@@ -16,6 +16,11 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, '/api/v1'),
+      },
+      '/health': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
       },
     },
   },

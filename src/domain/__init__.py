@@ -19,6 +19,7 @@ from src.domain.models import (
     VirtualMachine,
     VMSoftware,
     VMState,
+    VMStatus,
 )
 from src.domain.template_engine import TemplateEngine, get_template_engine
 from src.domain.vm_service import VMService
@@ -38,6 +39,7 @@ __all__ = [
     "VirtualMachine",
     "VMSoftware",
     "VMState",
+    "VMStatus",
     # Services
     "VMService",
     "DeploymentService",

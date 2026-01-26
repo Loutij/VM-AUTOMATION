@@ -88,9 +88,9 @@
 |----|-------|--------|---------|-------|
 | 2.2.1 | Lister Virtual Switches | ✅ | Agent | list_switches() |
 | 2.2.2 | Attacher NIC à switch | ✅ | Agent | Via create_vm() |
-| 2.2.3 | Configuration VLAN | ⬜ | - | - |
+| 2.2.3 | Configuration VLAN | ✅ | Agent | set_vm_vlan(), remove_vm_vlan(), get_vm_vlan() |
 | 2.2.4 | Récupération adresse MAC | ✅ | Agent | Via Get-VMNetworkAdapter |
-| 2.2.5 | Support multi-NIC | ⬜ | - | - |
+| 2.2.5 | Support multi-NIC | ✅ | Agent | list/add/remove/connect/disconnect_network_adapter() |
 
 ### 2.3 Gestion Stockage
 | ID | Tâche | Statut | Assigné | Notes |
@@ -98,7 +98,7 @@
 | 2.3.1 | Créer disque VHDX | ✅ | Agent | Via New-VHD |
 | 2.3.2 | Taille dynamique/fixe | ✅ | Agent | Dynamique par défaut |
 | 2.3.3 | Sélection emplacement | ✅ | Agent | C:\HyperV\VirtualHardDisks |
-| 2.3.4 | Support multi-disques | ⬜ | - | - |
+| 2.3.4 | Support multi-disques | ✅ | Agent | list/add/remove/resize_hard_disk(), attach_existing_disk() |
 
 ### 2.4 Montage ISO
 | ID | Tâche | Statut | Assigné | Notes |
@@ -238,7 +238,39 @@
 
 **Objectif** : Installation automatique de stack logicielle complète
 
-*(Phase non démarrée)*
+### 5.1 Gestionnaires de Paquets
+| ID | Tâche | Statut | Assigné | Notes |
+|----|-------|--------|---------|-------|
+| 5.1.1 | Installation Chocolatey | ✅ | Agent | ensure_chocolatey_installed() |
+| 5.1.2 | Support Winget | ⬜ | - | Windows 10/11 natif |
+| 5.1.3 | Support apt (Debian/Ubuntu) | ⬜ | - | Via SSH/cloud-init |
+| 5.1.4 | Support yum/dnf (RHEL/CentOS) | ⬜ | - | Via SSH/cloud-init |
+
+### 5.2 Installation Packages Windows
+| ID | Tâche | Statut | Assigné | Notes |
+|----|-------|--------|---------|-------|
+| 5.2.1 | Install package unique | ✅ | Agent | install_package_chocolatey() |
+| 5.2.2 | Install batch packages | ✅ | Agent | install_packages() |
+| 5.2.3 | Désinstallation package | ✅ | Agent | uninstall_package() |
+| 5.2.4 | Mise à jour packages | ✅ | Agent | upgrade_all_packages() |
+| 5.2.5 | Liste packages installés | ✅ | Agent | list_installed_packages() |
+
+### 5.3 Profils Logiciels
+| ID | Tâche | Statut | Assigné | Notes |
+|----|-------|--------|---------|-------|
+| 5.3.1 | Profil minimal | ✅ | Agent | 7zip, notepadplusplus |
+| 5.3.2 | Profil tools | ✅ | Agent | + sysinternals |
+| 5.3.3 | Profil development | ✅ | Agent | git, vscode, nodejs, python |
+| 5.3.4 | Profil webserver | ✅ | Agent | iis-webserver, urlrewrite |
+| 5.3.5 | Profil monitoring | ✅ | Agent | zabbix-agent |
+| 5.3.6 | Profil database | ✅ | Agent | sql-server-express, ssms |
+
+### 5.4 Installation Packages Linux
+| ID | Tâche | Statut | Assigné | Notes |
+|----|-------|--------|---------|-------|
+| 5.4.1 | Install via apt | ⬜ | - | Debian/Ubuntu |
+| 5.4.2 | Install via yum/dnf | ⬜ | - | RHEL/CentOS |
+| 5.4.3 | Profils Linux | ⬜ | - | web, db, monitoring |
 
 ---
 
@@ -379,22 +411,22 @@
 | Phase | Total | À Faire | En Cours | Terminé | % Complet |
 |-------|-------|---------|----------|---------|-----------|
 | Phase 1 | 31 | 0 | 0 | 31 | **100%** |
-| Phase 2 | 27 | 11 | 0 | 16 | **59%** |
+| Phase 2 | 27 | 8 | 0 | 19 | **70%** |
 | Phase 3 | 26 | 4 | 0 | 22 | **85%** |
 | Phase 4 | 23 | 3 | 0 | 20 | **87%** |
-| Phase 5 | 20 | 20 | 0 | 0 | 0% |
+| Phase 5 | 20 | 7 | 0 | 13 | **65%** |
 | Phase 6 | 8 | 6 | 0 | 2 | **25%** |
 | Phase 7 | 36 | 17 | 0 | 19 | **53%** |
 | Phase 8 | 13 | 12 | 0 | 1 | **8%** |
 | Phase 9 | 4 | 4 | 0 | 0 | 0% |
-| **TOTAL** | **188** | **77** | **0** | **111** | **~59%** |
+| **TOTAL** | **188** | **61** | **0** | **127** | **~68%** |
 
 ---
 
 ## Test en cours
 
 **VM: WinSrv2022-Test** sur Hyper-V 10.250.0.20
-- Statut: ✅ Installation + Post-install + Phase 4 COMPLETS
+- Statut: ✅ Installation + Post-install + Phase 4 + Phase 5 COMPLETS
 - OS: Windows Server 2022 Standard Evaluation (Desktop Experience)
 - Config: 2 vCPU, 4 GB RAM, 60 GB Disk (49 GB free)
 - IP: 10.250.0.83
@@ -409,6 +441,8 @@
 - Boot: HardDrive first ✅
 - Windows Update: Service auto, 5 MAJ disponibles
 - Politique MDP: 8 chars min, 90j expiration ✅
+- Chocolatey: v2.6.0 ✅
+- Logiciels installés: 7zip v25.1.0, Notepad++ v8.9.0 ✅
 
 ## Architecture Validée
 

@@ -54,7 +54,7 @@ class Architecture(str, enum.Enum):
 
 
 class VMStatus(str, enum.Enum):
-    """États possibles d'une VM."""
+    """États internes de gestion d'une VM."""
 
     CREATING = "creating"
     CREATED = "created"
@@ -65,6 +65,16 @@ class VMStatus(str, enum.Enum):
     ERROR = "error"
     DELETING = "deleting"
     DELETED = "deleted"
+
+
+class VMState(str, enum.Enum):
+    """États Hyper-V d'une VM (depuis l'hyperviseur)."""
+
+    RUNNING = "running"
+    STOPPED = "stopped"
+    PAUSED = "paused"
+    SUSPENDED = "saved"
+    UNKNOWN = "unknown"
 
 
 class DeploymentStatus(str, enum.Enum):
@@ -230,8 +240,15 @@ class VirtualMachine(Base, TimestampMixin):
     status: Mapped[VMStatus] = mapped_column(
         Enum(VMStatus), default=VMStatus.CREATING, nullable=False
     )
-    hyperv_id: Mapped[str | None] = mapped_column(
-        String(100), nullable=True, comment="GUID Hyper-V"
+    state: Mapped[VMState] = mapped_column(
+        Enum(VMState), default=VMState.STOPPED, nullable=False,
+        comment="État Hyper-V (running, stopped, paused, etc.)"
+    )
+    hypervisor_vm_id: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, comment="GUID Hyper-V de la VM"
+    )
+    ip_address: Mapped[str | None] = mapped_column(
+        String(45), nullable=True, comment="Adresse IP de la VM"
     )
     
     # Relations
