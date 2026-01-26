@@ -21,7 +21,7 @@
 |----|-------|--------|---------|-------|
 | 1.1.1 | Créer structure dossiers | ✅ | Agent | 26 fichiers Python créés |
 | 1.1.2 | Configurer Python/FastAPI | ✅ | Agent | config.py, requirements.txt |
-| 1.1.3 | Configurer React/TypeScript | ⬜ | - | - |
+| 1.1.3 | Configurer React/TypeScript | ✅ | Agent | Vite + React 19 + TypeScript 5.9 |
 | 1.1.4 | Setup Docker Compose | ✅ | Agent | PostgreSQL, Redis |
 | 1.1.5 | Configurer CI/CD GitHub Actions | ⬜ | - | Linting, tests |
 | 1.1.6 | Configurer pre-commit hooks | ⬜ | - | Black, isort, mypy |
@@ -56,15 +56,17 @@
 | 1.4.5 | Créer VM basique | ✅ | Agent | VM WinSrv2022-Test créée |
 | 1.4.6 | Démarrer/Arrêter VM | ✅ | Agent | start_vm(), stop_vm(), restart_vm() |
 
-### 1.5 Frontend Skeleton
+### 1.5 Frontend - Structure de Base
 | ID | Tâche | Statut | Assigné | Notes |
 |----|-------|--------|---------|-------|
-| 1.5.1 | Setup Vite + React + TS | ⬜ | - | - |
-| 1.5.2 | Configurer TailwindCSS | ⬜ | - | - |
-| 1.5.3 | Setup React Router | ⬜ | - | - |
-| 1.5.4 | Créer layout principal | ⬜ | - | - |
-| 1.5.5 | Créer service API | ⬜ | - | Axios/fetch |
-| 1.5.6 | Page Dashboard vide | ⬜ | - | - |
+| 1.5.1 | Setup Vite + React + TS | ✅ | Agent | React 19.2, Vite 7.2, TS 5.9 |
+| 1.5.2 | Configurer TailwindCSS | ✅ | Agent | tailwind.config.js, thème dark custom |
+| 1.5.3 | Setup React Router | ✅ | Agent | react-router-dom 7.13 installé |
+| 1.5.4 | Créer layout principal | ✅ | Agent | MainLayout, Sidebar, Header |
+| 1.5.5 | Créer service API | ✅ | Agent | Axios + React Query, retry avec backoff |
+| 1.5.6 | Types TypeScript | ✅ | Agent | types/index.ts complet |
+| 1.5.7 | Composants UI de base | ✅ | Agent | StatCard, StatusBadge |
+| 1.5.8 | Activer routing dans App.tsx | ✅ | Agent | BrowserRouter + Routes configurées |
 
 ---
 
@@ -104,16 +106,19 @@
 | 2.4.1 | Lister ISOs disponibles | ✅ | Agent | C:\HyperV\ISOs |
 | 2.4.2 | Monter ISO sur DVD | ✅ | Agent | Add-VMDvdDrive |
 | 2.4.3 | Configurer boot order | ✅ | Agent | Set-VMFirmware -FirstBootDevice |
-| 2.4.4 | Démonter ISO post-install | ⬜ | - | - |
+| 2.4.4 | Démonter ISO post-install | ✅ | Agent | unmount_iso(), cleanup_post_install() |
 
-### 2.5 Interface Création
+### 2.5 Interface Création VM
 | ID | Tâche | Statut | Assigné | Notes |
 |----|-------|--------|---------|-------|
-| 2.5.1 | Wizard étape 1 : OS | ⬜ | - | Frontend requis |
-| 2.5.2 | Wizard étape 2 : Ressources | ⬜ | - | Frontend requis |
-| 2.5.3 | Wizard étape 3 : Réseau | ⬜ | - | Frontend requis |
-| 2.5.4 | Wizard étape 4 : Stockage | ⬜ | - | Frontend requis |
-| 2.5.5 | Résumé et validation | ⬜ | - | Frontend requis |
+| 2.5.1 | Wizard étape 1 : Sélection Template OS | ⬜ | - | Liste templates, preview config |
+| 2.5.2 | Wizard étape 2 : Configuration Ressources | ⬜ | - | CPU, RAM, disque avec sliders |
+| 2.5.3 | Wizard étape 3 : Configuration Réseau | ⬜ | - | Switch, VLAN, IP statique/DHCP |
+| 2.5.4 | Wizard étape 4 : Options Avancées | ⬜ | - | Domaine AD, hostname, timezone |
+| 2.5.5 | Wizard étape 5 : Résumé et Validation | ⬜ | - | Récapitulatif, estimation temps |
+| 2.5.6 | Composant StepIndicator | ⬜ | - | Navigation wizard |
+| 2.5.7 | Validation formulaires (Zod/React Hook Form) | ⬜ | - | - |
+| 2.5.8 | Preview configuration JSON | ⬜ | - | Mode debug/avancé |
 
 ---
 
@@ -249,21 +254,123 @@
 | 6.1.3 | Parallélisation possible | ⬜ | - | - |
 | 6.1.4 | Points de checkpoint | ✅ | Agent | DeploymentLog par étape |
 
-*(Reste de la phase non démarrée)*
+### 6.2 Monitoring Temps Réel (Backend)
+| ID | Tâche | Statut | Assigné | Notes |
+|----|-------|--------|---------|-------|
+| 6.2.1 | WebSocket Server (FastAPI) | ⬜ | - | Broadcast événements déploiement |
+| 6.2.2 | Endpoint SSE alternatif | ⬜ | - | Fallback si WS non supporté |
+| 6.2.3 | Route /dashboard/stats | ⬜ | - | Agrégation stats temps réel |
+| 6.2.4 | Notifications push | ⬜ | - | Déploiement terminé/échec |
 
 ---
 
-## Phase 7 : Industrialisation
+## Phase 7 : Interface Web Complète
+
+**Objectif** : Interface utilisateur complète et fonctionnelle
+
+### 7.1 Pages Principales
+| ID | Tâche | Statut | Assigné | Notes |
+|----|-------|--------|---------|-------|
+| 7.1.1 | Activer React Router | 🔄 | - | Connecter App.tsx aux pages |
+| 7.1.2 | Page Dashboard | ✅ | Agent | Stats, déploiements récents, actions rapides |
+| 7.1.3 | Page Hyperviseurs - Liste | ⬜ | - | Tableau avec statut connexion |
+| 7.1.4 | Page Hyperviseurs - Ajout/Édition | ⬜ | - | Formulaire + test connexion |
+| 7.1.5 | Page VMs - Liste | ⬜ | - | Tableau avec filtres, tri, recherche |
+| 7.1.6 | Page VMs - Détail | ⬜ | - | Info complètes, métriques, actions |
+| 7.1.7 | Page Templates - Liste | ⬜ | - | Grille avec preview |
+| 7.1.8 | Page Templates - Ajout/Édition | ⬜ | - | Éditeur YAML/XML intégré |
+| 7.1.9 | Page Déploiements - Liste | ⬜ | - | Timeline, filtres par statut |
+| 7.1.10 | Page Déploiements - Détail | ⬜ | - | Logs temps réel, timeline étapes |
+| 7.1.11 | Page Paramètres | ⬜ | - | Config connexions, préférences |
+| 7.1.12 | Page Aide/Documentation | ⬜ | - | Guide utilisateur intégré |
+
+### 7.2 Composants UI Avancés
+| ID | Tâche | Statut | Assigné | Notes |
+|----|-------|--------|---------|-------|
+| 7.2.1 | DataTable générique | ⬜ | - | Tri, filtres, pagination, sélection |
+| 7.2.2 | Modal/Dialog | ⬜ | - | Confirmations, formulaires |
+| 7.2.3 | Toast/Notifications | ⬜ | - | Feedback actions utilisateur |
+| 7.2.4 | Skeleton loaders | ⬜ | - | États de chargement |
+| 7.2.5 | Empty states | ⬜ | - | Messages quand liste vide |
+| 7.2.6 | Dropdown menu | ⬜ | - | Actions contextuelles |
+| 7.2.7 | Tabs component | ⬜ | - | Navigation secondaire |
+| 7.2.8 | Progress/Timeline | ⬜ | - | Suivi étapes déploiement |
+| 7.2.9 | Form components | ⬜ | - | Input, Select, Checkbox, Radio |
+| 7.2.10 | CodeEditor | ⬜ | - | Edition templates (Monaco/CodeMirror) |
+
+### 7.3 Fonctionnalités Temps Réel
+| ID | Tâche | Statut | Assigné | Notes |
+|----|-------|--------|---------|-------|
+| 7.3.1 | Hook useWebSocket | ⬜ | - | Connexion persistante |
+| 7.3.2 | Mise à jour auto déploiements | ⬜ | - | Progress bar temps réel |
+| 7.3.3 | Logs streaming | ⬜ | - | Console déploiement live |
+| 7.3.4 | Refresh auto listes | ⬜ | - | Polling ou WS |
+| 7.3.5 | Indicateur connexion | ⬜ | - | Online/offline status |
+
+### 7.4 UX et Polish
+| ID | Tâche | Statut | Assigné | Notes |
+|----|-------|--------|---------|-------|
+| 7.4.1 | Responsive design | ⬜ | - | Mobile, tablet, desktop |
+| 7.4.2 | Keyboard shortcuts | ⬜ | - | Navigation rapide |
+| 7.4.3 | Dark/Light mode toggle | ⬜ | - | Préférence utilisateur |
+| 7.4.4 | Animations/Transitions | ⬜ | - | Framer Motion |
+| 7.4.5 | Breadcrumbs | ⬜ | - | Navigation contexte |
+| 7.4.6 | Error boundaries | ⬜ | - | Gestion erreurs gracieuse |
+| 7.4.7 | Loading states global | ⬜ | - | NProgress ou similaire |
+
+### 7.5 Tests Frontend
+| ID | Tâche | Statut | Assigné | Notes |
+|----|-------|--------|---------|-------|
+| 7.5.1 | Setup Vitest | ⬜ | - | Config test runner |
+| 7.5.2 | Tests composants UI | ⬜ | - | React Testing Library |
+| 7.5.3 | Tests hooks custom | ⬜ | - | useWebSocket, etc. |
+| 7.5.4 | Tests E2E | ⬜ | - | Playwright ou Cypress |
+| 7.5.5 | Storybook | ⬜ | - | Documentation composants |
+
+---
+
+## Phase 8 : Industrialisation
 
 **Objectif** : Outil production-ready
 
-*(Phase non démarrée)*
+### 8.1 Sécurité
+| ID | Tâche | Statut | Assigné | Notes |
+|----|-------|--------|---------|-------|
+| 8.1.1 | Authentification JWT complète | ⬜ | - | Login, refresh, logout |
+| 8.1.2 | Gestion rôles (RBAC) | ⬜ | - | Admin, operator, viewer |
+| 8.1.3 | Audit logs | ⬜ | - | Traçabilité actions |
+| 8.1.4 | Chiffrement credentials | ⬜ | - | Vault ou équivalent |
+| 8.1.5 | Rate limiting | ⬜ | - | Protection API |
+
+### 8.2 Performance
+| ID | Tâche | Statut | Assigné | Notes |
+|----|-------|--------|---------|-------|
+| 8.2.1 | Cache Redis | ⬜ | - | Réponses fréquentes |
+| 8.2.2 | Pagination API | ⬜ | - | Grandes listes |
+| 8.2.3 | Lazy loading frontend | ⬜ | - | Code splitting routes |
+| 8.2.4 | Optimisation requêtes DB | ⬜ | - | Indexation, eager loading |
+
+### 8.3 Déploiement
+| ID | Tâche | Statut | Assigné | Notes |
+|----|-------|--------|---------|-------|
+| 8.3.1 | Docker multi-stage build | ⬜ | - | Images optimisées |
+| 8.3.2 | Kubernetes manifests | ⬜ | - | Helm charts |
+| 8.3.3 | CI/CD pipeline complet | ⬜ | - | Tests, build, deploy |
+| 8.3.4 | Monitoring (Prometheus) | ⬜ | - | Métriques application |
+| 8.3.5 | Logging centralisé | ⬜ | - | ELK ou Loki |
 
 ---
 
-## Phase 8 : Extension VMware (Futur)
+## Phase 9 : Extension VMware (Futur)
 
 *(Phase non démarrée)*
+
+| ID | Tâche | Statut | Assigné | Notes |
+|----|-------|--------|---------|-------|
+| 9.1.1 | Client pyVmomi | ⬜ | - | Connexion vCenter/ESXi |
+| 9.1.2 | Adapter interface hyperviseur | ⬜ | - | Même API que Hyper-V |
+| 9.1.3 | Templates VMware | ⬜ | - | OVF, cloud-init |
+| 9.1.4 | Tests intégration VMware | ⬜ | - | - |
 
 ---
 
@@ -271,15 +378,16 @@
 
 | Phase | Total | À Faire | En Cours | Terminé | % Complet |
 |-------|-------|---------|----------|---------|-----------|
-| Phase 1 | 30 | 8 | 0 | 22 | **73%** |
-| Phase 2 | 24 | 9 | 0 | 15 | **63%** |
+| Phase 1 | 31 | 4 | 1 | 26 | **84%** |
+| Phase 2 | 27 | 12 | 0 | 15 | **56%** |
 | Phase 3 | 26 | 5 | 0 | 21 | **81%** |
 | Phase 4 | 23 | 12 | 0 | 11 | **48%** |
 | Phase 5 | 20 | 20 | 0 | 0 | 0% |
-| Phase 6 | 16 | 14 | 0 | 2 | **13%** |
-| Phase 7 | 16 | 16 | 0 | 0 | 0% |
-| Phase 8 | 7 | 7 | 0 | 0 | 0% |
-| **TOTAL** | **162** | **91** | **0** | **71** | **~44%** |
+| Phase 6 | 8 | 6 | 0 | 2 | **25%** |
+| Phase 7 | 36 | 35 | 1 | 1 | **3%** |
+| Phase 8 | 13 | 13 | 0 | 0 | 0% |
+| Phase 9 | 4 | 4 | 0 | 0 | 0% |
+| **TOTAL** | **188** | **111** | **2** | **76** | **~40%** |
 
 ---
 
@@ -296,6 +404,7 @@
 
 ## Architecture Validée
 
+### Backend
 ```
 ISO Windows (5 GB) ─────────┐
   (stocké une fois)         ├──► VM boot ──► Installation 100% AUTO
@@ -304,8 +413,37 @@ ISO OEMDRV (374 KB) ────────┘
     └── autounattend.xml (params custom via Jinja2)
 ```
 
+### Frontend
+```
+frontend/
+├── src/
+│   ├── components/
+│   │   ├── layout/          ✅ MainLayout, Sidebar, Header
+│   │   └── ui/              ✅ StatCard, StatusBadge
+│   ├── pages/               ✅ 7 pages (Dashboard fonctionnel, autres placeholder)
+│   ├── services/            ✅ api.ts (Axios + retry backoff)
+│   └── types/               ✅ Types TS complets
+├── tailwind.config.js       ✅ Thème dark personnalisé
+└── package.json             ✅ React 19, Vite 7, TailwindCSS 4
+```
+
+**Stack Frontend:**
+- React 19.2.0 + TypeScript 5.9
+- Vite 7.2.4 (build tool)
+- TailwindCSS 4.1.18 (styling)
+- React Router 7.13.0 (navigation)
+- React Query 5.90.20 (state management)
+- Axios 1.13.3 (HTTP client)
+- Lucide React (icônes)
+
+**Prochaines priorités Frontend:**
+1. ⚡ Activer React Router dans App.tsx
+2. 📝 Implémenter page Hyperviseurs (CRUD)
+3. 🖥️ Implémenter page VMs (liste + actions)
+4. 🚀 Créer Wizard de déploiement VM
+
 **Documentation technique:** `docs/UNATTENDED_INSTALL.md`
 
 ---
 
-*Dernière mise à jour : 2026-01-26 17:45*
+*Dernière mise à jour : 2026-01-26*
