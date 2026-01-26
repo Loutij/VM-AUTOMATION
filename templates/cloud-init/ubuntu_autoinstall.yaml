@@ -1,0 +1,162 @@
+#cloud-config
+# =============================================================================
+# Ubuntu 24.04 - Autoinstall Configuration Template
+# Variables Jinja2: {{ variable_name }}
+# Pour Ubuntu Server/Desktop avec Subiquity installer
+# =============================================================================
+
+autoinstall:
+  version: 1
+  
+  # ==========================================================================
+  # Locale et clavier
+  # ==========================================================================
+  locale: {{ locale | default('fr_FR.UTF-8') }}
+  keyboard:
+    layout: {{ keyboard_layout | default('fr') }}
+    variant: {{ keyboard_variant | default('') }}
+  
+  # ==========================================================================
+  # Configuration réseau
+  # ==========================================================================
+  {% if static_ip %}
+  network:
+    version: 2
+    ethernets:
+      {{ network_interface | default('eth0') }}:
+        addresses:
+          - {{ ip_address }}/{{ subnet_prefix | default('24') }}
+        gateway4: {{ gateway }}
+        nameservers:
+          addresses:
+            - {{ dns_server_1 | default('8.8.8.8') }}
+            {% if dns_server_2 %}
+            - {{ dns_server_2 }}
+            {% endif %}
+          search:
+            - {{ domain | default('localdomain') }}
+  {% else %}
+  network:
+    version: 2
+    ethernets:
+      {{ network_interface | default('eth0') }}:
+        dhcp4: true
+  {% endif %}
+  
+  # ==========================================================================
+  # Stockage - Partitionnement automatique avec LVM
+  # ==========================================================================
+  storage:
+    layout:
+      name: lvm
+      sizing-policy: all
+  
+  # ==========================================================================
+  # Identité système
+  # ==========================================================================
+  identity:
+    hostname: {{ hostname | default('ubuntu-vm') }}
+    username: {{ username | default('admin') }}
+    password: {{ user_password_hash | default('$6$rounds=4096$xyz$hashed') }}
+  
+  # ==========================================================================
+  # Configuration SSH
+  # ==========================================================================
+  ssh:
+    install-server: true
+    allow-pw: {{ ssh_password_auth | default(true) | lower }}
+    {% if ssh_authorized_keys %}
+    authorized-keys:
+      {% for key in ssh_authorized_keys %}
+      - {{ key }}
+      {% endfor %}
+    {% endif %}
+  
+  # ==========================================================================
+  # Paquets à installer
+  # ==========================================================================
+  packages:
+    - openssh-server
+    - sudo
+    - curl
+    - wget
+    - vim
+    - htop
+    - net-tools
+    - python3
+    - python3-pip
+    - git
+    - qemu-guest-agent
+    - cloud-init
+    {% for pkg in extra_packages | default([]) %}
+    - {{ pkg }}
+    {% endfor %}
+  
+  # ==========================================================================
+  # Mises à jour
+  # ==========================================================================
+  updates: security
+  
+  # ==========================================================================
+  # Configuration utilisateur
+  # ==========================================================================
+  user-data:
+    timezone: {{ timezone | default('Europe/Paris') }}
+    
+    # Désactiver l'invite de redémarrage
+    package_reboot_if_required: false
+    
+    # Configuration NTP
+    ntp:
+      enabled: true
+      servers:
+        - {{ ntp_server | default('ntp.ubuntu.com') }}
+    
+    # Scripts de post-installation
+    runcmd:
+      # Activer et démarrer le guest agent
+      - systemctl enable qemu-guest-agent
+      - systemctl start qemu-guest-agent
+      
+      # Configurer sudo sans mot de passe pour l'utilisateur
+      - echo "{{ username | default('admin') }} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/{{ username | default('admin') }}
+      - chmod 440 /etc/sudoers.d/{{ username | default('admin') }}
+      
+      # Configuration SSH sécurisée
+      - sed -i 's/#PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+      - systemctl restart sshd
+      
+      {% for cmd in post_install_commands | default([]) %}
+      - {{ cmd }}
+      {% endfor %}
+      
+      # Signal de fin
+      - echo "Autoinstall completed at $(date)" >> /var/log/autoinstall-custom.log
+    
+    # Fichiers à créer
+    write_files:
+      - path: /etc/motd
+        content: |
+          ============================================
+          VM: {{ hostname | default('ubuntu-vm') }}
+          Deployed by VM-Automation
+          ============================================
+        permissions: '0644'
+      
+      {% for file in extra_files | default([]) %}
+      - path: {{ file.path }}
+        content: |
+          {{ file.content | indent(10) }}
+        permissions: '{{ file.permissions | default('0644') }}'
+      {% endfor %}
+  
+  # ==========================================================================
+  # Fin de l'installation
+  # ==========================================================================
+  late-commands:
+    # Copier les logs d'installation
+    - cp /var/log/installer/autoinstall-user-data /target/var/log/
+    - curtin in-target --target=/target -- systemctl enable qemu-guest-agent
+    {% for cmd in late_commands | default([]) %}
+    - {{ cmd }}
+    {% endfor %}

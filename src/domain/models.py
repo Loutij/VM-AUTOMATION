@@ -1,0 +1,408 @@
+# =============================================================================
+# VM Automation - SQLAlchemy Models
+# =============================================================================
+"""
+Modèles de base de données SQLAlchemy.
+Définit le schéma de la base de données pour l'application.
+"""
+
+import enum
+from datetime import datetime, timezone
+from typing import Any
+from uuid import uuid4
+
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from src.common.database import Base
+
+
+# =============================================================================
+# Enums
+# =============================================================================
+
+
+class HypervisorType(str, enum.Enum):
+    """Types d'hyperviseurs supportés."""
+
+    HYPERV = "hyperv"
+    VMWARE = "vmware"
+
+
+class OSFamily(str, enum.Enum):
+    """Familles d'OS supportées."""
+
+    WINDOWS = "windows"
+    LINUX = "linux"
+
+
+class Architecture(str, enum.Enum):
+    """Architectures processeur supportées."""
+
+    X64 = "x64"
+    X86 = "x86"
+    ARM64 = "arm64"
+
+
+class VMStatus(str, enum.Enum):
+    """États possibles d'une VM."""
+
+    CREATING = "creating"
+    CREATED = "created"
+    STARTING = "starting"
+    RUNNING = "running"
+    STOPPING = "stopping"
+    STOPPED = "stopped"
+    ERROR = "error"
+    DELETING = "deleting"
+    DELETED = "deleted"
+
+
+class DeploymentStatus(str, enum.Enum):
+    """États possibles d'un déploiement."""
+
+    PENDING = "pending"
+    VM_CREATING = "vm_creating"
+    OS_INSTALLING = "os_installing"
+    POST_CONFIGURING = "post_configuring"
+    SOFTWARE_INSTALLING = "software_installing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class LogLevel(str, enum.Enum):
+    """Niveaux de log."""
+
+    DEBUG = "debug"
+    INFO = "info"
+    WARNING = "warning"
+    ERROR = "error"
+
+
+class SoftwareInstallStatus(str, enum.Enum):
+    """États d'installation d'un logiciel."""
+
+    PENDING = "pending"
+    INSTALLING = "installing"
+    INSTALLED = "installed"
+    FAILED = "failed"
+
+
+# =============================================================================
+# Mixins
+# =============================================================================
+
+
+class TimestampMixin:
+    """Mixin pour ajouter les timestamps created_at et updated_at."""
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=True,
+    )
+
+
+# =============================================================================
+# Models
+# =============================================================================
+
+
+class Hypervisor(Base, TimestampMixin):
+    """Modèle pour un hyperviseur."""
+
+    __tablename__ = "hypervisors"
+
+    id: Mapped[UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    type: Mapped[HypervisorType] = mapped_column(
+        Enum(HypervisorType), nullable=False
+    )
+    host: Mapped[str] = mapped_column(String(255), nullable=False)
+    port: Mapped[int] = mapped_column(Integer, default=5986, nullable=False)
+    use_ssl: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    username: Mapped[str] = mapped_column(String(100), nullable=False)
+    password_encrypted: Mapped[str] = mapped_column(String(500), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # Relations
+    virtual_machines: Mapped[list["VirtualMachine"]] = relationship(
+        back_populates="hypervisor",
+        cascade="all, delete-orphan",
+    )
+
+    def __repr__(self) -> str:
+        return f"<Hypervisor(id={self.id}, name={self.name}, type={self.type})>"
+
+
+class OSTemplate(Base, TimestampMixin):
+    """Modèle pour un template d'OS."""
+
+    __tablename__ = "os_templates"
+
+    id: Mapped[UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    os_family: Mapped[OSFamily] = mapped_column(Enum(OSFamily), nullable=False)
+    os_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    architecture: Mapped[Architecture] = mapped_column(
+        Enum(Architecture), default=Architecture.X64, nullable=False
+    )
+    iso_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    unattend_template: Mapped[str | None] = mapped_column(Text, nullable=True)
+    min_cpu: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    min_ram_gb: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
+    min_disk_gb: Mapped[int] = mapped_column(Integer, default=20, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # Relations
+    virtual_machines: Mapped[list["VirtualMachine"]] = relationship(
+        back_populates="os_template",
+    )
+
+    def __repr__(self) -> str:
+        return f"<OSTemplate(id={self.id}, name={self.name}, os_family={self.os_family})>"
+
+
+class VirtualMachine(Base, TimestampMixin):
+    """Modèle pour une machine virtuelle."""
+
+    __tablename__ = "virtual_machines"
+
+    id: Mapped[UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    
+    # Foreign keys
+    hypervisor_id: Mapped[UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("hypervisors.id"),
+        nullable=False,
+    )
+    os_template_id: Mapped[UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("os_templates.id"),
+        nullable=True,
+    )
+    
+    # Specs
+    generation: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
+    cpu_count: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
+    ram_gb: Mapped[int] = mapped_column(Integer, default=4, nullable=False)
+    disk_gb: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
+    disk_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    
+    # Network
+    network_switch: Mapped[str] = mapped_column(String(100), nullable=False)
+    vlan_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    mac_address: Mapped[str | None] = mapped_column(String(17), nullable=True)
+    ip_config: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    
+    # Domain
+    domain_config: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    
+    # Status
+    status: Mapped[VMStatus] = mapped_column(
+        Enum(VMStatus), default=VMStatus.CREATING, nullable=False
+    )
+    hyperv_id: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, comment="GUID Hyper-V"
+    )
+    
+    # Relations
+    hypervisor: Mapped["Hypervisor"] = relationship(back_populates="virtual_machines")
+    os_template: Mapped["OSTemplate | None"] = relationship(
+        back_populates="virtual_machines"
+    )
+    deployments: Mapped[list["Deployment"]] = relationship(
+        back_populates="virtual_machine",
+        cascade="all, delete-orphan",
+    )
+    software_installations: Mapped[list["VMSoftware"]] = relationship(
+        back_populates="virtual_machine",
+        cascade="all, delete-orphan",
+    )
+
+    def __repr__(self) -> str:
+        return f"<VirtualMachine(id={self.id}, name={self.name}, status={self.status})>"
+
+
+class Deployment(Base, TimestampMixin):
+    """Modèle pour un déploiement de VM."""
+
+    __tablename__ = "deployments"
+
+    id: Mapped[UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    
+    # Foreign keys
+    vm_id: Mapped[UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("virtual_machines.id"),
+        nullable=False,
+    )
+    created_by: Mapped[UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+        comment="ID de l'utilisateur ayant créé le déploiement",
+    )
+    
+    # Status
+    status: Mapped[DeploymentStatus] = mapped_column(
+        Enum(DeploymentStatus), default=DeploymentStatus.PENDING, nullable=False
+    )
+    current_step: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    progress: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    
+    # Timestamps
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    
+    # Relations
+    virtual_machine: Mapped["VirtualMachine"] = relationship(
+        back_populates="deployments"
+    )
+    logs: Mapped[list["DeploymentLog"]] = relationship(
+        back_populates="deployment",
+        cascade="all, delete-orphan",
+        order_by="DeploymentLog.created_at",
+    )
+
+    def __repr__(self) -> str:
+        return f"<Deployment(id={self.id}, status={self.status}, progress={self.progress}%)>"
+
+
+class DeploymentLog(Base):
+    """Modèle pour les logs de déploiement."""
+
+    __tablename__ = "deployment_logs"
+
+    id: Mapped[UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    deployment_id: Mapped[UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("deployments.id"),
+        nullable=False,
+    )
+    level: Mapped[LogLevel] = mapped_column(
+        Enum(LogLevel), default=LogLevel.INFO, nullable=False
+    )
+    step: Mapped[str] = mapped_column(String(50), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    details: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    # Relations
+    deployment: Mapped["Deployment"] = relationship(back_populates="logs")
+
+    def __repr__(self) -> str:
+        return f"<DeploymentLog(id={self.id}, level={self.level}, step={self.step})>"
+
+
+class SoftwarePackage(Base, TimestampMixin):
+    """Modèle pour un package logiciel."""
+
+    __tablename__ = "software_packages"
+
+    id: Mapped[UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    version: Mapped[str] = mapped_column(String(50), default="latest", nullable=False)
+    os_family: Mapped[OSFamily | None] = mapped_column(
+        Enum(OSFamily), nullable=True, comment="NULL = compatible tous OS"
+    )
+    install_command_windows: Mapped[str | None] = mapped_column(Text, nullable=True)
+    install_command_linux: Mapped[str | None] = mapped_column(Text, nullable=True)
+    category: Mapped[str] = mapped_column(
+        String(50), default="other", nullable=False
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # Relations
+    vm_installations: Mapped[list["VMSoftware"]] = relationship(
+        back_populates="software_package",
+        cascade="all, delete-orphan",
+    )
+
+    def __repr__(self) -> str:
+        return f"<SoftwarePackage(id={self.id}, name={self.name}, version={self.version})>"
+
+
+class VMSoftware(Base):
+    """Table d'association VM <-> Software avec statut d'installation."""
+
+    __tablename__ = "vm_software"
+
+    vm_id: Mapped[UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("virtual_machines.id"),
+        primary_key=True,
+    )
+    software_id: Mapped[UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("software_packages.id"),
+        primary_key=True,
+    )
+    status: Mapped[SoftwareInstallStatus] = mapped_column(
+        Enum(SoftwareInstallStatus),
+        default=SoftwareInstallStatus.PENDING,
+        nullable=False,
+    )
+    installed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Relations
+    virtual_machine: Mapped["VirtualMachine"] = relationship(
+        back_populates="software_installations"
+    )
+    software_package: Mapped["SoftwarePackage"] = relationship(
+        back_populates="vm_installations"
+    )
+
+    def __repr__(self) -> str:
+        return f"<VMSoftware(vm_id={self.vm_id}, software_id={self.software_id}, status={self.status})>"
