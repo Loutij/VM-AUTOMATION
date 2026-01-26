@@ -2,6 +2,8 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MainLayout } from './components/layout';
 import { ToastProvider } from './components/ui';
+import { AuthProvider } from './contexts/AuthContext';
+import { ProtectedRoute } from './components/auth/ProtectedRoute';
 import {
   Dashboard,
   Hypervisors,
@@ -10,6 +12,7 @@ import {
   Deployments,
   Settings,
   Help,
+  Login,
 } from './pages';
 
 // Configuration React Query
@@ -26,21 +29,33 @@ const queryClient = new QueryClient({
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <ToastProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route element={<MainLayout />}>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/hypervisors" element={<Hypervisors />} />
-              <Route path="/vms" element={<VirtualMachines />} />
-              <Route path="/templates" element={<Templates />} />
-              <Route path="/deployments" element={<Deployments />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="/help" element={<Help />} />
-            </Route>
-          </Routes>
-        </BrowserRouter>
-      </ToastProvider>
+      <AuthProvider>
+        <ToastProvider>
+          <BrowserRouter>
+            <Routes>
+              {/* Route publique */}
+              <Route path="/login" element={<Login />} />
+              
+              {/* Routes protégées */}
+              <Route
+                element={
+                  <ProtectedRoute>
+                    <MainLayout />
+                  </ProtectedRoute>
+                }
+              >
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/hypervisors" element={<Hypervisors />} />
+                <Route path="/vms" element={<VirtualMachines />} />
+                <Route path="/templates" element={<Templates />} />
+                <Route path="/deployments" element={<Deployments />} />
+                <Route path="/settings" element={<Settings />} />
+                <Route path="/help" element={<Help />} />
+              </Route>
+            </Routes>
+          </BrowserRouter>
+        </ToastProvider>
+      </AuthProvider>
     </QueryClientProvider>
   );
 }
