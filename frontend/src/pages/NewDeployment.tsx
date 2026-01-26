@@ -15,11 +15,33 @@ import {
   ChevronRight,
   ChevronLeft,
   Check,
+  Settings,
+  Package,
+  Shield,
+  RefreshCw,
+  Building2,
 } from 'lucide-react';
 import { Header } from '../components/layout';
-import { Button, Input, Select, useToast } from '../components/ui';
+import { Button, Input, Select, Switch, useToast } from '../components/ui';
 import { hypervisorsApi, templatesApi, deploymentsApi } from '../services/api';
 import type { DeploymentConfig } from '../types';
+
+// Profils logiciels disponibles
+const SOFTWARE_PROFILES = [
+  { id: 'minimal', name: 'Minimal', description: '7zip, Notepad++', packages: ['7zip', 'notepadplusplus'] },
+  { id: 'tools', name: 'Outils système', description: '+ Sysinternals, Process Explorer', packages: ['7zip', 'notepadplusplus', 'sysinternals'] },
+  { id: 'development', name: 'Développement', description: 'Git, VS Code, Node.js, Python', packages: ['git', 'vscode', 'nodejs', 'python'] },
+  { id: 'webserver', name: 'Serveur Web', description: 'IIS, URL Rewrite', packages: ['iis-webserver', 'urlrewrite'] },
+  { id: 'database', name: 'Base de données', description: 'SQL Server Express, SSMS', packages: ['sql-server-express', 'ssms'] },
+  { id: 'monitoring', name: 'Monitoring', description: 'Zabbix Agent', packages: ['zabbix-agent'] },
+];
+
+// Services Windows
+const WINDOWS_SERVICES = [
+  { id: 'rdp', name: 'Bureau à distance (RDP)', description: 'Accès distant via RDP', default: true },
+  { id: 'winrm', name: 'WinRM', description: 'Gestion PowerShell à distance', default: true },
+  { id: 'ssh', name: 'OpenSSH Server', description: 'Accès SSH', default: false },
+];
 
 interface DeploymentFormData {
   // Étape 1: Sélection hyperviseur et template
@@ -31,17 +53,35 @@ interface DeploymentFormData {
   cpu_count: number;
   memory_mb: number;
   disk_size_gb: number;
+  // Étape 3: Réseau
   network_switch: string;
-  // Étape 3: Configuration système
-  admin_password: string;
-  admin_password_confirm: string;
-  // Configuration IP (optionnelle)
+  vlan_id: number | null;
   use_static_ip: boolean;
   ip_address: string;
   subnet_prefix: number;
   gateway: string;
   dns_primary: string;
   dns_secondary: string;
+  // Étape 4: Options avancées
+  admin_password: string;
+  admin_password_confirm: string;
+  // Services
+  enable_rdp: boolean;
+  enable_winrm: boolean;
+  enable_ssh: boolean;
+  // Mises à jour
+  enable_windows_update: boolean;
+  // Logiciels
+  software_profile: string;
+  custom_packages: string[];
+  // Domaine AD
+  join_domain: boolean;
+  domain_name: string;
+  domain_user: string;
+  domain_password: string;
+  domain_ou: string;
+  // Post-install
+  post_install_commands: string[];
 }
 
 const defaultFormData: DeploymentFormData = {
@@ -53,21 +93,35 @@ const defaultFormData: DeploymentFormData = {
   memory_mb: 4096,
   disk_size_gb: 60,
   network_switch: 'Default Switch',
-  admin_password: '',
-  admin_password_confirm: '',
+  vlan_id: null,
   use_static_ip: false,
   ip_address: '',
   subnet_prefix: 24,
   gateway: '',
   dns_primary: '8.8.8.8',
   dns_secondary: '8.8.4.4',
+  admin_password: '',
+  admin_password_confirm: '',
+  enable_rdp: true,
+  enable_winrm: true,
+  enable_ssh: false,
+  enable_windows_update: true,
+  software_profile: '',
+  custom_packages: [],
+  join_domain: false,
+  domain_name: '',
+  domain_user: '',
+  domain_password: '',
+  domain_ou: '',
+  post_install_commands: [],
 };
 
 const steps = [
   { id: 1, name: 'Infrastructure', icon: Server },
   { id: 2, name: 'Ressources', icon: Cpu },
-  { id: 3, name: 'Système', icon: Key },
-  { id: 4, name: 'Résumé', icon: Check },
+  { id: 3, name: 'Réseau', icon: Network },
+  { id: 4, name: 'Options', icon: Settings },
+  { id: 5, name: 'Résumé', icon: Check },
 ];
 
 export function NewDeployment() {
@@ -116,6 +170,7 @@ export function NewDeployment() {
   // Hyperviseur et template sélectionnés
   const selectedHypervisor = hypervisors.find((h) => h.id === formData.hypervisor_id);
   const selectedTemplate = templates.find((t) => t.id === formData.template_id);
+  const selectedProfile = SOFTWARE_PROFILES.find((p) => p.id === formData.software_profile);
 
   // Validation par étape
   const validateStep = (step: number): boolean => {
@@ -130,8 +185,11 @@ export function NewDeployment() {
           formData.disk_size_gb >= 20
         );
       case 3:
-        if (formData.admin_password !== formData.admin_password_confirm) return false;
         if (formData.use_static_ip && !formData.ip_address) return false;
+        return true;
+      case 4:
+        if (formData.admin_password !== formData.admin_password_confirm) return false;
+        if (formData.join_domain && (!formData.domain_name || !formData.domain_user)) return false;
         return true;
       default:
         return true;
@@ -141,7 +199,7 @@ export function NewDeployment() {
   const canProceed = validateStep(currentStep);
 
   const handleNext = () => {
-    if (canProceed && currentStep < 4) {
+    if (canProceed && currentStep < 5) {
       setCurrentStep(currentStep + 1);
     }
   };
@@ -154,7 +212,7 @@ export function NewDeployment() {
 
   const handleSubmit = () => {
     // Valider toutes les étapes
-    for (let i = 1; i <= 3; i++) {
+    for (let i = 1; i <= 4; i++) {
       if (!validateStep(i)) {
         setCurrentStep(i);
         addToast({
@@ -166,19 +224,73 @@ export function NewDeployment() {
       }
     }
 
+    // Construire la config complète
+    const config: DeploymentConfig & Record<string, unknown> = {
+      vm_name: formData.vm_name,
+      cpu_count: formData.cpu_count,
+      memory_mb: formData.memory_mb,
+      disk_size_gb: formData.disk_size_gb,
+      hostname: formData.hostname || formData.vm_name,
+      admin_password: formData.admin_password || undefined,
+      network_switch: formData.network_switch || undefined,
+    };
+
+    // Ajouter VLAN si défini
+    if (formData.vlan_id) {
+      config.vlan_id = formData.vlan_id;
+    }
+
+    // Configuration IP
+    if (formData.use_static_ip) {
+      config.ip_config = {
+        static_ip: true,
+        ip_address: formData.ip_address,
+        subnet_prefix: formData.subnet_prefix,
+        gateway: formData.gateway,
+        dns_server_1: formData.dns_primary,
+        dns_server_2: formData.dns_secondary,
+      };
+    }
+
+    // Services
+    config.services = {
+      enable_rdp: formData.enable_rdp,
+      enable_winrm: formData.enable_winrm,
+      enable_ssh: formData.enable_ssh,
+    };
+
+    // Windows Update
+    config.enable_windows_update = formData.enable_windows_update;
+
+    // Logiciels
+    if (formData.software_profile) {
+      config.software_profile = formData.software_profile;
+      const profile = SOFTWARE_PROFILES.find((p) => p.id === formData.software_profile);
+      if (profile) {
+        config.packages = profile.packages;
+      }
+    }
+
+    // Domaine AD
+    if (formData.join_domain) {
+      config.domain_join = {
+        domain: formData.domain_name,
+        user: formData.domain_user,
+        password: formData.domain_password,
+        ou: formData.domain_ou || undefined,
+      };
+    }
+
+    // Commandes post-install
+    if (formData.post_install_commands.length > 0) {
+      config.post_install_commands = formData.post_install_commands;
+    }
+
     createMutation.mutate({
       name: formData.vm_name,
       hypervisor_id: formData.hypervisor_id,
       template_id: formData.template_id,
-      config: {
-        vm_name: formData.vm_name,
-        cpu_count: formData.cpu_count,
-        memory_mb: formData.memory_mb,
-        disk_size_gb: formData.disk_size_gb,
-        hostname: formData.hostname || formData.vm_name,
-        admin_password: formData.admin_password || undefined,
-        network_switch: formData.network_switch || undefined,
-      },
+      config: config as DeploymentConfig,
     });
   };
 
@@ -215,11 +327,11 @@ export function NewDeployment() {
 
         {/* Progress steps */}
         <div className="card p-6 mb-6">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between overflow-x-auto">
             {steps.map((step, index) => (
-              <div key={step.id} className="flex items-center">
+              <div key={step.id} className="flex items-center flex-shrink-0">
                 <div
-                  className={`flex items-center gap-3 cursor-pointer ${
+                  className={`flex items-center gap-2 cursor-pointer ${
                     currentStep === step.id
                       ? 'text-primary-500'
                       : currentStep > step.id
@@ -243,10 +355,10 @@ export function NewDeployment() {
                       <step.icon size={20} />
                     )}
                   </div>
-                  <span className="font-medium hidden sm:inline">{step.name}</span>
+                  <span className="font-medium hidden md:inline">{step.name}</span>
                 </div>
                 {index < steps.length - 1 && (
-                  <ChevronRight size={20} className="mx-4 text-dark-600" />
+                  <ChevronRight size={20} className="mx-2 md:mx-4 text-dark-600" />
                 )}
               </div>
             ))}
@@ -267,7 +379,7 @@ export function NewDeployment() {
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Sélection hyperviseur */}
                 <div>
                   <label className="block text-sm font-medium text-dark-200 mb-2">
@@ -505,82 +617,62 @@ export function NewDeployment() {
                   />
                 </div>
               </div>
-
-              <Input
-                label="Switch réseau"
-                value={formData.network_switch}
-                onChange={(e) => setFormData({ ...formData, network_switch: e.target.value })}
-                placeholder="Default Switch"
-                leftIcon={<Network size={18} />}
-                helperText="Nom du switch virtuel Hyper-V"
-              />
             </div>
           )}
 
-          {/* Étape 3: Configuration système */}
+          {/* Étape 3: Réseau */}
           {currentStep === 3 && (
             <div className="space-y-6">
               <div>
                 <h2 className="text-xl font-semibold text-white mb-2">
-                  Configuration système
+                  Configuration réseau
                 </h2>
                 <p className="text-dark-400">
-                  Configurez le mot de passe administrateur et les paramètres réseau.
+                  Configurez le switch virtuel, VLAN et les paramètres IP.
                 </p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <Input
-                  label="Mot de passe administrateur"
-                  type="password"
-                  value={formData.admin_password}
-                  onChange={(e) =>
-                    setFormData({ ...formData, admin_password: e.target.value })
-                  }
-                  placeholder="••••••••"
-                  leftIcon={<Key size={18} />}
+                  label="Switch réseau"
+                  value={formData.network_switch}
+                  onChange={(e) => setFormData({ ...formData, network_switch: e.target.value })}
+                  placeholder="Default Switch"
+                  leftIcon={<Network size={18} />}
+                  helperText="Nom du switch virtuel Hyper-V"
                 />
                 <Input
-                  label="Confirmer le mot de passe"
-                  type="password"
-                  value={formData.admin_password_confirm}
+                  label="VLAN ID (optionnel)"
+                  type="number"
+                  min="1"
+                  max="4094"
+                  value={formData.vlan_id?.toString() || ''}
                   onChange={(e) =>
-                    setFormData({ ...formData, admin_password_confirm: e.target.value })
+                    setFormData({
+                      ...formData,
+                      vlan_id: e.target.value ? parseInt(e.target.value) : null,
+                    })
                   }
-                  placeholder="••••••••"
-                  leftIcon={<Key size={18} />}
-                  error={
-                    formData.admin_password_confirm &&
-                    formData.admin_password !== formData.admin_password_confirm
-                      ? 'Les mots de passe ne correspondent pas'
-                      : undefined
-                  }
+                  placeholder="Ex: 100"
+                  helperText="Laissez vide pour pas de VLAN"
                 />
               </div>
 
               {/* Configuration IP statique */}
               <div className="border border-dark-600 rounded-lg p-4">
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formData.use_static_ip}
-                    onChange={(e) =>
-                      setFormData({ ...formData, use_static_ip: e.target.checked })
-                    }
-                    className="w-4 h-4 rounded border-dark-500 bg-dark-700 text-primary-500 focus:ring-primary-500"
-                  />
+                <div className="flex items-center justify-between mb-4">
                   <div>
-                    <span className="font-medium text-white">
-                      Utiliser une IP statique
-                    </span>
-                    <p className="text-sm text-dark-400">
-                      Par défaut, DHCP sera utilisé
-                    </p>
+                    <span className="font-medium text-white">Configuration IP statique</span>
+                    <p className="text-sm text-dark-400">Par défaut, DHCP sera utilisé</p>
                   </div>
-                </label>
+                  <Switch
+                    checked={formData.use_static_ip}
+                    onChange={(checked) => setFormData({ ...formData, use_static_ip: checked })}
+                  />
+                </div>
 
                 {formData.use_static_ip && (
-                  <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-dark-600">
                     <Input
                       label="Adresse IP"
                       value={formData.ip_address}
@@ -620,14 +712,235 @@ export function NewDeployment() {
                       }
                       placeholder="8.8.8.8"
                     />
+                    <Input
+                      label="DNS secondaire"
+                      value={formData.dns_secondary}
+                      onChange={(e) =>
+                        setFormData({ ...formData, dns_secondary: e.target.value })
+                      }
+                      placeholder="8.8.4.4"
+                    />
                   </div>
                 )}
               </div>
             </div>
           )}
 
-          {/* Étape 4: Résumé */}
+          {/* Étape 4: Options avancées */}
           {currentStep === 4 && (
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-xl font-semibold text-white mb-2">
+                  Options avancées
+                </h2>
+                <p className="text-dark-400">
+                  Configurez les services, logiciels et options de déploiement.
+                </p>
+              </div>
+
+              {/* Mot de passe administrateur */}
+              <div className="border border-dark-600 rounded-lg p-4">
+                <h3 className="text-sm font-medium text-dark-200 mb-4 flex items-center gap-2">
+                  <Key size={16} />
+                  Compte administrateur
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Input
+                    label="Mot de passe administrateur"
+                    type="password"
+                    value={formData.admin_password}
+                    onChange={(e) =>
+                      setFormData({ ...formData, admin_password: e.target.value })
+                    }
+                    placeholder="••••••••"
+                  />
+                  <Input
+                    label="Confirmer le mot de passe"
+                    type="password"
+                    value={formData.admin_password_confirm}
+                    onChange={(e) =>
+                      setFormData({ ...formData, admin_password_confirm: e.target.value })
+                    }
+                    placeholder="••••••••"
+                    error={
+                      formData.admin_password_confirm &&
+                      formData.admin_password !== formData.admin_password_confirm
+                        ? 'Les mots de passe ne correspondent pas'
+                        : undefined
+                    }
+                  />
+                </div>
+              </div>
+
+              {/* Services */}
+              <div className="border border-dark-600 rounded-lg p-4">
+                <h3 className="text-sm font-medium text-dark-200 mb-4 flex items-center gap-2">
+                  <Shield size={16} />
+                  Services à activer
+                </h3>
+                <div className="space-y-3">
+                  {WINDOWS_SERVICES.map((service) => (
+                    <div key={service.id} className="flex items-center justify-between">
+                      <div>
+                        <span className="font-medium text-white">{service.name}</span>
+                        <p className="text-sm text-dark-400">{service.description}</p>
+                      </div>
+                      <Switch
+                        checked={
+                          service.id === 'rdp'
+                            ? formData.enable_rdp
+                            : service.id === 'winrm'
+                            ? formData.enable_winrm
+                            : formData.enable_ssh
+                        }
+                        onChange={(checked) => {
+                          if (service.id === 'rdp') {
+                            setFormData({ ...formData, enable_rdp: checked });
+                          } else if (service.id === 'winrm') {
+                            setFormData({ ...formData, enable_winrm: checked });
+                          } else {
+                            setFormData({ ...formData, enable_ssh: checked });
+                          }
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Windows Update */}
+              <div className="border border-dark-600 rounded-lg p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <RefreshCw size={18} className="text-dark-400" />
+                    <div>
+                      <span className="font-medium text-white">Windows Update</span>
+                      <p className="text-sm text-dark-400">
+                        Installer les mises à jour après l'installation
+                      </p>
+                    </div>
+                  </div>
+                  <Switch
+                    checked={formData.enable_windows_update}
+                    onChange={(checked) =>
+                      setFormData({ ...formData, enable_windows_update: checked })
+                    }
+                  />
+                </div>
+              </div>
+
+              {/* Profil logiciels */}
+              <div className="border border-dark-600 rounded-lg p-4">
+                <h3 className="text-sm font-medium text-dark-200 mb-4 flex items-center gap-2">
+                  <Package size={16} />
+                  Profil logiciels (optionnel)
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {SOFTWARE_PROFILES.map((profile) => (
+                    <label
+                      key={profile.id}
+                      className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                        formData.software_profile === profile.id
+                          ? 'border-primary-500 bg-primary-500/10'
+                          : 'border-dark-600 hover:border-dark-500'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="software_profile"
+                        value={profile.id}
+                        checked={formData.software_profile === profile.id}
+                        onChange={(e) =>
+                          setFormData({ ...formData, software_profile: e.target.value })
+                        }
+                        className="sr-only"
+                      />
+                      <p className="font-medium text-white">{profile.name}</p>
+                      <p className="text-xs text-dark-400 mt-1">{profile.description}</p>
+                    </label>
+                  ))}
+                  <label
+                    className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                      formData.software_profile === ''
+                        ? 'border-primary-500 bg-primary-500/10'
+                        : 'border-dark-600 hover:border-dark-500'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="software_profile"
+                      value=""
+                      checked={formData.software_profile === ''}
+                      onChange={() => setFormData({ ...formData, software_profile: '' })}
+                      className="sr-only"
+                    />
+                    <p className="font-medium text-white">Aucun</p>
+                    <p className="text-xs text-dark-400 mt-1">Pas de logiciels supplémentaires</p>
+                  </label>
+                </div>
+              </div>
+
+              {/* Jonction domaine AD */}
+              <div className="border border-dark-600 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <Building2 size={18} className="text-dark-400" />
+                    <div>
+                      <span className="font-medium text-white">Joindre un domaine Active Directory</span>
+                      <p className="text-sm text-dark-400">Intégrer la VM au domaine AD</p>
+                    </div>
+                  </div>
+                  <Switch
+                    checked={formData.join_domain}
+                    onChange={(checked) => setFormData({ ...formData, join_domain: checked })}
+                  />
+                </div>
+
+                {formData.join_domain && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-dark-600">
+                    <Input
+                      label="Nom du domaine"
+                      value={formData.domain_name}
+                      onChange={(e) =>
+                        setFormData({ ...formData, domain_name: e.target.value })
+                      }
+                      placeholder="exemple.local"
+                      required
+                    />
+                    <Input
+                      label="Utilisateur (domaine\\user)"
+                      value={formData.domain_user}
+                      onChange={(e) =>
+                        setFormData({ ...formData, domain_user: e.target.value })
+                      }
+                      placeholder="DOMAINE\\admin"
+                      required
+                    />
+                    <Input
+                      label="Mot de passe domaine"
+                      type="password"
+                      value={formData.domain_password}
+                      onChange={(e) =>
+                        setFormData({ ...formData, domain_password: e.target.value })
+                      }
+                      placeholder="••••••••"
+                    />
+                    <Input
+                      label="OU cible (optionnel)"
+                      value={formData.domain_ou}
+                      onChange={(e) =>
+                        setFormData({ ...formData, domain_ou: e.target.value })
+                      }
+                      placeholder="OU=Servers,DC=exemple,DC=local"
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Étape 5: Résumé */}
+          {currentStep === 5 && (
             <div className="space-y-6">
               <div>
                 <h2 className="text-xl font-semibold text-white mb-2">
@@ -638,13 +951,14 @@ export function NewDeployment() {
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {/* Infrastructure */}
                 <div className="bg-dark-700/50 rounded-lg p-4">
-                  <h3 className="text-sm font-medium text-dark-400 mb-3">
+                  <h3 className="text-sm font-medium text-dark-400 mb-3 flex items-center gap-2">
+                    <Server size={14} />
                     Infrastructure
                   </h3>
-                  <div className="space-y-2">
+                  <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
                       <span className="text-dark-300">Hyperviseur</span>
                       <span className="text-white font-medium">
@@ -657,56 +971,24 @@ export function NewDeployment() {
                         {selectedTemplate?.name || '-'}
                       </span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-dark-300">Système</span>
-                      <span className="text-white font-medium">
-                        {selectedTemplate?.os_version || '-'}
-                      </span>
-                    </div>
                   </div>
                 </div>
 
                 {/* Configuration VM */}
                 <div className="bg-dark-700/50 rounded-lg p-4">
-                  <h3 className="text-sm font-medium text-dark-400 mb-3">
+                  <h3 className="text-sm font-medium text-dark-400 mb-3 flex items-center gap-2">
+                    <Cpu size={14} />
                     Machine virtuelle
                   </h3>
-                  <div className="space-y-2">
+                  <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
                       <span className="text-dark-300">Nom</span>
-                      <span className="text-white font-medium">
-                        {formData.vm_name || '-'}
-                      </span>
+                      <span className="text-white font-medium">{formData.vm_name || '-'}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-dark-300">Hostname</span>
+                      <span className="text-dark-300">CPU / RAM / Disque</span>
                       <span className="text-white font-medium">
-                        {formData.hostname || formData.vm_name || '-'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Ressources */}
-                <div className="bg-dark-700/50 rounded-lg p-4">
-                  <h3 className="text-sm font-medium text-dark-400 mb-3">Ressources</h3>
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <span className="text-dark-300">CPU</span>
-                      <span className="text-white font-medium">
-                        {formData.cpu_count} vCPU
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-dark-300">RAM</span>
-                      <span className="text-white font-medium">
-                        {formatMemory(formData.memory_mb)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-dark-300">Disque</span>
-                      <span className="text-white font-medium">
-                        {formData.disk_size_gb} GB
+                        {formData.cpu_count} vCPU / {formatMemory(formData.memory_mb)} / {formData.disk_size_gb} GB
                       </span>
                     </div>
                   </div>
@@ -714,20 +996,84 @@ export function NewDeployment() {
 
                 {/* Réseau */}
                 <div className="bg-dark-700/50 rounded-lg p-4">
-                  <h3 className="text-sm font-medium text-dark-400 mb-3">Réseau</h3>
-                  <div className="space-y-2">
+                  <h3 className="text-sm font-medium text-dark-400 mb-3 flex items-center gap-2">
+                    <Network size={14} />
+                    Réseau
+                  </h3>
+                  <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
                       <span className="text-dark-300">Switch</span>
                       <span className="text-white font-medium">
-                        {formData.network_switch || 'Default Switch'}
+                        {formData.network_switch}
+                        {formData.vlan_id && ` (VLAN ${formData.vlan_id})`}
                       </span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-dark-300">Configuration IP</span>
+                      <span className="text-dark-300">IP</span>
                       <span className="text-white font-medium">
                         {formData.use_static_ip ? formData.ip_address : 'DHCP'}
                       </span>
                     </div>
+                  </div>
+                </div>
+
+                {/* Services */}
+                <div className="bg-dark-700/50 rounded-lg p-4">
+                  <h3 className="text-sm font-medium text-dark-400 mb-3 flex items-center gap-2">
+                    <Shield size={14} />
+                    Services
+                  </h3>
+                  <div className="flex flex-wrap gap-2">
+                    {formData.enable_rdp && (
+                      <span className="px-2 py-1 bg-blue-500/20 text-blue-400 text-xs rounded">RDP</span>
+                    )}
+                    {formData.enable_winrm && (
+                      <span className="px-2 py-1 bg-purple-500/20 text-purple-400 text-xs rounded">WinRM</span>
+                    )}
+                    {formData.enable_ssh && (
+                      <span className="px-2 py-1 bg-green-500/20 text-green-400 text-xs rounded">SSH</span>
+                    )}
+                    {formData.enable_windows_update && (
+                      <span className="px-2 py-1 bg-yellow-500/20 text-yellow-400 text-xs rounded">Windows Update</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Logiciels */}
+                <div className="bg-dark-700/50 rounded-lg p-4">
+                  <h3 className="text-sm font-medium text-dark-400 mb-3 flex items-center gap-2">
+                    <Package size={14} />
+                    Logiciels
+                  </h3>
+                  <div className="text-sm">
+                    {selectedProfile ? (
+                      <div>
+                        <span className="text-white font-medium">{selectedProfile.name}</span>
+                        <p className="text-xs text-dark-400 mt-1">{selectedProfile.description}</p>
+                      </div>
+                    ) : (
+                      <span className="text-dark-400">Aucun profil sélectionné</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Domaine */}
+                <div className="bg-dark-700/50 rounded-lg p-4">
+                  <h3 className="text-sm font-medium text-dark-400 mb-3 flex items-center gap-2">
+                    <Building2 size={14} />
+                    Domaine AD
+                  </h3>
+                  <div className="text-sm">
+                    {formData.join_domain ? (
+                      <div className="space-y-1">
+                        <span className="text-white font-medium">{formData.domain_name}</span>
+                        {formData.domain_ou && (
+                          <p className="text-xs text-dark-400">OU: {formData.domain_ou}</p>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-dark-400">Pas de jonction au domaine</span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -745,7 +1091,7 @@ export function NewDeployment() {
               Précédent
             </Button>
 
-            {currentStep < 4 ? (
+            {currentStep < 5 ? (
               <Button
                 rightIcon={<ChevronRight size={18} />}
                 onClick={handleNext}
