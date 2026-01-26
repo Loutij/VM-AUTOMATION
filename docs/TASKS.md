@@ -411,16 +411,16 @@
 
 | Phase | Total | À Faire | En Cours | Terminé | % Complet |
 |-------|-------|---------|----------|---------|-----------|
-| Phase 1 | 31 | 0 | 0 | 31 | **100%** |
-| Phase 2 | 27 | 8 | 0 | 19 | **70%** |
-| Phase 3 | 26 | 4 | 0 | 22 | **85%** |
-| Phase 4 | 23 | 3 | 0 | 20 | **87%** |
-| Phase 5 | 20 | 7 | 0 | 13 | **65%** |
-| Phase 6 | 8 | 2 | 0 | 6 | **75%** |
-| Phase 7 | 36 | 17 | 0 | 19 | **53%** |
-| Phase 8 | 13 | 12 | 0 | 1 | **8%** |
-| Phase 9 | 4 | 4 | 0 | 0 | 0% |
-| **TOTAL** | **188** | **57** | **0** | **131** | **~70%** |
+| Phase 1 : Fondations | 31 | 0 | 0 | 31 | **100%** |
+| Phase 2 : Création VMs | 28 | 8 | 0 | 20 | **71%** |
+| Phase 3 : Installation OS | 26 | 4 | 0 | 22 | **85%** |
+| Phase 4 : Post-Installation | 23 | 3 | 0 | 20 | **87%** |
+| Phase 5 : Logiciels | 20 | 7 | 0 | 13 | **65%** |
+| Phase 6 : Orchestration | 8 | 2 | 0 | 6 | **75%** |
+| Phase 7 : Interface Web | 36 | 17 | 0 | 19 | **53%** |
+| Phase 8 : Industrialisation | 13 | 12 | 0 | 1 | **8%** |
+| Phase 9 : VMware (futur) | 4 | 4 | 0 | 0 | **0%** |
+| **TOTAL** | **189** | **57** | **0** | **132** | **~70%** |
 
 ---
 
@@ -507,4 +507,4 @@ frontend/
 
 ---
 
-*Dernière mise à jour : 2026-01-26*
+*Dernière mise à jour : 2026-01-26 17:45*

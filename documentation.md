@@ -52,10 +52,19 @@ Outil interne d'automatisation complète du déploiement de machines virtuelles.
 ### Module 5 : Installation Logiciels
 | Fonctionnalité | Statut | Description |
 |----------------|--------|-------------|
-| Catalogue logiciels | À FAIRE | Base de données apps |
-| Installation Windows | À FAIRE | Chocolatey |
-| Installation Linux | À FAIRE | apt/yum |
-| Profils prédéfinis | À FAIRE | Templates par rôle |
+| Chocolatey | TERMINÉ | ensure_chocolatey_installed() |
+| Installation Windows | TERMINÉ | install_package_chocolatey(), install_packages() |
+| Désinstallation | TERMINÉ | uninstall_package() |
+| Mise à jour | TERMINÉ | upgrade_all_packages() |
+| Liste packages | TERMINÉ | list_installed_packages() |
+| Profil minimal | TERMINÉ | 7zip, notepadplusplus |
+| Profil tools | TERMINÉ | + sysinternals |
+| Profil development | TERMINÉ | git, vscode, nodejs, python |
+| Profil webserver | TERMINÉ | iis-webserver, urlrewrite |
+| Profil monitoring | TERMINÉ | zabbix-agent |
+| Profil database | TERMINÉ | sql-server-express, ssms |
+| Installation Linux apt | À FAIRE | Debian/Ubuntu |
+| Installation Linux yum | À FAIRE | RHEL/Rocky |
 
 ### Module 6 : Interface Web (Frontend React)
 | Fonctionnalité | Statut | Description |
@@ -87,7 +96,9 @@ Outil interne d'automatisation complète du déploiement de machines virtuelles.
 | Migration Alembic | TERMINÉ | 001_initial_schema.py (8 tables) |
 | CI/CD Pipeline | TERMINÉ | GitHub Actions (lint, test, build) |
 | Pre-commit hooks | TERMINÉ | Black, isort, ruff, mypy, bandit |
-| WebSocket | À FAIRE | Événements temps réel |
+| WebSocket Backend | TERMINÉ | WebSocketManager + rooms + subscriptions |
+| SSE Endpoint | TERMINÉ | /api/v1/realtime/sse avec heartbeat |
+| Notifications push | TERMINÉ | emit_deployment_event(), emit_vm_event() |
 
 ---
 
@@ -266,48 +277,37 @@ docker-compose -f docker-compose.prod.yml up -d
 
 ## Changelog
 
-### v0.4.0 (En cours)
-- **Phase 7 - Interface Web** : 31% complète
-  - React Router activé avec 7 routes
-  - Page Hyperviseurs CRUD complète
-  - 7 composants UI avancés (Button, Modal, Toast, DataTable, Input, Select, EmptyState)
-  - Prochaines étapes: pages VMs, Templates, Déploiements
+### v0.5.0 (2026-01-26) - En cours
+- **Avancement global** : ~70% (132/189 tâches)
+- **Récupération infos réseau complètes** :
+  - get_vm_network_info() - IP, MAC, gateway, DNS, hostname
+  - get_vm_network_summary() - résumé simplifié
+  - execute_in_vm() avec encodage Base64 pour scripts longs
+
+### v0.4.0 (2026-01-26)
+- **Phase 7 - Interface Web** : 53% complète
+  - Dashboard avec stats temps réel
+  - Page Hyperviseurs CRUD complète + test connexion
+  - Page VMs avec actions (start/stop/restart/delete)
+  - Page Templates avec grille, filtres OS, duplication
+  - Page Déploiements avec timeline, logs, cancel/retry
+  - 10+ composants UI réutilisables
+
+- **Phase 5 - Installation Logiciels** : 65% complète
+  - Chocolatey intégré (ensure, install, uninstall, upgrade)
+  - 6 profils logiciels Windows (minimal, tools, dev, web, monitoring, db)
+  - SoftwareInstallService complet
+
+- **Phase 6 - Orchestration** : 75% complète
+  - WebSocket Server avec rooms et subscriptions
+  - SSE endpoint avec heartbeat
+  - Notifications push temps réel
 
 ### v0.3.0 (2026-01-26)
-- **Backend** : Services et sécurité
-  - Module JWT auth (src/common/auth.py)
-  - PostInstallService pour Windows (updates, services, firewall, password policies)
-  - Migration Alembic initiale (8 tables)
-  - CI/CD GitHub Actions complet
-  - Pre-commit hooks configurés
-
-### v0.2.0 (2026-01-26)
-- **Phase 1 - Fondations** : 84% complète
-  - Structure projet complète (26 fichiers Python)
-  - Configuration centralisée (Pydantic Settings)
-  - Base de données PostgreSQL (SQLAlchemy async)
-  - API FastAPI avec CORS, exception handlers
-  - 5 routers : health, hypervisors, vms, templates, deployments
-  - 7 modèles SQLAlchemy
-  - Client Hyper-V complet (PowerShell/WinRM)
-
-- **Frontend Skeleton** : Structure complète
-  - Vite 7.2 + React 19.2 + TypeScript 5.9
-  - TailwindCSS 4.1 avec thème dark personnalisé
-  - React Router 7.13 + React Query 5.90
-  - Service API Axios avec retry backoff
-  - Dashboard fonctionnel avec stats et déploiements récents
-  - Composants UI: StatCard, StatusBadge
-  - Layout: Sidebar collapsible + Header avec recherche
-  - 7 pages créées (1 fonctionnelle, 6 placeholders)
-
-- **Phase 3 - Templates OS & Monitoring** : 81% complète
-  - Moteur de templates Jinja2
-  - Templates: Windows Server 2022, Ubuntu 24.04, Debian 12, Cloud-init
-  - Injection dynamique: hostname, réseau, password, locale, timezone
-  - Monitoring VM: heartbeat, health, Integration Services
-  - PowerShell Direct: exécution commandes dans VM
-  - VM WinSrv2022-Test validée avec installation 100% automatique
+- **Phase 1 - Fondations** : 100% complète
+- **Phase 2 - Création VMs** : 71% complète
+- **Phase 3 - Installation OS** : 85% complète
+- **Phase 4 - Post-Installation** : 87% complète
 
 ### v0.1.0 (2026-01-26)
 - Initialisation du projet
@@ -318,30 +318,35 @@ docker-compose -f docker-compose.prod.yml up -d
 
 ## Roadmap Frontend
 
-### Priorité Haute (Sprint actuel)
-| Tâche | Description | Effort |
+### Terminé ✅
+| Tâche | Description | Statut |
 |-------|-------------|--------|
-| ~~Activer React Router~~ | ~~Connecter App.tsx aux pages existantes~~ | ✅ |
-| ~~Page Hyperviseurs~~ | ~~CRUD complet avec test de connexion~~ | ✅ |
-| ~~Composant DataTable~~ | ~~Table générique avec tri/filtre/pagination~~ | ✅ |
-| Page VMs | Liste avec actions (start/stop/restart) | 4h |
-| Page Templates | CRUD templates OS | 4h |
+| React Router | 7 routes configurées | ✅ |
+| Page Dashboard | Stats, déploiements récents | ✅ |
+| Page Hyperviseurs | CRUD complet + test connexion | ✅ |
+| Page VMs | Liste, filtres, actions | ✅ |
+| Page Templates | CRUD, grille, filtres, duplicate | ✅ |
+| Page Déploiements | Timeline, logs, cancel/retry | ✅ |
+| DataTable | Tri, search, pagination, actions | ✅ |
+| Modal/Dialog | Modal + ConfirmModal | ✅ |
+| Toast | ToastProvider + useToast | ✅ |
+| Form components | Input, Textarea, Select | ✅ |
 
-### Priorité Moyenne (Prochain sprint)
-| Tâche | Description | Effort |
-|-------|-------------|--------|
-| Wizard Création VM | Formulaire multi-étapes avec validation | 8h |
-| Page Déploiements | Suivi avec progression temps réel | 4h |
-| ~~Modals/Dialogs~~ | ~~Confirmations et formulaires modaux~~ | ✅ |
-| ~~Notifications Toast~~ | ~~Feedback utilisateur après actions~~ | ✅ |
+### En cours 🔄
+| Tâche | Description | Priorité |
+|-------|-------------|----------|
+| Wizard Création VM | Multi-étapes avec validation | Haute |
+| Page Paramètres | Configuration connexions | Moyenne |
+| Page Aide | Documentation intégrée | Basse |
 
-### Priorité Basse (Backlog)
-| Tâche | Description | Effort |
-|-------|-------------|--------|
-| WebSocket | Temps réel pour déploiements | 6h |
-| Page Templates Editor | Éditeur YAML/XML intégré (Monaco) | 6h |
-| Tests Frontend | Vitest + Testing Library | 8h |
-| Dark/Light mode | Toggle thème utilisateur | 2h |
+### À faire ⬜
+| Tâche | Description | Priorité |
+|-------|-------------|----------|
+| Hook useWebSocket | Connexion persistante | Haute |
+| Logs streaming | Console déploiement live | Moyenne |
+| Skeleton loaders | États de chargement | Basse |
+| Dark/Light toggle | Préférence utilisateur | Basse |
+| Tests Frontend | Vitest + Testing Library | Basse |
 
 ---
 
