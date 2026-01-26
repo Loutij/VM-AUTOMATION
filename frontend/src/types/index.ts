@@ -141,3 +141,57 @@ export interface HealthCheck {
     connected: boolean;
   }[];
 }
+
+// Types pour les paramètres de l'application
+export interface AppSettings {
+  // Paramètres généraux
+  language: 'fr' | 'en';
+  theme: 'dark' | 'light' | 'system';
+  
+  // Notifications
+  notifications: {
+    enabled: boolean;
+    deploymentComplete: boolean;
+    deploymentFailed: boolean;
+    vmStateChange: boolean;
+    sound: boolean;
+  };
+  
+  // Valeurs par défaut pour les déploiements
+  defaultDeployment: {
+    cpu_count: number;
+    memory_mb: number;
+    disk_size_gb: number;
+    network_switch: string;
+  };
+  
+  // Paramètres d'affichage
+  display: {
+    itemsPerPage: number;
+    autoRefresh: boolean;
+    refreshInterval: number; // secondes
+  };
+}
+
+export const DEFAULT_SETTINGS: AppSettings = {
+  language: 'fr',
+  theme: 'dark',
+  notifications: {
+    enabled: true,
+    deploymentComplete: true,
+    deploymentFailed: true,
+    vmStateChange: false,
+    sound: false,
+  },
+  defaultDeployment: {
+    cpu_count: 2,
+    memory_mb: 4096,
+    disk_size_gb: 60,
+    network_switch: 'Default Switch',
+  },
+  display: {
+    itemsPerPage: 10,
+    autoRefresh: true,
+    refreshInterval: 30,
+  },
+};

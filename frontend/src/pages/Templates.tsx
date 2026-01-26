@@ -122,7 +122,6 @@ export function Templates() {
       setFormData(defaultFormData);
     }
     setIsModalOpen(true);
-    setActiveDropdown(null);
   };
 
   const handleCloseModal = () => {
@@ -154,7 +153,6 @@ export function Templates() {
   const handleDelete = (template: OSTemplate) => {
     setSelectedTemplate(template);
     setIsDeleteModalOpen(true);
-    setActiveDropdown(null);
   };
 
   const handleDuplicate = (template: OSTemplate) => {
@@ -170,7 +168,6 @@ export function Templates() {
       default_disk_gb: template.default_disk_gb.toString(),
     });
     setIsModalOpen(true);
-    setActiveDropdown(null);
   };
 
   const filteredTemplates =

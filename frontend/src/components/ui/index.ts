@@ -8,3 +8,4 @@ export { Input, Textarea } from './Input';
 export { Select } from './Select';
 export { EmptyState } from './EmptyState';
 export { Dropdown } from './Dropdown';
+export { Switch } from './Switch';

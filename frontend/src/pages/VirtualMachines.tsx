@@ -104,7 +104,6 @@ export function VirtualMachines() {
 
   const openActionModal = (type: 'stop' | 'restart' | 'delete', vm: VirtualMachine) => {
     setActionModal({ type, vm });
-    setActiveDropdown(null);
   };
 
   const closeActionModal = () => {
@@ -113,7 +112,6 @@ export function VirtualMachines() {
 
   const handleStart = (vm: VirtualMachine) => {
     startMutation.mutate(vm.id);
-    setActiveDropdown(null);
   };
 
   const handleConfirmAction = () => {
