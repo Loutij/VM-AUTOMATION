@@ -68,9 +68,9 @@ Outil interne d'automatisation complète du déploiement de machines virtuelles.
 | React Router | TERMINÉ | 7 routes configurées dans App.tsx |
 | Dashboard principal | TERMINÉ | Stats, déploiements récents |
 | Page Hyperviseurs | TERMINÉ | CRUD complet + test connexion |
-| Page VMs | À FAIRE | Liste, actions, détails |
-| Page Templates | À FAIRE | CRUD templates OS |
-| Page Déploiements | À FAIRE | Suivi temps réel |
+| Page VMs | TERMINÉ | Liste avec stats, filtres, actions (start/stop/restart/delete) |
+| Page Templates | TERMINÉ | CRUD grille avec filtres OS, duplicate |
+| Page Déploiements | TERMINÉ | Timeline, logs modal, cancel/retry, auto-refresh |
 | Wizard création VM | À FAIRE | Multi-étapes, validation |
 | Temps réel (WebSocket) | À FAIRE | Progression live |
 

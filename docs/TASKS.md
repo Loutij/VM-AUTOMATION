@@ -271,16 +271,16 @@
 ### 7.1 Pages Principales
 | ID | Tâche | Statut | Assigné | Notes |
 |----|-------|--------|---------|-------|
-| 7.1.1 | Activer React Router | 🔄 | - | Connecter App.tsx aux pages |
+| 7.1.1 | Activer React Router | ✅ | Agent | BrowserRouter + Routes + QueryClient |
 | 7.1.2 | Page Dashboard | ✅ | Agent | Stats, déploiements récents, actions rapides |
-| 7.1.3 | Page Hyperviseurs - Liste | ⬜ | - | Tableau avec statut connexion |
-| 7.1.4 | Page Hyperviseurs - Ajout/Édition | ⬜ | - | Formulaire + test connexion |
-| 7.1.5 | Page VMs - Liste | ⬜ | - | Tableau avec filtres, tri, recherche |
-| 7.1.6 | Page VMs - Détail | ⬜ | - | Info complètes, métriques, actions |
-| 7.1.7 | Page Templates - Liste | ⬜ | - | Grille avec preview |
-| 7.1.8 | Page Templates - Ajout/Édition | ⬜ | - | Éditeur YAML/XML intégré |
-| 7.1.9 | Page Déploiements - Liste | ⬜ | - | Timeline, filtres par statut |
-| 7.1.10 | Page Déploiements - Détail | ⬜ | - | Logs temps réel, timeline étapes |
+| 7.1.3 | Page Hyperviseurs - Liste | ✅ | Agent | DataTable avec statut, recherche |
+| 7.1.4 | Page Hyperviseurs - Ajout/Édition | ✅ | Agent | Modal CRUD + test connexion |
+| 7.1.5 | Page VMs - Liste | ✅ | Agent | DataTable avec filtres hyperviseur, stats |
+| 7.1.6 | Page VMs - Actions | ✅ | Agent | Start/stop/restart/delete avec confirm |
+| 7.1.7 | Page Templates - Liste | ✅ | Agent | Grille avec filtre OS family |
+| 7.1.8 | Page Templates - CRUD | ✅ | Agent | Modal create/edit + duplicate |
+| 7.1.9 | Page Déploiements - Liste | ✅ | Agent | Timeline, filtres statut, auto-refresh |
+| 7.1.10 | Page Déploiements - Logs | ✅ | Agent | Modal logs, cancel/retry |
 | 7.1.11 | Page Paramètres | ⬜ | - | Config connexions, préférences |
 | 7.1.12 | Page Aide/Documentation | ⬜ | - | Guide utilisateur intégré |
 
@@ -384,10 +384,10 @@
 | Phase 4 | 23 | 3 | 0 | 20 | **87%** |
 | Phase 5 | 20 | 20 | 0 | 0 | 0% |
 | Phase 6 | 8 | 6 | 0 | 2 | **25%** |
-| Phase 7 | 36 | 25 | 0 | 11 | **31%** |
+| Phase 7 | 36 | 17 | 0 | 19 | **53%** |
 | Phase 8 | 13 | 12 | 0 | 1 | **8%** |
 | Phase 9 | 4 | 4 | 0 | 0 | 0% |
-| **TOTAL** | **188** | **85** | **0** | **103** | **~55%** |
+| **TOTAL** | **188** | **77** | **0** | **111** | **~59%** |
 
 ---
 
@@ -428,7 +428,14 @@ frontend/
 │   ├── components/
 │   │   ├── layout/          ✅ MainLayout, Sidebar, Header
 │   │   └── ui/              ✅ Button, Modal, Toast, DataTable, Input, Select, EmptyState
-│   ├── pages/               ✅ 7 pages (Dashboard + Hypervisors complets)
+│   ├── pages/               ✅ 7 pages fonctionnelles
+│   │   ├── Dashboard        ✅ Stats, déploiements récents
+│   │   ├── Hypervisors      ✅ CRUD complet + test connexion
+│   │   ├── VirtualMachines  ✅ Liste + actions (start/stop/restart/delete)
+│   │   ├── Templates        ✅ CRUD + grille + filtres + duplicate
+│   │   ├── Deployments      ✅ Timeline + logs + cancel/retry
+│   │   ├── Settings         🔄 Placeholder
+│   │   └── Help             🔄 Placeholder
 │   ├── services/            ✅ api.ts (Axios + retry backoff)
 │   └── types/               ✅ Types TS complets
 ├── tailwind.config.js       ✅ Thème dark personnalisé
@@ -445,22 +452,24 @@ frontend/
 - Lucide React (icônes)
 
 **Composants UI créés:**
-- Button (variants, sizes, loading)
+- Button (variants, sizes, loading, icons)
 - Modal + ConfirmModal
-- Toast + ToastProvider
-- DataTable (tri, search, pagination)
+- Toast + ToastProvider + useToast
+- DataTable (tri, search, pagination, actions)
 - Input + Textarea
 - Select
 - EmptyState
+- StatusBadge
+- StatCard
 
 **Prochaines priorités Frontend:**
-1. 🖥️ Implémenter page VMs (liste + actions)
-2. 📋 Implémenter page Templates (CRUD)
-3. 🚀 Créer Wizard de déploiement VM
-4. 📊 Page Déploiements avec timeline
+1. 🚀 Wizard de création de déploiement VM
+2. ⚙️ Page Paramètres (configuration)
+3. 📚 Page Aide (documentation intégrée)
+4. 🔌 WebSocket pour temps réel
 
 **Documentation technique:** `docs/UNATTENDED_INSTALL.md`
 
 ---
 
-*Dernière mise à jour : 2026-01-26 19:35*
+*Dernière mise à jour : 2026-01-26*
