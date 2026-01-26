@@ -126,9 +126,9 @@ class VMService:
             id=uuid4(),
             name=name,
             host=host,
-            hypervisor_type=hypervisor_type,
+            type=hypervisor_type,
             username=username,
-            password=password,
+            password_encrypted=password,  # TODO: encrypt password
             use_ssl=use_ssl,
             **kwargs,
         )

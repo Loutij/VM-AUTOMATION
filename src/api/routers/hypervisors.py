@@ -73,6 +73,22 @@ class HypervisorResponse(BaseModel):
     class Config:
         from_attributes = True
 
+    @classmethod
+    def model_validate(cls, obj, **kwargs):
+        """Convertit le modèle ORM en réponse avec mapping type -> hypervisor_type."""
+        return cls(
+            id=obj.id,
+            name=obj.name,
+            hypervisor_type=obj.type.value if hasattr(obj.type, 'value') else str(obj.type),
+            host=obj.host,
+            port=obj.port,
+            use_ssl=obj.use_ssl,
+            username=obj.username,
+            is_active=obj.is_active,
+            created_at=obj.created_at,
+            updated_at=obj.updated_at,
+        )
+
 
 class HypervisorList(BaseModel):
     """Schéma pour la liste paginée d'hyperviseurs."""
