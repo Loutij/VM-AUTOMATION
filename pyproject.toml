@@ -1,90 +1,101 @@
-# =============================================================================
-# VM Automation - Python Project Configuration
-# =============================================================================
-
 [project]
 name = "vm-automation"
-version = "0.1.0"
-description = "Outil d'automatisation du déploiement de machines virtuelles"
+version = "0.2.0"
+description = "Outil d'automatisation de déploiement de machines virtuelles"
 readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "Proprietary"}
-authors = [
-    {name = "Infrastructure IT Team"}
-]
+license = { text = "Proprietary" }
+authors = [{ name = "Infrastructure IT Team" }]
 
 [tool.black]
 line-length = 100
-target-version = ['py311']
+target-version = ["py311"]
 include = '\.pyi?$'
-exclude = '''
+extend-exclude = '''
 /(
     \.git
+    | \.hg
+    | \.mypy_cache
+    | \.tox
     | \.venv
-    | venv
+    | _build
+    | buck-out
     | build
     | dist
-    | __pycache__
-    | \.mypy_cache
+    | alembic/versions
 )/
 '''
 
 [tool.isort]
 profile = "black"
 line_length = 100
-skip = [".venv", "venv", "build", "dist"]
+skip_gitignore = true
 known_first_party = ["src"]
-
-[tool.mypy]
-python_version = "3.11"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-check_untyped_defs = true
-ignore_missing_imports = true
-exclude = [
-    "venv",
-    ".venv",
-    "build",
-    "dist",
-]
+sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-select = [
-    "E",   # pycodestyle errors
-    "W",   # pycodestyle warnings
-    "F",   # pyflakes
-    "I",   # isort
-    "B",   # flake8-bugbear
-    "C4",  # flake8-comprehensions
-    "UP",  # pyupgrade
-]
-ignore = [
-    "E501",  # line too long (handled by black)
-]
 exclude = [
+    ".git",
+    ".mypy_cache",
+    ".ruff_cache",
     ".venv",
-    "venv",
-    "build",
-    "dist",
+    "alembic/versions",
     "__pycache__",
 ]
 
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # Pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+    "ARG",    # flake8-unused-arguments
+    "SIM",    # flake8-simplify
+]
+ignore = [
+    "E501",   # line too long (handled by black)
+    "B008",   # do not perform function calls in argument defaults
+    "B904",   # raise without from inside except
+    "ARG001", # unused function argument
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ARG", "S101"]
+"alembic/*" = ["E402"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+plugins = ["sqlalchemy.ext.mypy.plugin"]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+
 [tool.pytest.ini_options]
+asyncio_mode = "auto"
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
-python_functions = ["test_*"]
-asyncio_mode = "auto"
 addopts = "-v --tb=short"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
 
 [tool.coverage.run]
 source = ["src"]
+branch = true
 omit = [
     "*/tests/*",
-    "*/__pycache__/*",
+    "*/__init__.py",
+    "*/migrations/*",
 ]
 
 [tool.coverage.report]
@@ -92,5 +103,6 @@ exclude_lines = [
     "pragma: no cover",
     "def __repr__",
     "raise NotImplementedError",
+    "if TYPE_CHECKING:",
     "if __name__ == .__main__.:",
 ]
