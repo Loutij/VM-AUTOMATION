@@ -22,30 +22,30 @@ Outil interne d'automatisation complète du déploiement de machines virtuelles.
 ### Module 2 : Création de VMs
 | Fonctionnalité | Statut | Description |
 |----------------|--------|-------------|
-| Création VM basique | À FAIRE | Nom, génération, emplacement |
-| Configuration CPU/RAM | À FAIRE | Allocation ressources |
-| Création disque VHDX | À FAIRE | Taille, format, emplacement |
-| Configuration réseau | À FAIRE | Switch, VLAN, MAC |
-| Montage ISO | À FAIRE | Attachement ISO automatique |
+| Création VM basique | TERMINÉ | Nom, génération, emplacement |
+| Configuration CPU/RAM | TERMINÉ | Allocation ressources dynamique |
+| Création disque VHDX | TERMINÉ | Taille, format dynamique |
+| Configuration réseau | TERMINÉ | Virtual Switch, MAC auto |
+| Montage ISO | TERMINÉ | Attachement ISO + OEMDRV |
 
 ### Module 3 : Installation OS Automatique
 | Fonctionnalité | Statut | Description |
 |----------------|--------|-------------|
-| Template Windows unattend | À FAIRE | Win10, Win11, Server |
-| Template Linux preseed | À FAIRE | Ubuntu, Debian |
-| Template Linux kickstart | À FAIRE | RHEL, CentOS |
-| Génération dynamique | À FAIRE | Injection paramètres |
-| Injection drivers | À FAIRE | Hyper-V Integration Services |
-| Détection fin install | À FAIRE | Monitoring état VM |
+| Template Windows unattend | TERMINÉ | Windows Server 2022 |
+| Template Linux preseed | TERMINÉ | Debian 12 |
+| Template Linux autoinstall | TERMINÉ | Ubuntu 24.04 |
+| Template Cloud-init | TERMINÉ | Générique Linux |
+| Génération dynamique | TERMINÉ | Jinja2 avec injection paramètres |
+| Détection fin install | TERMINÉ | Heartbeat + PowerShell Direct |
 
-### Module 4 : Post-Installationsetting
+### Module 4 : Post-Installation
 | Fonctionnalité | Statut | Description |
 |----------------|--------|-------------|
-| Configuration réseau | À FAIRE | DHCP/statique, DNS |
-| Jointure domaine AD | À FAIRE | Windows et Linux |
-| Activation services | À FAIRE | SSH, WinRM |
-| Mises à jour système | À FAIRE | Windows Update, apt/yum |
-| Configuration sécurité | À FAIRE | Firewall, comptes |
+| Configuration réseau | TERMINÉ | DHCP/statique, DNS, gateway |
+| Jointure domaine AD | TERMINÉ | Windows (unattend.xml) |
+| Activation services | TERMINÉ | SSH, WinRM, RDP |
+| Mises à jour système | EN COURS | apt update dans templates Linux |
+| Configuration sécurité | EN COURS | Firewall Windows configuré |
 
 ### Module 5 : Installation Logiciels
 | Fonctionnalité | Statut | Description |
@@ -55,23 +55,34 @@ Outil interne d'automatisation complète du déploiement de machines virtuelles.
 | Installation Linux | À FAIRE | apt/yum |
 | Profils prédéfinis | À FAIRE | Templates par rôle |
 
-### Module 6 : Interface Web
+### Module 6 : Interface Web (Frontend React)
 | Fonctionnalité | Statut | Description |
 |----------------|--------|-------------|
-| Dashboard principal | À FAIRE | Vue d'ensemble |
-| Formulaire création VM | À FAIRE | Wizard multi-étapes |
-| Monitoring déploiements | À FAIRE | Progression temps réel |
-| Gestion templates | À FAIRE | CRUD templates |
-| Historique/Logs | À FAIRE | Audit trail |
+| Structure projet | TERMINÉ | Vite + React 19 + TypeScript 5.9 |
+| Design system | TERMINÉ | TailwindCSS 4, thème dark |
+| Layout application | TERMINÉ | Sidebar, Header, MainLayout |
+| Composants UI base | TERMINÉ | StatCard, StatusBadge |
+| Service API | TERMINÉ | Axios avec retry backoff |
+| Types TypeScript | TERMINÉ | Interfaces complètes |
+| Dashboard principal | TERMINÉ | Stats, déploiements récents |
+| React Router | TERMINÉ | BrowserRouter + Routes configurées |
+| Page Hyperviseurs | À FAIRE | CRUD hyperviseurs |
+| Page VMs | À FAIRE | Liste, actions, détails |
+| Page Templates | À FAIRE | CRUD templates OS |
+| Page Déploiements | À FAIRE | Suivi temps réel |
+| Wizard création VM | À FAIRE | Multi-étapes, validation |
+| Temps réel (WebSocket) | À FAIRE | Progression live |
 
-### Module 7 : API REST
+### Module 7 : API REST (Backend FastAPI)
 | Fonctionnalité | Statut | Description |
 |----------------|--------|-------------|
-| Endpoints VMs | À FAIRE | CRUD machines virtuelles |
-| Endpoints Templates | À FAIRE | Gestion templates |
-| Endpoints Deployments | À FAIRE | Orchestration |
+| Endpoints VMs | TERMINÉ | CRUD + start/stop/restart |
+| Endpoints Templates | TERMINÉ | CRUD templates OS |
+| Endpoints Deployments | TERMINÉ | Création, logs, cancel |
+| Endpoints Hypervisors | TERMINÉ | CRUD + test connexion |
+| Documentation OpenAPI | TERMINÉ | Swagger UI sur /docs |
 | Authentification | À FAIRE | JWT/OAuth |
-| Documentation OpenAPI | À FAIRE | Swagger UI |
+| WebSocket | À FAIRE | Événements temps réel |
 
 ---
 
@@ -92,82 +103,94 @@ Outil interne d'automatisation complète du déploiement de machines virtuelles.
 
 ```
 vm-automation/
-├── src/
+├── src/                        # Backend Python
 │   ├── api/                    # FastAPI endpoints
 │   │   ├── routers/
-│   │   │   ├── vms.py
-│   │   │   ├── templates.py
-│   │   │   ├── deployments.py
-│   │   │   └── hypervisors.py
+│   │   │   ├── vms.py          ✅ CRUD + actions VM
+│   │   │   ├── templates.py    ✅ CRUD templates OS
+│   │   │   ├── deployments.py  ✅ Orchestration déploiements
+│   │   │   ├── hypervisors.py  ✅ CRUD hyperviseurs
+│   │   │   └── health.py       ✅ Health check
 │   │   ├── dependencies.py
-│   │   └── main.py
+│   │   └── main.py             ✅ App FastAPI avec CORS
 │   │
 │   ├── domain/                 # Logique métier
-│   │   ├── vm/
-│   │   ├── deployment/
-│   │   ├── provisioning/
-│   │   └── configuration/
+│   │   ├── models.py           ✅ 7 modèles SQLAlchemy
+│   │   ├── vm_service.py       ✅ Service VM complet
+│   │   ├── deployment_service.py ✅ Orchestration déploiement
+│   │   └── template_engine.py  ✅ Génération Jinja2
 │   │
 │   ├── integrations/           # Clients externes
-│   │   ├── hypervisors/
-│   │   │   ├── base.py
-│   │   │   ├── hyperv_client.py
-│   │   │   └── vmware_client.py
-│   │   ├── active_directory/
-│   │   └── dns/
-│   │
-│   ├── workers/                # Tâches Celery
-│   │   ├── vm_creation.py
-│   │   ├── os_installation.py
-│   │   ├── post_install.py
-│   │   └── software_install.py
+│   │   └── hypervisors/
+│   │       ├── base.py         ✅ Interface abstraite
+│   │       └── hyperv_client.py ✅ Client Hyper-V WinRM
 │   │
 │   ├── common/                 # Utilitaires
-│   │   ├── powershell.py
-│   │   ├── logging.py
-│   │   └── exceptions.py
+│   │   ├── powershell.py       ✅ Wrapper PowerShell/WinRM
+│   │   ├── config.py           ✅ Configuration Pydantic
+│   │   ├── database.py         ✅ Session async SQLAlchemy
+│   │   ├── logging.py          ✅ Configuration logs
+│   │   └── exceptions.py       ✅ Exceptions custom
 │   │
 │   └── types/                  # Types/interfaces
-│       ├── vm.py
-│       ├── deployment.py
-│       └── config.py
+│       └── schemas.py          ✅ Pydantic schemas
 │
 ├── frontend/                   # React app
 │   ├── src/
 │   │   ├── components/
-│   │   ├── pages/
+│   │   │   ├── layout/         ✅ MainLayout, Sidebar, Header
+│   │   │   └── ui/             ✅ StatCard, StatusBadge
+│   │   ├── pages/              ✅ 7 pages (Dashboard fonctionnel)
+│   │   │   ├── Dashboard.tsx   ✅ Stats + déploiements récents
+│   │   │   ├── Hypervisors.tsx 🔄 Placeholder
+│   │   │   ├── VirtualMachines.tsx 🔄 Placeholder
+│   │   │   ├── Templates.tsx   🔄 Placeholder
+│   │   │   ├── Deployments.tsx 🔄 Placeholder
+│   │   │   ├── Settings.tsx    🔄 Placeholder
+│   │   │   └── Help.tsx        🔄 Placeholder
 │   │   ├── services/
+│   │   │   └── api.ts          ✅ Client Axios complet
 │   │   └── types/
-│   ├── package.json
-│   └── tsconfig.json
+│   │       └── index.ts        ✅ Types TypeScript
+│   ├── package.json            ✅ Deps React 19, Vite 7
+│   ├── tailwind.config.js      ✅ Thème dark custom
+│   └── vite.config.ts          ✅ Config Vite
 │
 ├── templates/                  # Templates d'installation
 │   ├── unattend/
-│   │   ├── win10.xml
-│   │   ├── win11.xml
-│   │   └── winserver.xml
+│   │   └── windows_server_2022.xml ✅
 │   ├── preseed/
-│   ├── kickstart/
-│   └── cloud-init/
+│   │   └── debian_12.cfg       ✅
+│   ├── cloud-init/
+│   │   ├── ubuntu_autoinstall.yaml ✅
+│   │   └── debian_cloud_init.yaml ✅
+│   └── kickstart/              ⬜ À faire
 │
 ├── scripts/                    # Scripts utilitaires
-│   ├── powershell/
-│   └── ansible/
-│
-├── config/                     # Configuration
-│   └── settings.py
+│   ├── check_vm_status.py      ✅ Test monitoring VM
+│   ├── test_monitoring.py      ✅ Test heartbeat/health
+│   └── test_powershell_direct.py ✅ Test PowerShell Direct
 │
 ├── tests/                      # Tests
-│   ├── unit/
-│   ├── integration/
-│   └── e2e/
+│   ├── unit/                   ⬜ À faire
+│   ├── integration/            ⬜ À faire
+│   └── e2e/                    ⬜ À faire
 │
 ├── docs/                       # Documentation
+│   ├── ARCHITECTURE.md
+│   ├── GETTING_STARTED.md
+│   ├── PREREQUISITES.md
+│   ├── TASKS.md                ✅ Suivi détaillé
+│   └── UNATTENDED_INSTALL.md   ✅ Guide installation auto
 │
+├── alembic/                    # Migrations DB
+├── config/                     # Configuration
 ├── requirements.txt
-├── docker-compose.yml
+├── docker-compose.yml          ✅ PostgreSQL + Redis
 └── README.md
 ```
+
+**Légende:** ✅ Implémenté | 🔄 En cours | ⬜ À faire
 
 ---
 
@@ -239,7 +262,15 @@ docker-compose -f docker-compose.prod.yml up -d
 ## Changelog
 
 ### v0.2.0 (En cours)
-- **Phase 1 - Fondations** : 73% complète
+- **Phase 1 - Fondations** : 93% complète
+- **Frontend Skeleton** : 100% complète
+  - Vite 5 + React 19 + TypeScript 5.9
+  - TailwindCSS 3 avec thème dark
+  - React Router v6
+  - Service API Axios + React Query
+  - Dashboard avec stats et déploiements récents
+  - Composants UI: StatCard, StatusBadge
+  - Layout: Sidebar + Header
   - Structure projet complète (26 fichiers Python)
   - Configuration centralisée (Pydantic Settings)
   - Base de données PostgreSQL (SQLAlchemy async)

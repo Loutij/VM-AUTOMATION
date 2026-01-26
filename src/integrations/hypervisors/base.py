@@ -306,15 +306,65 @@ class BaseHypervisor(ABC):
         pass
 
     @abstractmethod
-    async def unmount_iso(self, vm_id: str) -> bool:
+    async def unmount_iso(self, vm_id: str, unmount_all: bool = True) -> bool:
         """
-        Démonte l'ISO du lecteur DVD d'une VM.
+        Démonte les ISOs des lecteurs DVD d'une VM.
+        
+        Args:
+            vm_id: ID ou nom de la VM
+            unmount_all: Si True, démonte tous les lecteurs. Sinon, juste le premier.
+            
+        Returns:
+            True si le démontage a réussi
+        """
+        pass
+
+    @abstractmethod
+    async def enable_guest_services(self, vm_id: str) -> bool:
+        """
+        Active le Guest Service Interface (copie de fichiers hôte -> VM).
         
         Args:
             vm_id: ID ou nom de la VM
             
         Returns:
-            True si le démontage a réussi
+            True si l'activation a réussi
+        """
+        pass
+
+    @abstractmethod
+    async def set_first_boot_device(
+        self,
+        vm_id: str,
+        device_type: str = "HardDrive",
+    ) -> bool:
+        """
+        Configure le premier périphérique de boot d'une VM.
+        
+        Args:
+            vm_id: ID ou nom de la VM
+            device_type: Type de périphérique (HardDrive, DVD, Network)
+            
+        Returns:
+            True si la configuration a réussi
+        """
+        pass
+
+    @abstractmethod
+    async def cleanup_post_install(self, vm_id: str) -> dict[str, bool]:
+        """
+        Effectue le nettoyage post-installation d'une VM.
+        
+        Actions typiques:
+        - Démonte tous les ISOs
+        - Configure le boot sur le disque dur
+        - Active les Guest Services
+        
+        Args:
+            vm_id: ID ou nom de la VM
+            
+        Returns:
+            Dictionnaire avec le résultat de chaque action
         """
         pass
 

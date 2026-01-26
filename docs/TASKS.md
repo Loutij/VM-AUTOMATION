@@ -159,7 +159,7 @@
 | 3.4.1 | Création ISO OEMDRV | ✅ | Agent | genisoimage avec label OEMDRV |
 | 3.4.2 | Montage second DVD | ✅ | Agent | Add-VMDvdDrive |
 | 3.4.3 | Copie via SMB | ✅ | Agent | smbclient fonctionnel |
-| 3.4.4 | Hyper-V Integration Services | ⬜ | - | - |
+| 3.4.4 | Hyper-V Integration Services | ✅ | Agent | enable_guest_services(), Copy-VMFile |
 
 ### 3.5 Monitoring Installation
 | ID | Tâche | Statut | Assigné | Notes |
@@ -379,8 +379,8 @@
 | Phase | Total | À Faire | En Cours | Terminé | % Complet |
 |-------|-------|---------|----------|---------|-----------|
 | Phase 1 | 31 | 4 | 1 | 26 | **84%** |
-| Phase 2 | 27 | 12 | 0 | 15 | **56%** |
-| Phase 3 | 26 | 5 | 0 | 21 | **81%** |
+| Phase 2 | 27 | 11 | 0 | 16 | **59%** |
+| Phase 3 | 26 | 4 | 0 | 22 | **85%** |
 | Phase 4 | 23 | 12 | 0 | 11 | **48%** |
 | Phase 5 | 20 | 20 | 0 | 0 | 0% |
 | Phase 6 | 8 | 6 | 0 | 2 | **25%** |
@@ -394,13 +394,18 @@
 ## Test en cours
 
 **VM: WinSrv2022-Test** sur Hyper-V 10.250.0.20
-- Statut: ✅ Installation automatique FONCTIONNELLE + Monitoring OK
+- Statut: ✅ Installation automatique FONCTIONNELLE + Post-install OK
 - OS: Windows Server 2022 Standard Evaluation (Desktop Experience)
-- Config: 2 vCPU, 4 GB RAM, 60 GB Disk
+- Config: 2 vCPU, 4 GB RAM, 60 GB Disk (49 GB free)
 - IP: 10.250.0.83
 - Credentials: Administrateur / Admin123!
 - Heartbeat: OkApplicationsUnknown ✅
 - PowerShell Direct: Fonctionnel ✅
+- Guest Services: Enabled ✅ (Copy-VMFile fonctionnel)
+- RDP: Enabled ✅
+- WinRM: Running ✅
+- ISOs: Démontés ✅
+- Boot: HardDrive first ✅
 
 ## Architecture Validée
 
@@ -446,4 +451,4 @@ frontend/
 
 ---
 
-*Dernière mise à jour : 2026-01-26*
+*Dernière mise à jour : 2026-01-26 17:55*

@@ -494,19 +494,81 @@ class HyperVClient(BaseHypervisor):
         logger.info("hyperv_iso_mounted", vm_id=vm_id, iso_path=iso_path)
         return True
 
-    async def unmount_iso(self, vm_id: str) -> bool:
-        """Démonte l'ISO du lecteur DVD."""
+    async def unmount_iso(self, vm_id: str, unmount_all: bool = True) -> bool:
+        """
+        Démonte les ISOs des lecteurs DVD.
+        
+        Args:
+            vm_id: ID ou nom de la VM
+            unmount_all: Si True, démonte tous les lecteurs DVD. Sinon, juste le premier.
+        """
+        if unmount_all:
+            script = f"""
+            $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+            if (-not $vm) {{
+                $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+            }}
+            if ($vm) {{
+                $count = 0
+                Get-VMDvdDrive -VM $vm | ForEach-Object {{
+                    if ($_.Path) {{
+                        Set-VMDvdDrive -VMName $vm.Name -ControllerNumber $_.ControllerNumber -ControllerLocation $_.ControllerLocation -Path $null
+                        $count++
+                    }}
+                }}
+                Write-Output "$count ISOs unmounted"
+            }} else {{
+                throw "VM not found"
+            }}
+            """
+        else:
+            script = f"""
+            $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+            if (-not $vm) {{
+                $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+            }}
+            if ($vm) {{
+                $dvd = Get-VMDvdDrive -VM $vm | Select-Object -First 1
+                if ($dvd -and $dvd.Path) {{
+                    Set-VMDvdDrive -VMDvdDrive $dvd -Path $null
+                }}
+                Write-Output "ISO unmounted"
+            }} else {{
+                throw "VM not found"
+            }}
+            """
+        
+        result = await self._execute(script)
+        
+        if not result.success:
+            raise VMOperationError(vm_id, "unmount_iso", result.stderr)
+        
+        logger.info("hyperv_iso_unmounted", vm_id=vm_id, unmount_all=unmount_all)
+        return True
+
+    async def enable_guest_services(self, vm_id: str) -> bool:
+        """
+        Active le Guest Service Interface (copie de fichiers hôte -> VM).
+        
+        Args:
+            vm_id: ID ou nom de la VM
+        """
         script = f"""
         $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
         if (-not $vm) {{
             $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
         }}
         if ($vm) {{
-            $dvd = Get-VMDvdDrive -VM $vm
-            if ($dvd) {{
-                Set-VMDvdDrive -VMDvdDrive $dvd[0] -Path $null
+            # Rechercher le service Guest (nom peut varier selon la langue)
+            $guestSvc = Get-VMIntegrationService -VM $vm | Where-Object {{ 
+                $_.Name -like "*invit*" -or $_.Name -like "*Guest*" 
             }}
-            Write-Output "ISO unmounted"
+            if ($guestSvc) {{
+                Enable-VMIntegrationService -VM $vm -Name $guestSvc.Name
+                Write-Output "Guest Service enabled: $($guestSvc.Name)"
+            }} else {{
+                Write-Output "Guest Service not found"
+            }}
         }} else {{
             throw "VM not found"
         }}
@@ -515,10 +577,129 @@ class HyperVClient(BaseHypervisor):
         result = await self._execute(script)
         
         if not result.success:
-            raise VMOperationError(vm_id, "unmount_iso", result.stderr)
+            raise VMOperationError(vm_id, "enable_guest_services", result.stderr)
         
-        logger.info("hyperv_iso_unmounted", vm_id=vm_id)
+        logger.info("hyperv_guest_services_enabled", vm_id=vm_id)
         return True
+
+    async def set_first_boot_device(
+        self,
+        vm_id: str,
+        device_type: str = "HardDrive",
+    ) -> bool:
+        """
+        Configure le premier périphérique de boot d'une VM Gen2.
+        
+        Args:
+            vm_id: ID ou nom de la VM
+            device_type: Type de périphérique (HardDrive, DVD, Network)
+        """
+        script = f"""
+        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        if (-not $vm) {{
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+        }}
+        if ($vm) {{
+            if ($vm.Generation -eq 2) {{
+                $device = $null
+                switch ('{device_type}') {{
+                    'HardDrive' {{ 
+                        $device = Get-VMHardDiskDrive -VM $vm | Select-Object -First 1
+                    }}
+                    'DVD' {{ 
+                        $device = Get-VMDvdDrive -VM $vm | Select-Object -First 1
+                    }}
+                    'Network' {{ 
+                        $device = Get-VMNetworkAdapter -VM $vm | Select-Object -First 1
+                    }}
+                }}
+                
+                if ($device) {{
+                    Set-VMFirmware -VM $vm -FirstBootDevice $device
+                    Write-Output "First boot device set to {device_type}"
+                }} else {{
+                    throw "Device type {device_type} not found"
+                }}
+            }} else {{
+                Write-Output "Gen1 VM - use BIOS settings"
+            }}
+        }} else {{
+            throw "VM not found"
+        }}
+        """
+        
+        result = await self._execute(script)
+        
+        if not result.success:
+            raise VMOperationError(vm_id, "set_first_boot_device", result.stderr)
+        
+        logger.info(
+            "hyperv_first_boot_device_set",
+            vm_id=vm_id,
+            device_type=device_type,
+        )
+        return True
+
+    async def cleanup_post_install(self, vm_id: str) -> dict[str, bool]:
+        """
+        Effectue le nettoyage post-installation d'une VM.
+        
+        Actions:
+        - Démonte tous les ISOs
+        - Configure le boot sur le disque dur
+        - Active les Guest Services
+        
+        Args:
+            vm_id: ID ou nom de la VM
+            
+        Returns:
+            Dictionnaire avec le résultat de chaque action
+        """
+        results = {
+            "unmount_isos": False,
+            "set_boot_device": False,
+            "enable_guest_services": False,
+        }
+        
+        logger.info("hyperv_cleanup_post_install_start", vm_id=vm_id)
+        
+        try:
+            await self.unmount_iso(vm_id, unmount_all=True)
+            results["unmount_isos"] = True
+        except Exception as e:
+            logger.warning(
+                "hyperv_cleanup_unmount_failed",
+                vm_id=vm_id,
+                error=str(e),
+            )
+        
+        try:
+            await self.set_first_boot_device(vm_id, "HardDrive")
+            results["set_boot_device"] = True
+        except Exception as e:
+            logger.warning(
+                "hyperv_cleanup_boot_failed",
+                vm_id=vm_id,
+                error=str(e),
+            )
+        
+        try:
+            await self.enable_guest_services(vm_id)
+            results["enable_guest_services"] = True
+        except Exception as e:
+            logger.warning(
+                "hyperv_cleanup_guest_services_failed",
+                vm_id=vm_id,
+                error=str(e),
+            )
+        
+        logger.info(
+            "hyperv_cleanup_post_install_complete",
+            vm_id=vm_id,
+            results=results,
+        )
+        
+        return results
 
     async def set_boot_order(
         self,

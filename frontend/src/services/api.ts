@@ -8,7 +8,6 @@ import type {
   DeploymentConfig,
   DashboardStats,
   HealthCheck,
-  PaginatedResponse,
 } from '../types';
 
 // Configuration de base
