@@ -1,0 +1,314 @@
+<?xml version="1.0" encoding="utf-8"?>
+<unattend xmlns="urn:schemas-microsoft-com:unattend">
+    <!-- =================================================================== -->
+    <!-- Windows 11 Pro - Unattended Installation Template                   -->
+    <!-- Variables Jinja2: {{ variable_name }}                               -->
+    <!-- Note: Requires TPM 2.0 and Secure Boot for standard install         -->
+    <!-- =================================================================== -->
+
+    <!-- ================================================================== -->
+    <!-- Phase 1: windowsPE - Configuration initiale du disque              -->
+    <!-- ================================================================== -->
+    <settings pass="windowsPE">
+        <component name="Microsoft-Windows-International-Core-WinPE" 
+                   processorArchitecture="amd64" 
+                   publicKeyToken="31bf3856ad364e35" 
+                   language="neutral" 
+                   versionScope="nonSxS">
+            <SetupUILanguage>
+                <UILanguage>{{ locale | default('fr-FR') }}</UILanguage>
+            </SetupUILanguage>
+            <InputLocale>{{ keyboard_layout | default('040c:0000040c') }}</InputLocale>
+            <SystemLocale>{{ locale | default('fr-FR') }}</SystemLocale>
+            <UILanguage>{{ locale | default('fr-FR') }}</UILanguage>
+            <UserLocale>{{ locale | default('fr-FR') }}</UserLocale>
+        </component>
+
+        <component name="Microsoft-Windows-Setup" 
+                   processorArchitecture="amd64" 
+                   publicKeyToken="31bf3856ad364e35" 
+                   language="neutral" 
+                   versionScope="nonSxS">
+            
+            {% if bypass_tpm %}
+            <!-- Bypass TPM/SecureBoot check for VMs without vTPM -->
+            <RunSynchronous>
+                <RunSynchronousCommand wcm:action="add">
+                    <Order>1</Order>
+                    <Path>reg add HKLM\SYSTEM\Setup\LabConfig /v BypassTPMCheck /t REG_DWORD /d 1</Path>
+                </RunSynchronousCommand>
+                <RunSynchronousCommand wcm:action="add">
+                    <Order>2</Order>
+                    <Path>reg add HKLM\SYSTEM\Setup\LabConfig /v BypassSecureBootCheck /t REG_DWORD /d 1</Path>
+                </RunSynchronousCommand>
+                <RunSynchronousCommand wcm:action="add">
+                    <Order>3</Order>
+                    <Path>reg add HKLM\SYSTEM\Setup\LabConfig /v BypassRAMCheck /t REG_DWORD /d 1</Path>
+                </RunSynchronousCommand>
+            </RunSynchronous>
+            {% endif %}
+
+            <!-- Configuration du disque GPT pour UEFI -->
+            <DiskConfiguration>
+                <Disk wcm:action="add">
+                    <DiskID>0</DiskID>
+                    <WillWipeDisk>true</WillWipeDisk>
+                    <CreatePartitions>
+                        <!-- Partition EFI -->
+                        <CreatePartition wcm:action="add">
+                            <Order>1</Order>
+                            <Size>500</Size>
+                            <Type>EFI</Type>
+                        </CreatePartition>
+                        <!-- Partition MSR -->
+                        <CreatePartition wcm:action="add">
+                            <Order>2</Order>
+                            <Size>16</Size>
+                            <Type>MSR</Type>
+                        </CreatePartition>
+                        <!-- Partition Windows -->
+                        <CreatePartition wcm:action="add">
+                            <Order>3</Order>
+                            <Extend>true</Extend>
+                            <Type>Primary</Type>
+                        </CreatePartition>
+                    </CreatePartitions>
+                    <ModifyPartitions>
+                        <ModifyPartition wcm:action="add">
+                            <Order>1</Order>
+                            <PartitionID>1</PartitionID>
+                            <Format>FAT32</Format>
+                            <Label>System</Label>
+                        </ModifyPartition>
+                        <ModifyPartition wcm:action="add">
+                            <Order>2</Order>
+                            <PartitionID>2</PartitionID>
+                        </ModifyPartition>
+                        <ModifyPartition wcm:action="add">
+                            <Order>3</Order>
+                            <PartitionID>3</PartitionID>
+                            <Format>NTFS</Format>
+                            <Label>Windows</Label>
+                            <Letter>C</Letter>
+                        </ModifyPartition>
+                    </ModifyPartitions>
+                </Disk>
+            </DiskConfiguration>
+
+            <!-- Sélection de l'image à installer -->
+            <ImageInstall>
+                <OSImage>
+                    <InstallFrom>
+                        <MetaData wcm:action="add">
+                            <Key>/IMAGE/NAME</Key>
+                            <Value>{{ windows_edition | default('Windows 11 Pro') }}</Value>
+                        </MetaData>
+                    </InstallFrom>
+                    <InstallTo>
+                        <DiskID>0</DiskID>
+                        <PartitionID>3</PartitionID>
+                    </InstallTo>
+                </OSImage>
+            </ImageInstall>
+
+            {% if product_key %}
+            <UserData>
+                <ProductKey>
+                    <Key>{{ product_key }}</Key>
+                </ProductKey>
+                <AcceptEula>true</AcceptEula>
+            </UserData>
+            {% else %}
+            <UserData>
+                <AcceptEula>true</AcceptEula>
+            </UserData>
+            {% endif %}
+        </component>
+    </settings>
+
+    <!-- ================================================================== -->
+    <!-- Phase 4: specialize - Configuration réseau et machine              -->
+    <!-- ================================================================== -->
+    <settings pass="specialize">
+        <component name="Microsoft-Windows-Shell-Setup" 
+                   processorArchitecture="amd64" 
+                   publicKeyToken="31bf3856ad364e35" 
+                   language="neutral" 
+                   versionScope="nonSxS">
+            <ComputerName>{{ hostname | default('WIN11-PC') }}</ComputerName>
+            <TimeZone>{{ timezone | default('Romance Standard Time') }}</TimeZone>
+        </component>
+
+        <component name="Microsoft-Windows-TerminalServices-LocalSessionManager" 
+                   processorArchitecture="amd64" 
+                   publicKeyToken="31bf3856ad364e35" 
+                   language="neutral" 
+                   versionScope="nonSxS">
+            <fDenyTSConnections>false</fDenyTSConnections>
+        </component>
+
+        <component name="Networking-MPSSVC-Svc" 
+                   processorArchitecture="amd64" 
+                   publicKeyToken="31bf3856ad364e35" 
+                   language="neutral" 
+                   versionScope="nonSxS">
+            <FirewallGroups>
+                <FirewallGroup wcm:action="add" wcm:keyValue="RemoteDesktop">
+                    <Active>true</Active>
+                    <Group>Remote Desktop</Group>
+                    <Profile>all</Profile>
+                </FirewallGroup>
+            </FirewallGroups>
+        </component>
+
+        <!-- Bypass OOBE network requirement -->
+        <component name="Microsoft-Windows-Deployment" 
+                   processorArchitecture="amd64" 
+                   publicKeyToken="31bf3856ad364e35" 
+                   language="neutral" 
+                   versionScope="nonSxS">
+            <RunSynchronous>
+                <RunSynchronousCommand wcm:action="add">
+                    <Order>1</Order>
+                    <Path>reg add HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE /v BypassNRO /t REG_DWORD /d 1 /f</Path>
+                </RunSynchronousCommand>
+            </RunSynchronous>
+        </component>
+
+        {% if static_ip %}
+        <component name="Microsoft-Windows-TCPIP" 
+                   processorArchitecture="amd64" 
+                   publicKeyToken="31bf3856ad364e35" 
+                   language="neutral" 
+                   versionScope="nonSxS">
+            <Interfaces>
+                <Interface wcm:action="add">
+                    <Identifier>Ethernet</Identifier>
+                    <Ipv4Settings>
+                        <DhcpEnabled>false</DhcpEnabled>
+                    </Ipv4Settings>
+                    <UnicastIpAddresses>
+                        <IpAddress wcm:action="add" wcm:keyValue="1">{{ ip_address }}/{{ subnet_prefix | default('24') }}</IpAddress>
+                    </UnicastIpAddresses>
+                    <Routes>
+                        <Route wcm:action="add">
+                            <Identifier>0</Identifier>
+                            <NextHopAddress>{{ gateway }}</NextHopAddress>
+                            <Prefix>0.0.0.0/0</Prefix>
+                        </Route>
+                    </Routes>
+                </Interface>
+            </Interfaces>
+        </component>
+        <component name="Microsoft-Windows-DNS-Client" 
+                   processorArchitecture="amd64" 
+                   publicKeyToken="31bf3856ad364e35" 
+                   language="neutral" 
+                   versionScope="nonSxS">
+            <Interfaces>
+                <Interface wcm:action="add">
+                    <Identifier>Ethernet</Identifier>
+                    <DNSServerSearchOrder>
+                        <IpAddress wcm:action="add" wcm:keyValue="1">{{ dns_server_1 | default('8.8.8.8') }}</IpAddress>
+                        {% if dns_server_2 %}
+                        <IpAddress wcm:action="add" wcm:keyValue="2">{{ dns_server_2 }}</IpAddress>
+                        {% endif %}
+                    </DNSServerSearchOrder>
+                </Interface>
+            </Interfaces>
+        </component>
+        {% endif %}
+    </settings>
+
+    <!-- ================================================================== -->
+    <!-- Phase 7: oobeSystem - Configuration utilisateur et OOBE            -->
+    <!-- ================================================================== -->
+    <settings pass="oobeSystem">
+        <component name="Microsoft-Windows-Shell-Setup" 
+                   processorArchitecture="amd64" 
+                   publicKeyToken="31bf3856ad364e35" 
+                   language="neutral" 
+                   versionScope="nonSxS">
+            
+            <OOBE>
+                <HideEULAPage>true</HideEULAPage>
+                <HideLocalAccountScreen>true</HideLocalAccountScreen>
+                <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
+                <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+                <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+                <NetworkLocation>Work</NetworkLocation>
+                <ProtectYourPC>3</ProtectYourPC>
+                <SkipMachineOOBE>true</SkipMachineOOBE>
+                <SkipUserOOBE>true</SkipUserOOBE>
+            </OOBE>
+
+            <UserAccounts>
+                <LocalAccounts>
+                    <LocalAccount wcm:action="add">
+                        <Password>
+                            <Value>{{ admin_password | default('TempP@ss123!') }}</Value>
+                            <PlainText>true</PlainText>
+                        </Password>
+                        <Description>Local Administrator</Description>
+                        <DisplayName>{{ admin_username | default('Admin') }}</DisplayName>
+                        <Group>Administrators</Group>
+                        <Name>{{ admin_username | default('Admin') }}</Name>
+                    </LocalAccount>
+                </LocalAccounts>
+            </UserAccounts>
+
+            <AutoLogon>
+                <Password>
+                    <Value>{{ admin_password | default('TempP@ss123!') }}</Value>
+                    <PlainText>true</PlainText>
+                </Password>
+                <Enabled>true</Enabled>
+                <LogonCount>1</LogonCount>
+                <Username>{{ admin_username | default('Admin') }}</Username>
+            </AutoLogon>
+
+            <FirstLogonCommands>
+                <SynchronousCommand wcm:action="add">
+                    <Order>1</Order>
+                    <CommandLine>powershell -Command "Enable-PSRemoting -Force -SkipNetworkProfileCheck"</CommandLine>
+                    <Description>Enable PowerShell Remoting</Description>
+                </SynchronousCommand>
+                <SynchronousCommand wcm:action="add">
+                    <Order>2</Order>
+                    <CommandLine>powershell -Command "winrm quickconfig -quiet"</CommandLine>
+                    <Description>Quick configure WinRM</Description>
+                </SynchronousCommand>
+                <SynchronousCommand wcm:action="add">
+                    <Order>3</Order>
+                    <CommandLine>reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v AutoAdminLogon /t REG_SZ /d 0 /f</CommandLine>
+                    <Description>Disable Auto Logon</Description>
+                </SynchronousCommand>
+                {% if join_domain %}
+                <SynchronousCommand wcm:action="add">
+                    <Order>4</Order>
+                    <CommandLine>powershell -Command "Add-Computer -DomainName '{{ domain_name }}' -Credential (New-Object PSCredential('{{ domain_user }}', (ConvertTo-SecureString '{{ domain_password }}' -AsPlainText -Force))) -OUPath '{{ domain_ou | default('') }}' -Restart"</CommandLine>
+                    <Description>Join Active Directory Domain</Description>
+                </SynchronousCommand>
+                {% endif %}
+                {% if callback_url %}
+                <SynchronousCommand wcm:action="add">
+                    <Order>99</Order>
+                    <CommandLine>powershell -Command "Invoke-RestMethod -Uri '{{ callback_url }}' -Method POST -Body (@{hostname=$env:COMPUTERNAME;status='completed'} | ConvertTo-Json) -ContentType 'application/json'"</CommandLine>
+                    <Description>Callback to automation server</Description>
+                </SynchronousCommand>
+                {% endif %}
+            </FirstLogonCommands>
+        </component>
+
+        <component name="Microsoft-Windows-International-Core" 
+                   processorArchitecture="amd64" 
+                   publicKeyToken="31bf3856ad364e35" 
+                   language="neutral" 
+                   versionScope="nonSxS">
+            <InputLocale>{{ keyboard_layout | default('040c:0000040c') }}</InputLocale>
+            <SystemLocale>{{ locale | default('fr-FR') }}</SystemLocale>
+            <UILanguage>{{ locale | default('fr-FR') }}</UILanguage>
+            <UserLocale>{{ locale | default('fr-FR') }}</UserLocale>
+        </component>
+    </settings>
+</unattend>
