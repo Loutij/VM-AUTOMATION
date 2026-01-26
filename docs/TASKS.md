@@ -286,11 +286,23 @@
 ## Test en cours
 
 **VM: WinSrv2022-Test** sur Hyper-V 10.250.0.20
-- Statut: Installation automatique en cours
+- Statut: ✅ Installation automatique FONCTIONNELLE
 - OS: Windows Server 2022 Standard (Desktop Experience)
 - Config: 2 vCPU, 4 GB RAM, 60 GB Disk
 - Credentials: Administrateur / Admin123!
 
+## Architecture Validée
+
+```
+ISO Windows (5 GB) ─────────┐
+  (stocké une fois)         ├──► VM boot ──► Installation 100% AUTO
+ISO OEMDRV (374 KB) ────────┘
+  (généré par déploiement)
+    └── autounattend.xml (params custom via Jinja2)
+```
+
+**Documentation technique:** `docs/UNATTENDED_INSTALL.md`
+
 ---
 
-*Dernière mise à jour : 2026-01-26 16:15*
+*Dernière mise à jour : 2026-01-26 16:40*
