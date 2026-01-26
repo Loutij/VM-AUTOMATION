@@ -56,6 +56,7 @@ class DeploymentCreate(BaseModel):
     cpu_count: int = Field(default=2, ge=1, le=64, description="CPUs")
     ram_gb: int = Field(default=4, ge=1, le=512, description="RAM en GB")
     disk_gb: int = Field(default=60, ge=20, le=2048, description="Disque en GB")
+    vhdx_path: str | None = Field(None, description="Emplacement du disque virtuel (dossier)")
     network_switch: str | None = Field(None, description="Switch réseau")
     hostname: str | None = Field(None, description="Nom d'hôte (défaut: vm_name)")
     admin_password: str | None = Field(None, description="Mot de passe admin")

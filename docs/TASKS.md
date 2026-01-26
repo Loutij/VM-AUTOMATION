@@ -472,15 +472,17 @@ frontend/
 ├── src/
 │   ├── components/
 │   │   ├── layout/          ✅ MainLayout, Sidebar, Header
-│   │   └── ui/              ✅ Button, Modal, Toast, DataTable, Input, Select, EmptyState
-│   ├── pages/               ✅ 7 pages fonctionnelles
+│   │   └── ui/              ✅ Button, Modal, Toast, DataTable, Input, Select, EmptyState, Progress, Skeleton, Switch, Dropdown
+│   ├── hooks/               ✅ useWebSocket (deployments, VMs, notifications)
+│   ├── pages/               ✅ 8 pages fonctionnelles
 │   │   ├── Dashboard        ✅ Stats, déploiements récents
 │   │   ├── Hypervisors      ✅ CRUD complet + test connexion
 │   │   ├── VirtualMachines  ✅ Liste + actions (start/stop/restart/delete)
 │   │   ├── Templates        ✅ CRUD + grille + filtres + duplicate
 │   │   ├── Deployments      ✅ Timeline + logs + cancel/retry
-│   │   ├── Settings         🔄 Placeholder
-│   │   └── Help             🔄 Placeholder
+│   │   ├── NewDeployment    ✅ Wizard 5 étapes (infra, ressources, réseau, options, résumé)
+│   │   ├── Settings         ✅ Config complète (thème, notifs, valeurs par défaut, compte)
+│   │   └── Help             ✅ Documentation intégrée, FAQ, raccourcis
 │   ├── services/            ✅ api.ts (Axios + retry backoff)
 │   └── types/               ✅ Types TS complets
 ├── tailwind.config.js       ✅ Thème dark personnalisé
@@ -502,19 +504,29 @@ frontend/
 - Toast + ToastProvider + useToast
 - DataTable (tri, search, pagination, actions)
 - Input + Textarea
-- Select
+- Select + Switch
 - EmptyState
-- StatusBadge
-- StatCard
+- StatusBadge + StatCard
+- ProgressBar + ProgressTimeline + ProgressCircle
+- Skeleton + SkeletonCard + SkeletonTable
+- Dropdown (portal-based)
+
+**Hooks personnalisés:**
+- useWebSocket (connexion temps réel)
+- useDeploymentEvents (suivi déploiements)
+- useVMEvents (changements état VM)
+- useNotifications (alertes temps réel)
 
 **Prochaines priorités Frontend:**
-1. 🚀 Wizard de création de déploiement VM
-2. ⚙️ Page Paramètres (configuration)
-3. 📚 Page Aide (documentation intégrée)
-4. 🔌 WebSocket pour temps réel
+1. ✅ Wizard de création de déploiement VM - COMPLÉTÉ
+2. ✅ Page Paramètres (configuration) - COMPLÉTÉ
+3. ✅ Page Aide (documentation intégrée) - COMPLÉTÉ
+4. ✅ WebSocket hook pour temps réel - COMPLÉTÉ
+5. 🔄 Intégration WebSocket dans les pages
+6. ⬜ Tests frontend (Vitest)
 
 **Documentation technique:** `docs/UNATTENDED_INSTALL.md`
 
 ---
 
-*Dernière mise à jour : 2026-01-26 18:00*
+*Dernière mise à jour : 2026-01-26 19:30*

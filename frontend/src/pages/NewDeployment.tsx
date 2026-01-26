@@ -297,6 +297,7 @@ export function NewDeployment() {
       cpu_count: formData.cpu_count,
       memory_mb: formData.memory_mb,
       disk_size_gb: formData.disk_size_gb,
+      vhdx_path: formData.vhdx_path || undefined, // Emplacement du disque virtuel
       hostname: formData.hostname || formData.vm_name,
       admin_password: formData.admin_password || undefined,
       network_switch: formData.network_switch || undefined,

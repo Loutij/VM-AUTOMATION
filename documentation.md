@@ -321,31 +321,31 @@ docker-compose -f docker-compose.prod.yml up -d
 ### Terminé ✅
 | Tâche | Description | Statut |
 |-------|-------------|--------|
-| React Router | 7 routes configurées | ✅ |
+| React Router | 8 routes configurées | ✅ |
 | Page Dashboard | Stats, déploiements récents | ✅ |
 | Page Hyperviseurs | CRUD complet + test connexion | ✅ |
 | Page VMs | Liste, filtres, actions | ✅ |
 | Page Templates | CRUD, grille, filtres, duplicate | ✅ |
 | Page Déploiements | Timeline, logs, cancel/retry | ✅ |
+| Wizard Création VM | 5 étapes avec validation | ✅ |
+| Page Paramètres | Config multi-sections complète | ✅ |
+| Page Aide | FAQ, raccourcis, dépannage, guide | ✅ |
 | DataTable | Tri, search, pagination, actions | ✅ |
 | Modal/Dialog | Modal + ConfirmModal | ✅ |
 | Toast | ToastProvider + useToast | ✅ |
-| Form components | Input, Textarea, Select | ✅ |
-| Switch component | Toggle on/off pour settings | ✅ |
-| Page Paramètres | Config multi-sections complète | ✅ |
-
-### En cours 🔄
-| Tâche | Description | Priorité |
-|-------|-------------|----------|
-| Wizard Création VM | Multi-étapes avec validation | Haute |
-| Page Aide | Documentation intégrée | Basse |
+| Form components | Input, Textarea, Select, Switch | ✅ |
+| Progress components | ProgressBar, ProgressTimeline, ProgressCircle | ✅ |
+| Skeleton loaders | Skeleton, SkeletonCard, SkeletonTable, SkeletonStats | ✅ |
+| Hook useWebSocket | Connexion persistante avec reconnexion | ✅ |
+| Hook useDeploymentEvents | Suivi progression temps réel | ✅ |
+| Hook useVMEvents | État VM temps réel | ✅ |
+| Hook useNotifications | Notifications temps réel | ✅ |
+| Keyboard shortcuts | Ctrl+K, Ctrl+N, ?, Esc | ✅ |
 
 ### À faire ⬜
 | Tâche | Description | Priorité |
 |-------|-------------|----------|
-| Hook useWebSocket | Connexion persistante | Haute |
 | Logs streaming | Console déploiement live | Moyenne |
-| Skeleton loaders | États de chargement | Basse |
 | Dark/Light toggle | Préférence utilisateur | Basse |
 | Tests Frontend | Vitest + Testing Library | Basse |
 

@@ -86,6 +86,7 @@ export interface DeploymentConfig {
   cpu_count: number;
   memory_mb: number;
   disk_size_gb: number;
+  vhdx_path?: string; // Emplacement personnalisé du disque virtuel
   network_switch?: string;
   hostname?: string;
   admin_password?: string;
