@@ -211,6 +211,7 @@ async def create_deployment(
         cpu_count=deployment.cpu_count,
         ram_gb=deployment.ram_gb,
         disk_gb=deployment.disk_gb,
+        vhdx_path=deployment.vhdx_path,
         network_switch=deployment.network_switch,
         hostname=deployment.hostname,
         admin_password=deployment.admin_password,
