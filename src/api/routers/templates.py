@@ -8,11 +8,14 @@ Endpoints CRUD pour la gestion des templates OS.
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import CurrentUser, DbSession, Pagination
 from src.common.logging import get_logger
+from src.domain.models import OSTemplate, OSFamily, Architecture
 
 logger = get_logger(__name__)
 
@@ -102,12 +105,58 @@ async def list_templates(
         is_active=is_active,
     )
     
-    # TODO: Implémenter la requête DB
+    # Construire la requête
+    query = select(OSTemplate)
+    count_query = select(func.count()).select_from(OSTemplate)
+    
+    # Appliquer les filtres
+    if os_family:
+        try:
+            family_enum = OSFamily(os_family)
+            query = query.where(OSTemplate.os_family == family_enum)
+            count_query = count_query.where(OSTemplate.os_family == family_enum)
+        except ValueError:
+            pass  # Ignorer si la valeur n'est pas valide
+    
+    if is_active is not None:
+        query = query.where(OSTemplate.is_active == is_active)
+        count_query = count_query.where(OSTemplate.is_active == is_active)
+    
+    # Compter le total
+    total_result = await db.execute(count_query)
+    total = total_result.scalar() or 0
+    
+    # Pagination
+    offset = (pagination.page - 1) * pagination.page_size
+    query = query.offset(offset).limit(pagination.page_size)
+    
+    # Exécuter
+    result = await db.execute(query)
+    templates = result.scalars().all()
+    
     return OSTemplateList(
-        items=[],
-        total=0,
+        items=[_template_to_response(t) for t in templates],
+        total=total,
         page=pagination.page,
         page_size=pagination.page_size,
+    )
+
+
+def _template_to_response(template: OSTemplate) -> OSTemplateResponse:
+    """Convertit un modèle OSTemplate en réponse API."""
+    return OSTemplateResponse(
+        id=template.id,
+        name=template.name,
+        os_family=template.os_family.value,
+        os_type=template.os_type,
+        architecture=template.architecture.value,
+        iso_path=template.iso_path,
+        min_cpu=template.min_cpu,
+        min_ram_gb=template.min_ram_gb,
+        min_disk_gb=template.min_disk_gb,
+        is_active=template.is_active,
+        created_at=template.created_at.isoformat() if template.created_at else "",
+        updated_at=template.updated_at.isoformat() if template.updated_at else None,
     )
 
 
@@ -131,9 +180,44 @@ async def create_template(
         os_type=template.os_type,
     )
     
-    # TODO: Implémenter la création en DB
-    # TODO: Valider que l'ISO existe
-    raise NotImplementedError("Template creation not implemented yet")
+    # Vérifier si un template avec le même nom existe
+    existing = await db.execute(
+        select(OSTemplate).where(OSTemplate.name == template.name)
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Un template avec le nom '{template.name}' existe déjà",
+        )
+    
+    # Créer le template
+    try:
+        os_family_enum = OSFamily(template.os_family)
+        arch_enum = Architecture(template.architecture)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Valeur invalide: {e}",
+        )
+    
+    db_template = OSTemplate(
+        name=template.name,
+        os_family=os_family_enum,
+        os_type=template.os_type,
+        architecture=arch_enum,
+        iso_path=template.iso_path,
+        unattend_template=template.unattend_template,
+        min_cpu=template.min_cpu,
+        min_ram_gb=template.min_ram_gb,
+        min_disk_gb=template.min_disk_gb,
+    )
+    
+    db.add(db_template)
+    await db.commit()
+    await db.refresh(db_template)
+    
+    logger.info("template_created", template_id=str(db_template.id), name=db_template.name)
+    return _template_to_response(db_template)
 
 
 @router.get(
@@ -149,8 +233,18 @@ async def get_template(
     """Récupère un template OS par son ID."""
     logger.info("getting_template", template_id=str(template_id))
     
-    # TODO: Implémenter la requête DB
-    raise NotImplementedError("Template retrieval not implemented yet")
+    result = await db.execute(
+        select(OSTemplate).where(OSTemplate.id == template_id)
+    )
+    template = result.scalar_one_or_none()
+    
+    if not template:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Template avec l'ID '{template_id}' non trouvé",
+        )
+    
+    return _template_to_response(template)
 
 
 @router.patch(
@@ -172,8 +266,29 @@ async def update_template(
         fields=template.model_dump(exclude_unset=True),
     )
     
-    # TODO: Implémenter la mise à jour en DB
-    raise NotImplementedError("Template update not implemented yet")
+    # Récupérer le template
+    result = await db.execute(
+        select(OSTemplate).where(OSTemplate.id == template_id)
+    )
+    db_template = result.scalar_one_or_none()
+    
+    if not db_template:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Template avec l'ID '{template_id}' non trouvé",
+        )
+    
+    # Mettre à jour les champs fournis
+    update_data = template.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        if value is not None:
+            setattr(db_template, field, value)
+    
+    await db.commit()
+    await db.refresh(db_template)
+    
+    logger.info("template_updated", template_id=str(template_id))
+    return _template_to_response(db_template)
 
 
 @router.delete(
@@ -190,9 +305,37 @@ async def delete_template(
     """Supprime un template OS."""
     logger.info("deleting_template", template_id=str(template_id))
     
-    # TODO: Implémenter la suppression en DB
-    # TODO: Vérifier qu'aucune VM n'utilise ce template
-    raise NotImplementedError("Template deletion not implemented yet")
+    # Récupérer le template
+    result = await db.execute(
+        select(OSTemplate).where(OSTemplate.id == template_id)
+    )
+    db_template = result.scalar_one_or_none()
+    
+    if not db_template:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Template avec l'ID '{template_id}' non trouvé",
+        )
+    
+    # Vérifier qu'aucune VM n'utilise ce template
+    from src.domain.models import VirtualMachine
+    vm_result = await db.execute(
+        select(func.count()).select_from(VirtualMachine).where(
+            VirtualMachine.os_template_id == template_id
+        )
+    )
+    vm_count = vm_result.scalar() or 0
+    
+    if vm_count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Impossible de supprimer: {vm_count} VM(s) utilisent ce template",
+        )
+    
+    await db.delete(db_template)
+    await db.commit()
+    
+    logger.info("template_deleted", template_id=str(template_id))
 
 
 @router.post(
@@ -207,8 +350,62 @@ async def validate_template(
     """Valide un template OS (vérifie l'ISO, le template Jinja2, etc.)."""
     logger.info("validating_template", template_id=str(template_id))
     
-    # TODO: Implémenter la validation
-    return {
-        "status": "not_implemented",
-        "message": "Template validation not implemented yet",
+    # Récupérer le template
+    result = await db.execute(
+        select(OSTemplate).where(OSTemplate.id == template_id)
+    )
+    template = result.scalar_one_or_none()
+    
+    if not template:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Template avec l'ID '{template_id}' non trouvé",
+        )
+    
+    validation_results = {
+        "template_id": str(template_id),
+        "name": template.name,
+        "valid": True,
+        "checks": [],
+        "errors": [],
     }
+    
+    # Check 1: ISO path format
+    if template.iso_path:
+        validation_results["checks"].append({
+            "name": "iso_path_format",
+            "status": "ok",
+            "message": f"ISO path défini: {template.iso_path}",
+        })
+    else:
+        validation_results["valid"] = False
+        validation_results["errors"].append("ISO path non défini")
+    
+    # Check 2: Minimum requirements
+    if template.min_cpu >= 1 and template.min_ram_gb >= 1 and template.min_disk_gb >= 10:
+        validation_results["checks"].append({
+            "name": "min_requirements",
+            "status": "ok",
+            "message": f"CPU: {template.min_cpu}, RAM: {template.min_ram_gb}GB, Disk: {template.min_disk_gb}GB",
+        })
+    else:
+        validation_results["valid"] = False
+        validation_results["errors"].append("Exigences minimales invalides")
+    
+    # Check 3: Unattend template (if provided)
+    if template.unattend_template:
+        # Vérification basique Jinja2
+        try:
+            from jinja2 import Environment
+            env = Environment()
+            env.parse(template.unattend_template)
+            validation_results["checks"].append({
+                "name": "unattend_template",
+                "status": "ok",
+                "message": "Template Jinja2 syntaxiquement valide",
+            })
+        except Exception as e:
+            validation_results["valid"] = False
+            validation_results["errors"].append(f"Template Jinja2 invalide: {e}")
+    
+    return validation_results

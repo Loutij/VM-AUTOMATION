@@ -11,7 +11,7 @@ import type {
 } from '../types';
 
 // Configuration de base
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
 // Instance Axios configurée
 const apiClient: AxiosInstance = axios.create({
@@ -55,7 +55,8 @@ export async function withRetry<T>(
 
 export const healthApi = {
   check: async (): Promise<HealthCheck> => {
-    const response = await apiClient.get<HealthCheck>('/health');
+    // Health est sur /health (racine, sans préfixe /api/v1)
+    const response = await axios.get<HealthCheck>('/health', { timeout: 10000 });
     return response.data;
   },
 };
@@ -433,10 +434,24 @@ export const deploymentsApi = {
 
 export const dashboardApi = {
   getStats: async (): Promise<DashboardStats> => {
-    // Cette route peut ne pas exister encore, on gère l'erreur
     try {
-      const response = await apiClient.get<DashboardStats>('/dashboard/stats');
-      return response.data;
+      // Stats disponibles via /realtime/stats
+      const response = await apiClient.get<{
+        hypervisors: { total: number };
+        virtual_machines: { total: number; running: number; by_status: Record<string, number> };
+        deployments: { total: number; in_progress: number; by_status: Record<string, number> };
+      }>('/realtime/stats');
+      
+      const data = response.data;
+      return {
+        total_vms: data.virtual_machines.total,
+        running_vms: data.virtual_machines.running,
+        stopped_vms: data.virtual_machines.by_status?.stopped || 0,
+        total_hypervisors: data.hypervisors.total,
+        active_deployments: data.deployments.in_progress,
+        completed_deployments: data.deployments.by_status?.completed || 0,
+        failed_deployments: data.deployments.by_status?.failed || 0,
+      };
     } catch {
       // Retourne des stats vides si l'API n'existe pas encore
       return {

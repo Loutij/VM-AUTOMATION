@@ -43,6 +43,15 @@ class OSFamily(str, enum.Enum):
 
     WINDOWS = "windows"
     LINUX = "linux"
+    
+    def _generate_next_value_(name, start, count, last_values):
+        return name.lower()
+
+
+# Helper pour SQLAlchemy - utilise les valeurs (minuscules) au lieu des noms
+def enum_values(enum_class):
+    """Retourne une fonction pour obtenir les valeurs d'un enum."""
+    return lambda x: [e.value for e in x]
 
 
 class Architecture(str, enum.Enum):
@@ -145,7 +154,8 @@ class Hypervisor(Base, TimestampMixin):
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     type: Mapped[HypervisorType] = mapped_column(
-        Enum(HypervisorType), nullable=False
+        Enum(HypervisorType, values_callable=lambda x: [e.value for e in x]),
+        nullable=False
     )
     host: Mapped[str] = mapped_column(String(255), nullable=False)
     port: Mapped[int] = mapped_column(Integer, default=5986, nullable=False)
@@ -175,10 +185,15 @@ class OSTemplate(Base, TimestampMixin):
         default=uuid4,
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    os_family: Mapped[OSFamily] = mapped_column(Enum(OSFamily), nullable=False)
+    os_family: Mapped[OSFamily] = mapped_column(
+        Enum(OSFamily, values_callable=lambda x: [e.value for e in x]),
+        nullable=False
+    )
     os_type: Mapped[str] = mapped_column(String(50), nullable=False)
     architecture: Mapped[Architecture] = mapped_column(
-        Enum(Architecture), default=Architecture.X64, nullable=False
+        Enum(Architecture, values_callable=lambda x: [e.value for e in x]),
+        default=Architecture.X64,
+        nullable=False
     )
     iso_path: Mapped[str] = mapped_column(String(500), nullable=False)
     unattend_template: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -238,10 +253,14 @@ class VirtualMachine(Base, TimestampMixin):
     
     # Status
     status: Mapped[VMStatus] = mapped_column(
-        Enum(VMStatus), default=VMStatus.CREATING, nullable=False
+        Enum(VMStatus, values_callable=lambda x: [e.value for e in x]),
+        default=VMStatus.CREATING,
+        nullable=False
     )
     state: Mapped[VMState] = mapped_column(
-        Enum(VMState), default=VMState.STOPPED, nullable=False,
+        Enum(VMState, values_callable=lambda x: [e.value for e in x]),
+        default=VMState.STOPPED,
+        nullable=False,
         comment="État Hyper-V (running, stopped, paused, etc.)"
     )
     hypervisor_vm_id: Mapped[str | None] = mapped_column(
@@ -294,7 +313,9 @@ class Deployment(Base, TimestampMixin):
     
     # Status
     status: Mapped[DeploymentStatus] = mapped_column(
-        Enum(DeploymentStatus), default=DeploymentStatus.PENDING, nullable=False
+        Enum(DeploymentStatus, values_callable=lambda x: [e.value for e in x]),
+        default=DeploymentStatus.PENDING,
+        nullable=False
     )
     current_step: Mapped[str | None] = mapped_column(String(50), nullable=True)
     progress: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -338,7 +359,9 @@ class DeploymentLog(Base):
         nullable=False,
     )
     level: Mapped[LogLevel] = mapped_column(
-        Enum(LogLevel), default=LogLevel.INFO, nullable=False
+        Enum(LogLevel, values_callable=lambda x: [e.value for e in x]),
+        default=LogLevel.INFO,
+        nullable=False
     )
     step: Mapped[str] = mapped_column(String(50), nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
@@ -369,7 +392,9 @@ class SoftwarePackage(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     version: Mapped[str] = mapped_column(String(50), default="latest", nullable=False)
     os_family: Mapped[OSFamily | None] = mapped_column(
-        Enum(OSFamily), nullable=True, comment="NULL = compatible tous OS"
+        Enum(OSFamily, values_callable=lambda x: [e.value for e in x]),
+        nullable=True,
+        comment="NULL = compatible tous OS"
     )
     install_command_windows: Mapped[str | None] = mapped_column(Text, nullable=True)
     install_command_linux: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -404,7 +429,7 @@ class VMSoftware(Base):
         primary_key=True,
     )
     status: Mapped[SoftwareInstallStatus] = mapped_column(
-        Enum(SoftwareInstallStatus),
+        Enum(SoftwareInstallStatus, values_callable=lambda x: [e.value for e in x]),
         default=SoftwareInstallStatus.PENDING,
         nullable=False,
     )
