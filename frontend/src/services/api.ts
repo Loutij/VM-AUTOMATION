@@ -32,8 +32,8 @@ apiClient.interceptors.response.use(
   }
 );
 
-// Helper pour retry avec backoff
-async function withRetry<T>(
+// Helper pour retry avec backoff (exporté pour usage externe)
+export async function withRetry<T>(
   fn: () => Promise<T>,
   retries = 3,
   delay = 1000

@@ -261,34 +261,37 @@ docker-compose -f docker-compose.prod.yml up -d
 
 ## Changelog
 
-### v0.2.0 (En cours)
-- **Phase 1 - Fondations** : 93% complète
-- **Frontend Skeleton** : 100% complète
-  - Vite 5 + React 19 + TypeScript 5.9
-  - TailwindCSS 3 avec thème dark
-  - React Router v6
-  - Service API Axios + React Query
-  - Dashboard avec stats et déploiements récents
-  - Composants UI: StatCard, StatusBadge
-  - Layout: Sidebar + Header
+### v0.3.0 (En cours)
+- **Phase 7 - Interface Web** : Démarrée (3%)
+  - React Router installé (à activer dans App.tsx)
+  - Prochaines étapes: pages Hyperviseurs, VMs, Templates
+
+### v0.2.0 (2026-01-26)
+- **Phase 1 - Fondations** : 84% complète
   - Structure projet complète (26 fichiers Python)
   - Configuration centralisée (Pydantic Settings)
   - Base de données PostgreSQL (SQLAlchemy async)
   - API FastAPI avec CORS, exception handlers
   - 5 routers : health, hypervisors, vms, templates, deployments
-  - 7 modèles SQLAlchemy : Hypervisor, VirtualMachine, OSTemplate, Deployment, DeploymentLog, SoftwarePackage, VMSoftware
+  - 7 modèles SQLAlchemy
   - Client Hyper-V complet (PowerShell/WinRM)
-  - Wrapper PowerShell avec support mock pour dev
+
+- **Frontend Skeleton** : Structure complète
+  - Vite 7.2 + React 19.2 + TypeScript 5.9
+  - TailwindCSS 4.1 avec thème dark personnalisé
+  - React Router 7.13 + React Query 5.90
+  - Service API Axios avec retry backoff
+  - Dashboard fonctionnel avec stats et déploiements récents
+  - Composants UI: StatCard, StatusBadge
+  - Layout: Sidebar collapsible + Header avec recherche
+  - 7 pages créées (1 fonctionnelle, 6 placeholders)
 
 - **Phase 3 - Templates OS & Monitoring** : 81% complète
   - Moteur de templates Jinja2
-  - Template Windows Server 2022 (unattend.xml)
-  - Template Ubuntu 24.04 (autoinstall)
-  - Template Debian 12 (preseed)
-  - Template Cloud-init générique
-  - Injection dynamique : hostname, réseau, password, locale, timezone
-  - **Monitoring VM** : get_vm_health(), get_vm_heartbeat(), get_vm_integration_services()
-  - **PowerShell Direct** : execute_in_vm(), wait_for_vm_ready()
+  - Templates: Windows Server 2022, Ubuntu 24.04, Debian 12, Cloud-init
+  - Injection dynamique: hostname, réseau, password, locale, timezone
+  - Monitoring VM: heartbeat, health, Integration Services
+  - PowerShell Direct: exécution commandes dans VM
   - VM WinSrv2022-Test validée avec installation 100% automatique
 
 ### v0.1.0 (2026-01-26)
@@ -298,7 +301,36 @@ docker-compose -f docker-compose.prod.yml up -d
 
 ---
 
+## Roadmap Frontend
+
+### Priorité Haute (Sprint actuel)
+| Tâche | Description | Effort |
+|-------|-------------|--------|
+| Activer React Router | Connecter App.tsx aux pages existantes | 1h |
+| Page Hyperviseurs | CRUD complet avec test de connexion | 4h |
+| Page VMs | Liste avec actions (start/stop/restart) | 4h |
+| Composant DataTable | Table générique avec tri/filtre/pagination | 3h |
+
+### Priorité Moyenne (Prochain sprint)
+| Tâche | Description | Effort |
+|-------|-------------|--------|
+| Wizard Création VM | Formulaire multi-étapes avec validation | 8h |
+| Page Déploiements | Suivi avec progression temps réel | 4h |
+| Modals/Dialogs | Confirmations et formulaires modaux | 2h |
+| Notifications Toast | Feedback utilisateur après actions | 2h |
+
+### Priorité Basse (Backlog)
+| Tâche | Description | Effort |
+|-------|-------------|--------|
+| WebSocket | Temps réel pour déploiements | 6h |
+| Page Templates | Éditeur YAML/XML intégré | 6h |
+| Tests Frontend | Vitest + Testing Library | 8h |
+| Dark/Light mode | Toggle thème utilisateur | 2h |
+
+---
+
 ## Contacts
 
 - **Équipe** : Infrastructure IT
 - **Repository** : https://github.com/votre-org/vm-automation
+- **ClickUp** : Tâche VM-AUTOMATION (869bxaf8k)
