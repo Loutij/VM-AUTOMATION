@@ -24,7 +24,7 @@ import {
   useToast,
 } from '../components/ui';
 import { deploymentsApi } from '../services/api';
-import type { Deployment, DeploymentStatus, DeploymentLog } from '../types';
+import type { Deployment, DeploymentStatus } from '../types';
 
 const statusOrder: DeploymentStatus[] = [
   'pending',

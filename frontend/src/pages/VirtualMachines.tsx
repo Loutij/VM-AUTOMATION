@@ -25,13 +25,12 @@ import {
   type Column,
 } from '../components/ui';
 import { vmsApi, hypervisorsApi } from '../services/api';
-import type { VirtualMachine, Hypervisor } from '../types';
+import type { VirtualMachine } from '../types';
 
 export function VirtualMachines() {
   const queryClient = useQueryClient();
   const { addToast } = useToast();
   
-  const [selectedVM, setSelectedVM] = useState<VirtualMachine | null>(null);
   const [actionModal, setActionModal] = useState<{
     type: 'stop' | 'restart' | 'delete' | null;
     vm: VirtualMachine | null;

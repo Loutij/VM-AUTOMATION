@@ -158,11 +158,11 @@ vm-automation/
 │   │   │   └── ui/             ✅ StatCard, StatusBadge
 │   │   ├── pages/              ✅ 7 pages (Dashboard fonctionnel)
 │   │   │   ├── Dashboard.tsx   ✅ Stats + déploiements récents
-│   │   │   ├── Hypervisors.tsx 🔄 Placeholder
-│   │   │   ├── VirtualMachines.tsx 🔄 Placeholder
-│   │   │   ├── Templates.tsx   🔄 Placeholder
-│   │   │   ├── Deployments.tsx 🔄 Placeholder
-│   │   │   ├── Settings.tsx    🔄 Placeholder
+│   │   │   ├── Hypervisors.tsx ✅ CRUD + test connexion
+│   │   │   ├── VirtualMachines.tsx ✅ Liste, filtres, actions
+│   │   │   ├── Templates.tsx   ✅ CRUD, grille, filtres
+│   │   │   ├── Deployments.tsx ✅ Timeline, logs, actions
+│   │   │   ├── Settings.tsx    ✅ Config complète multi-sections
 │   │   │   └── Help.tsx        🔄 Placeholder
 │   │   ├── services/
 │   │   │   └── api.ts          ✅ Client Axios complet
@@ -331,12 +331,13 @@ docker-compose -f docker-compose.prod.yml up -d
 | Modal/Dialog | Modal + ConfirmModal | ✅ |
 | Toast | ToastProvider + useToast | ✅ |
 | Form components | Input, Textarea, Select | ✅ |
+| Switch component | Toggle on/off pour settings | ✅ |
+| Page Paramètres | Config multi-sections complète | ✅ |
 
 ### En cours 🔄
 | Tâche | Description | Priorité |
 |-------|-------------|----------|
 | Wizard Création VM | Multi-étapes avec validation | Haute |
-| Page Paramètres | Configuration connexions | Moyenne |
 | Page Aide | Documentation intégrée | Basse |
 
 ### À faire ⬜

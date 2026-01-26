@@ -19,7 +19,7 @@ import {
 import { Header } from '../components/layout';
 import { Button, Input, Select, useToast } from '../components/ui';
 import { hypervisorsApi, templatesApi, deploymentsApi } from '../services/api';
-import type { Hypervisor, OSTemplate } from '../types';
+import type { DeploymentConfig } from '../types';
 
 interface DeploymentFormData {
   // Étape 1: Sélection hyperviseur et template
@@ -94,14 +94,7 @@ export function NewDeployment() {
       name: string;
       hypervisor_id: string;
       template_id: string;
-      config: {
-        cpu_count: number;
-        memory_mb: number;
-        disk_size_gb: number;
-        hostname?: string;
-        admin_password?: string;
-        network_switch?: string;
-      };
+      config: DeploymentConfig;
     }) => deploymentsApi.create(data),
     onSuccess: (deployment) => {
       addToast({
@@ -178,6 +171,7 @@ export function NewDeployment() {
       hypervisor_id: formData.hypervisor_id,
       template_id: formData.template_id,
       config: {
+        vm_name: formData.vm_name,
         cpu_count: formData.cpu_count,
         memory_mb: formData.memory_mb,
         disk_size_gb: formData.disk_size_gb,

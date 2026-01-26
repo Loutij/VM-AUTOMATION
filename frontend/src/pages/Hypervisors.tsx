@@ -18,7 +18,6 @@ import {
   ConfirmModal,
   Input,
   Select,
-  StatusBadge,
   EmptyState,
   useToast,
   Dropdown,
