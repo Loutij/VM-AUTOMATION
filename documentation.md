@@ -17,6 +17,7 @@ Outil interne d'automatisation complète du déploiement de machines virtuelles.
 | Liste des VMs | TERMINÉ | Récupération des VMs existantes |
 | Gestion Virtual Switches | TERMINÉ | CRUD switches réseau |
 | Monitoring VM | TERMINÉ | Heartbeat, Integration Services, PowerShell Direct |
+| Infos réseau complètes | TERMINÉ | get_vm_network_info(), get_vm_network_summary() |
 | Support VMware | À FAIRE | Client pyVmomi (futur) |
 
 ### Module 2 : Création de VMs

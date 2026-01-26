@@ -91,6 +91,7 @@
 | 2.2.3 | Configuration VLAN | ✅ | Agent | set_vm_vlan(), remove_vm_vlan(), get_vm_vlan() |
 | 2.2.4 | Récupération adresse MAC | ✅ | Agent | Via Get-VMNetworkAdapter |
 | 2.2.5 | Support multi-NIC | ✅ | Agent | list/add/remove/connect/disconnect_network_adapter() |
+| 2.2.6 | Infos réseau complètes | ✅ | Agent | get_vm_network_info(), get_vm_network_summary() (IP, MAC, gateway, DNS) |
 
 ### 2.3 Gestion Stockage
 | ID | Tâche | Statut | Assigné | Notes |

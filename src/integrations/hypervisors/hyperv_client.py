@@ -27,10 +27,12 @@ from src.integrations.hypervisors.base import (
     DiskInfo,
     IntegrationService,
     NetworkAdapterInfo,
+    NetworkInterfaceDetails,
     PowerShellDirectResult,
     VirtualSwitch,
     VMHealthStatus,
     VMInfo,
+    VMNetworkInfo,
     VMSpecs,
 )
 
@@ -940,10 +942,13 @@ class HyperVClient(BaseHypervisor):
             vm_credentials: Tuple (username, password) pour la VM
             timeout: Timeout en secondes
         """
+        import base64
+        
         username, password = vm_credentials
         
-        # Échapper les caractères spéciaux dans le script
-        escaped_script = script.replace("'", "''").replace('"', '`"')
+        # Encoder le script en Base64 pour éviter les problèmes d'échappement
+        script_bytes = script.encode("utf-16-le")
+        script_b64 = base64.b64encode(script_bytes).decode("ascii")
         
         ps_script = f"""
         $ErrorActionPreference = 'Stop'
@@ -953,10 +958,16 @@ class HyperVClient(BaseHypervisor):
             (ConvertTo-SecureString '{password}' -AsPlainText -Force)
         )
         
+        # Décoder le script Base64
+        $scriptB64 = '{script_b64}'
+        $scriptBytes = [Convert]::FromBase64String($scriptB64)
+        $scriptText = [System.Text.Encoding]::Unicode.GetString($scriptBytes)
+        
         try {{
             $result = Invoke-Command -VMName $vmName -Credential $cred -ScriptBlock {{
-                {escaped_script}
-            }} -ErrorAction Stop
+                param($code)
+                Invoke-Expression $code
+            }} -ArgumentList $scriptText -ErrorAction Stop
             
             @{{
                 Success = $true
@@ -1827,3 +1838,170 @@ class HyperVClient(BaseHypervisor):
             disk_path=disk_path,
         )
         return True
+
+    # =========================================================================
+    # Informations réseau complètes
+    # =========================================================================
+
+    async def get_vm_network_info(
+        self,
+        vm_id: str,
+        vm_credentials: tuple[str, str] | None = None,
+    ) -> VMNetworkInfo:
+        """
+        Récupère les informations réseau complètes d'une VM.
+
+        Combine les infos Hyper-V (MAC, switch, VLAN) avec les infos
+        récupérées depuis l'intérieur de la VM via PowerShell Direct
+        (IP, masque, gateway, DNS, DHCP status).
+
+        Args:
+            vm_id: ID ou nom de la VM
+            vm_credentials: Tuple (username, password) pour récupérer les infos
+                           depuis l'intérieur de la VM. Si None, seules les
+                           infos Hyper-V sont retournées.
+
+        Returns:
+            VMNetworkInfo avec toutes les informations réseau
+        """
+        # Récupérer les infos côté Hyper-V
+        adapters = await self.list_network_adapters(vm_id)
+
+        network_info = VMNetworkInfo(
+            vm_name=vm_id,
+            adapters_hyperv=adapters,
+        )
+
+        # Si pas de credentials, retourner uniquement les infos Hyper-V
+        if not vm_credentials:
+            logger.info(
+                "hyperv_network_info_partial",
+                vm_id=vm_id,
+                adapters_count=len(adapters),
+            )
+            return network_info
+
+        # Script guest ultra-simplifié pour éviter limite ligne de commande
+        guest_script = '''$r=@{H=$env:COMPUTERNAME;I=@()};Get-NetAdapter|?{$_.Status-eq"Up"}|%{$a=$_;$i=$a.InterfaceIndex;$p=Get-NetIPAddress -InterfaceIndex $i -AddressFamily IPv4 -EA 0|Select -First 1;$c=Get-NetIPConfiguration -InterfaceIndex $i -EA 0;$d=Get-DnsClientServerAddress -InterfaceIndex $i -AddressFamily IPv4 -EA 0;$g=if($c.IPv4DefaultGateway){$c.IPv4DefaultGateway.NextHop}else{$null};$r.I+=@{N=$a.Name;M=$a.MacAddress;IP=if($p){$p.IPAddress}else{$null};P=if($p){$p.PrefixLength}else{$null};G=$g;D=$d.ServerAddresses}};$r|ConvertTo-Json -Depth 3'''
+
+        result = await self.execute_in_vm(vm_id, guest_script, vm_credentials, timeout=60)
+
+        if not result.success:
+            logger.warning(
+                "hyperv_network_info_guest_failed",
+                vm_id=vm_id,
+                error=result.error,
+            )
+            return network_info
+
+        # Parser les données guest (clés abrégées pour réduire taille script)
+        # Le résultat peut être encapsulé dans {'value': 'json_string'}
+        raw_output = result.output
+        if isinstance(raw_output, dict) and "value" in raw_output:
+            raw_output = raw_output["value"]
+        if isinstance(raw_output, str):
+            guest_data = self._parse_json_output(raw_output)
+        else:
+            guest_data = raw_output
+
+        if guest_data:
+            # Clés abrégées: H=Hostname, I=Interfaces
+            network_info.hostname = guest_data.get("H")
+
+            interfaces = guest_data.get("I", [])
+            if isinstance(interfaces, dict):
+                interfaces = [interfaces]
+
+            for iface in interfaces:
+                if iface:
+                    # Clés abrégées: D=DNS, G=Gateway, N=Name, M=MAC, IP=IP, P=Prefix
+                    dns_servers = iface.get("D", [])
+                    if isinstance(dns_servers, str):
+                        dns_servers = [dns_servers] if dns_servers else []
+
+                    network_info.interfaces_guest.append(
+                        NetworkInterfaceDetails(
+                            interface_name=iface.get("N", ""),
+                            interface_alias=iface.get("N", ""),  # Même que Name dans script simplifié
+                            interface_index=0,  # Non récupéré dans script simplifié
+                            mac_address=iface.get("M", ""),
+                            ip_address=iface.get("IP"),
+                            subnet_mask=None,  # Non récupéré dans script simplifié
+                            prefix_length=iface.get("P"),
+                            default_gateway=iface.get("G"),
+                            dns_servers=dns_servers,
+                            dhcp_enabled=False,  # Non récupéré dans script simplifié
+                            dhcp_server=None,
+                            connection_status="Up",  # Implicite car on filtre Status="Up"
+                            link_speed_mbps=None,
+                        )
+                    )
+
+        logger.info(
+            "hyperv_network_info_complete",
+            vm_id=vm_id,
+            hostname=network_info.hostname,
+            adapters_hyperv=len(network_info.adapters_hyperv),
+            interfaces_guest=len(network_info.interfaces_guest),
+            primary_ip=network_info.get_primary_ip(),
+            primary_mac=network_info.get_primary_mac(),
+        )
+
+        return network_info
+
+    async def get_vm_network_summary(
+        self,
+        vm_id: str,
+        vm_credentials: tuple[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Retourne un résumé des informations réseau d'une VM.
+
+        Format simplifié pour l'affichage/API.
+
+        Args:
+            vm_id: ID ou nom de la VM
+            vm_credentials: Credentials pour les infos guest (optionnel)
+
+        Returns:
+            Dictionnaire avec les infos réseau essentielles
+        """
+        network_info = await self.get_vm_network_info(vm_id, vm_credentials)
+
+        summary = {
+            "vm_name": network_info.vm_name,
+            "hostname": network_info.hostname,
+            "primary_ip": network_info.get_primary_ip(),
+            "primary_mac": network_info.get_primary_mac(),
+            "adapters": [],
+        }
+
+        # Combiner les infos Hyper-V et guest
+        for adapter in network_info.adapters_hyperv:
+            adapter_info = {
+                "name": adapter.name,
+                "switch": adapter.switch_name,
+                "mac": adapter.mac_address,
+                "vlan": adapter.vlan_id,
+                "ips_hyperv": adapter.ip_addresses,
+            }
+
+            # Chercher l'interface guest correspondante (par MAC)
+            if adapter.mac_address:
+                # Normaliser le format MAC pour comparaison
+                adapter_mac = adapter.mac_address.replace("-", "").replace(":", "").upper()
+                for guest_iface in network_info.interfaces_guest:
+                    guest_mac = guest_iface.mac_address.replace("-", "").replace(":", "").upper()
+                    if adapter_mac == guest_mac:
+                        adapter_info["ip"] = guest_iface.ip_address
+                        adapter_info["subnet_mask"] = guest_iface.subnet_mask
+                        adapter_info["gateway"] = guest_iface.default_gateway
+                        adapter_info["dns"] = guest_iface.dns_servers
+                        adapter_info["dhcp"] = guest_iface.dhcp_enabled
+                        adapter_info["status"] = guest_iface.connection_status
+                        adapter_info["speed_mbps"] = guest_iface.link_speed_mbps
+                        break
+
+            summary["adapters"].append(adapter_info)
+
+        return summary

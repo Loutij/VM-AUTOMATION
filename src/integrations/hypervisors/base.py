@@ -127,6 +127,84 @@ class NetworkAdapterInfo:
 
 
 @dataclass
+class NetworkInterfaceDetails:
+    """Informations réseau détaillées d'une interface depuis l'intérieur de la VM."""
+
+    interface_name: str
+    interface_alias: str
+    interface_index: int
+    mac_address: str
+    ip_address: str | None = None
+    subnet_mask: str | None = None
+    prefix_length: int | None = None
+    default_gateway: str | None = None
+    dns_servers: list[str] = field(default_factory=list)
+    dhcp_enabled: bool = False
+    dhcp_server: str | None = None
+    connection_status: str = "Unknown"
+    link_speed_mbps: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convertit en dictionnaire."""
+        return {
+            "interface_name": self.interface_name,
+            "interface_alias": self.interface_alias,
+            "interface_index": self.interface_index,
+            "mac_address": self.mac_address,
+            "ip_address": self.ip_address,
+            "subnet_mask": self.subnet_mask,
+            "prefix_length": self.prefix_length,
+            "default_gateway": self.default_gateway,
+            "dns_servers": self.dns_servers,
+            "dhcp_enabled": self.dhcp_enabled,
+            "dhcp_server": self.dhcp_server,
+            "connection_status": self.connection_status,
+            "link_speed_mbps": self.link_speed_mbps,
+        }
+
+
+@dataclass
+class VMNetworkInfo:
+    """Informations réseau complètes d'une VM (Hyper-V + Guest OS)."""
+
+    vm_name: str
+    hostname: str | None = None
+    adapters_hyperv: list[NetworkAdapterInfo] = field(default_factory=list)
+    interfaces_guest: list[NetworkInterfaceDetails] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convertit en dictionnaire."""
+        return {
+            "vm_name": self.vm_name,
+            "hostname": self.hostname,
+            "adapters_hyperv": [a.to_dict() for a in self.adapters_hyperv],
+            "interfaces_guest": [i.to_dict() for i in self.interfaces_guest],
+        }
+
+    def get_primary_ip(self) -> str | None:
+        """Retourne l'IP principale (première IPv4 non-loopback)."""
+        for iface in self.interfaces_guest:
+            if iface.ip_address and not iface.ip_address.startswith("127."):
+                return iface.ip_address
+        # Fallback sur les adresses Hyper-V
+        for adapter in self.adapters_hyperv:
+            for ip in adapter.ip_addresses:
+                if not ip.startswith("127.") and ":" not in ip:  # Exclure IPv6
+                    return ip
+        return None
+
+    def get_primary_mac(self) -> str | None:
+        """Retourne l'adresse MAC principale."""
+        for adapter in self.adapters_hyperv:
+            if adapter.mac_address:
+                return adapter.mac_address
+        for iface in self.interfaces_guest:
+            if iface.mac_address:
+                return iface.mac_address
+        return None
+
+
+@dataclass
 class IntegrationService:
     """Informations sur un service d'intégration Hyper-V."""
 
