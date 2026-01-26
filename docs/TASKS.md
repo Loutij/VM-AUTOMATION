@@ -66,7 +66,7 @@
 | 1.5.5 | Créer service API | ✅ | Agent | Axios + React Query, retry avec backoff |
 | 1.5.6 | Types TypeScript | ✅ | Agent | types/index.ts complet |
 | 1.5.7 | Composants UI de base | ✅ | Agent | StatCard, StatusBadge |
-| 1.5.8 | Activer routing dans App.tsx | ✅ | Agent | BrowserRouter + Routes configurées |
+| 1.5.8 | Activer routing dans App.tsx | 🔄 | - | Router installé, à connecter aux pages |
 
 ---
 

@@ -65,7 +65,7 @@ Outil interne d'automatisation complète du déploiement de machines virtuelles.
 | Service API | TERMINÉ | Axios avec retry backoff |
 | Types TypeScript | TERMINÉ | Interfaces complètes |
 | Dashboard principal | TERMINÉ | Stats, déploiements récents |
-| React Router | TERMINÉ | BrowserRouter + Routes configurées |
+| React Router | EN COURS | Installé, à activer dans App.tsx |
 | Page Hyperviseurs | À FAIRE | CRUD hyperviseurs |
 | Page VMs | À FAIRE | Liste, actions, détails |
 | Page Templates | À FAIRE | CRUD templates OS |
