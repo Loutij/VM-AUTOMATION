@@ -7,3 +7,4 @@ export { DataTable, type Column } from './DataTable';
 export { Input, Textarea } from './Input';
 export { Select } from './Select';
 export { EmptyState } from './EmptyState';
+export { Dropdown } from './Dropdown';

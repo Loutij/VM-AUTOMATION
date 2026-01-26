@@ -3,7 +3,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Server,
   Plus,
-  MoreVertical,
   Pencil,
   Trash2,
   Plug,
@@ -22,6 +21,7 @@ import {
   StatusBadge,
   EmptyState,
   useToast,
+  Dropdown,
   type Column,
 } from '../components/ui';
 import { hypervisorsApi } from '../services/api';
@@ -53,7 +53,6 @@ export function Hypervisors() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [selectedHypervisor, setSelectedHypervisor] = useState<Hypervisor | null>(null);
   const [formData, setFormData] = useState<HypervisorFormData>(defaultFormData);
-  const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
 
   // Fetch hypervisors
   const { data: hypervisors = [], isLoading, refetch } = useQuery({
@@ -134,7 +133,6 @@ export function Hypervisors() {
       setFormData(defaultFormData);
     }
     setIsModalOpen(true);
-    setActiveDropdown(null);
   };
 
   const handleCloseModal = () => {
@@ -164,12 +162,10 @@ export function Hypervisors() {
   const handleDelete = (hypervisor: Hypervisor) => {
     setSelectedHypervisor(hypervisor);
     setIsDeleteModalOpen(true);
-    setActiveDropdown(null);
   };
 
   const handleTestConnection = (hypervisor: Hypervisor) => {
     testConnectionMutation.mutate(hypervisor.id);
-    setActiveDropdown(null);
   };
 
   const columns: Column<Hypervisor>[] = [
@@ -227,60 +223,28 @@ export function Hypervisors() {
     },
   ];
 
-  const renderActions = (hypervisor: Hypervisor) => {
-    const isOpen = activeDropdown === hypervisor.id;
-    
-    return (
-      <div className="relative">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={(e) => {
-            e.stopPropagation();
-            setActiveDropdown(isOpen ? null : hypervisor.id);
-          }}
-          className="!p-1.5"
-        >
-          <MoreVertical size={16} />
-        </Button>
-        {isOpen && (
-          <>
-            <div
-              className="fixed inset-0"
-              style={{ zIndex: 9998 }}
-              onClick={() => setActiveDropdown(null)}
-            />
-            <div 
-              className="absolute right-0 mt-1 w-48 bg-dark-700 border border-dark-600 rounded-lg shadow-xl py-1"
-              style={{ zIndex: 9999, top: '100%' }}
-            >
-              <button
-                onClick={() => handleTestConnection(hypervisor)}
-                className="w-full flex items-center gap-2 px-4 py-2 text-sm text-dark-200 hover:bg-dark-600 transition-colors"
-              >
-                <Plug size={16} />
-                Tester la connexion
-              </button>
-              <button
-                onClick={() => handleOpenModal(hypervisor)}
-                className="w-full flex items-center gap-2 px-4 py-2 text-sm text-dark-200 hover:bg-dark-600 transition-colors"
-              >
-                <Pencil size={16} />
-                Modifier
-              </button>
-              <button
-                onClick={() => handleDelete(hypervisor)}
-                className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-500 hover:bg-dark-600 transition-colors"
-              >
-                <Trash2 size={16} />
-                Supprimer
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    );
-  };
+  const renderActions = (hypervisor: Hypervisor) => (
+    <Dropdown
+      items={[
+        {
+          label: 'Tester la connexion',
+          icon: <Plug size={16} />,
+          onClick: () => handleTestConnection(hypervisor),
+        },
+        {
+          label: 'Modifier',
+          icon: <Pencil size={16} />,
+          onClick: () => handleOpenModal(hypervisor),
+        },
+        {
+          label: 'Supprimer',
+          icon: <Trash2 size={16} />,
+          onClick: () => handleDelete(hypervisor),
+          variant: 'danger',
+        },
+      ]}
+    />
+  );
 
   return (
     <div className="min-h-screen bg-dark-900">

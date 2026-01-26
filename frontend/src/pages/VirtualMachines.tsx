@@ -6,7 +6,6 @@ import {
   Square,
   RotateCw,
   Trash2,
-  MoreVertical,
   RefreshCw,
   Server,
   Cpu,
@@ -22,6 +21,7 @@ import {
   StatusBadge,
   EmptyState,
   useToast,
+  Dropdown,
   type Column,
 } from '../components/ui';
 import { vmsApi, hypervisorsApi } from '../services/api';
@@ -36,7 +36,6 @@ export function VirtualMachines() {
     type: 'stop' | 'restart' | 'delete' | null;
     vm: VirtualMachine | null;
   }>({ type: null, vm: null });
-  const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const [selectedHypervisor, setSelectedHypervisor] = useState<string>('all');
 
   // Fetch VMs
@@ -213,73 +212,38 @@ export function VirtualMachines() {
   ];
 
   const renderActions = (vm: VirtualMachine) => {
-    const isOpen = activeDropdown === vm.id;
+    const items = [];
     
-    return (
-      <div className="relative">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={(e) => {
-            e.stopPropagation();
-            setActiveDropdown(isOpen ? null : vm.id);
-          }}
-          className="!p-1.5"
-        >
-          <MoreVertical size={16} />
-        </Button>
-        {isOpen && (
-          <>
-            <div
-              className="fixed inset-0"
-              style={{ zIndex: 9998 }}
-              onClick={() => setActiveDropdown(null)}
-            />
-            <div 
-              className="absolute right-0 mt-1 w-44 bg-dark-700 border border-dark-600 rounded-lg shadow-xl py-1"
-              style={{ zIndex: 9999, top: '100%' }}
-            >
-              {vm.state !== 'running' && (
-                <button
-                  onClick={() => handleStart(vm)}
-                  disabled={startMutation.isPending}
-                  className="w-full flex items-center gap-2 px-4 py-2 text-sm text-green-500 hover:bg-dark-600 transition-colors disabled:opacity-50"
-                >
-                  <Play size={16} />
-                  Démarrer
-                </button>
-              )}
-              {vm.state === 'running' && (
-                <>
-                  <button
-                    onClick={() => openActionModal('stop', vm)}
-                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-yellow-500 hover:bg-dark-600 transition-colors"
-                  >
-                    <Square size={16} />
-                    Arrêter
-                  </button>
-                  <button
-                    onClick={() => openActionModal('restart', vm)}
-                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-blue-500 hover:bg-dark-600 transition-colors"
-                  >
-                    <RotateCw size={16} />
-                    Redémarrer
-                  </button>
-                </>
-              )}
-              <div className="border-t border-dark-600 my-1" />
-              <button
-                onClick={() => openActionModal('delete', vm)}
-                className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-500 hover:bg-dark-600 transition-colors"
-              >
-                <Trash2 size={16} />
-                Supprimer
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    );
+    if (vm.state !== 'running') {
+      items.push({
+        label: 'Démarrer',
+        icon: <Play size={16} className="text-green-500" />,
+        onClick: () => handleStart(vm),
+        disabled: startMutation.isPending,
+      });
+    }
+    
+    if (vm.state === 'running') {
+      items.push({
+        label: 'Arrêter',
+        icon: <Square size={16} className="text-yellow-500" />,
+        onClick: () => openActionModal('stop', vm),
+      });
+      items.push({
+        label: 'Redémarrer',
+        icon: <RotateCw size={16} className="text-blue-500" />,
+        onClick: () => openActionModal('restart', vm),
+      });
+    }
+    
+    items.push({
+      label: 'Supprimer',
+      icon: <Trash2 size={16} />,
+      onClick: () => openActionModal('delete', vm),
+      variant: 'danger' as const,
+    });
+    
+    return <Dropdown items={items} />;
   };
 
   const getModalConfig = () => {

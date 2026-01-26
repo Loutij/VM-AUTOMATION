@@ -3,7 +3,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   FileCode,
   Plus,
-  MoreVertical,
   Pencil,
   Trash2,
   Copy,
@@ -21,6 +20,7 @@ import {
   Select,
   EmptyState,
   useToast,
+  Dropdown,
 } from '../components/ui';
 import { templatesApi } from '../services/api';
 import type { OSTemplate, OSFamily } from '../types';
@@ -55,7 +55,6 @@ export function Templates() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<OSTemplate | null>(null);
   const [formData, setFormData] = useState<TemplateFormData>(defaultFormData);
-  const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const [filterFamily, setFilterFamily] = useState<'all' | OSFamily>('all');
 
   // Fetch templates
@@ -279,53 +278,27 @@ export function Templates() {
                 className="card p-6 hover:border-dark-600 transition-colors relative group"
               >
                 {/* Actions dropdown */}
-                <div className="absolute top-4 right-4">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActiveDropdown(activeDropdown === template.id ? null : template.id);
-                    }}
-                    className="!p-1.5 opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <MoreVertical size={16} />
-                  </Button>
-                  {activeDropdown === template.id && (
-                    <>
-                      <div
-                        className="fixed inset-0"
-                        style={{ zIndex: 9998 }}
-                        onClick={() => setActiveDropdown(null)}
-                      />
-                      <div 
-                        className="absolute right-0 mt-1 w-40 bg-dark-700 border border-dark-600 rounded-lg shadow-xl py-1"
-                        style={{ zIndex: 9999, top: '100%' }}
-                      >
-                        <button
-                          onClick={() => handleOpenModal(template)}
-                          className="w-full flex items-center gap-2 px-4 py-2 text-sm text-dark-200 hover:bg-dark-600 transition-colors"
-                        >
-                          <Pencil size={16} />
-                          Modifier
-                        </button>
-                        <button
-                          onClick={() => handleDuplicate(template)}
-                          className="w-full flex items-center gap-2 px-4 py-2 text-sm text-dark-200 hover:bg-dark-600 transition-colors"
-                        >
-                          <Copy size={16} />
-                          Dupliquer
-                        </button>
-                        <button
-                          onClick={() => handleDelete(template)}
-                          className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-500 hover:bg-dark-600 transition-colors"
-                        >
-                          <Trash2 size={16} />
-                          Supprimer
-                        </button>
-                      </div>
-                    </>
-                  )}
+                <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Dropdown
+                    items={[
+                      {
+                        label: 'Modifier',
+                        icon: <Pencil size={16} />,
+                        onClick: () => handleOpenModal(template),
+                      },
+                      {
+                        label: 'Dupliquer',
+                        icon: <Copy size={16} />,
+                        onClick: () => handleDuplicate(template),
+                      },
+                      {
+                        label: 'Supprimer',
+                        icon: <Trash2 size={16} />,
+                        onClick: () => handleDelete(template),
+                        variant: 'danger',
+                      },
+                    ]}
+                  />
                 </div>
 
                 {/* Template content */}
