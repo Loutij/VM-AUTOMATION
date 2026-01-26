@@ -289,10 +289,10 @@
 ### 6.2 Monitoring Temps Réel (Backend)
 | ID | Tâche | Statut | Assigné | Notes |
 |----|-------|--------|---------|-------|
-| 6.2.1 | WebSocket Server (FastAPI) | ⬜ | - | Broadcast événements déploiement |
-| 6.2.2 | Endpoint SSE alternatif | ⬜ | - | Fallback si WS non supporté |
-| 6.2.3 | Route /dashboard/stats | ⬜ | - | Agrégation stats temps réel |
-| 6.2.4 | Notifications push | ⬜ | - | Déploiement terminé/échec |
+| 6.2.1 | WebSocket Server (FastAPI) | ✅ | Agent | WebSocketManager + rooms + subscriptions |
+| 6.2.2 | Endpoint SSE alternatif | ✅ | Agent | /api/v1/realtime/sse avec heartbeat |
+| 6.2.3 | Route /dashboard/stats | ✅ | Agent | Stats VMs, déploiements, hyperviseurs |
+| 6.2.4 | Notifications push | ✅ | Agent | emit_deployment_event(), emit_vm_event() |
 
 ---
 
@@ -415,11 +415,11 @@
 | Phase 3 | 26 | 4 | 0 | 22 | **85%** |
 | Phase 4 | 23 | 3 | 0 | 20 | **87%** |
 | Phase 5 | 20 | 7 | 0 | 13 | **65%** |
-| Phase 6 | 8 | 6 | 0 | 2 | **25%** |
+| Phase 6 | 8 | 2 | 0 | 6 | **75%** |
 | Phase 7 | 36 | 17 | 0 | 19 | **53%** |
 | Phase 8 | 13 | 12 | 0 | 1 | **8%** |
 | Phase 9 | 4 | 4 | 0 | 0 | 0% |
-| **TOTAL** | **188** | **61** | **0** | **127** | **~68%** |
+| **TOTAL** | **188** | **57** | **0** | **131** | **~70%** |
 
 ---
 

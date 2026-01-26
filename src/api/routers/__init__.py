@@ -5,12 +5,24 @@
 Package contenant tous les routers FastAPI.
 """
 
-from src.api.routers import deployments, health, hypervisors, templates, vms
+from src.api.routers import (
+    auth,
+    callbacks,
+    deployments,
+    health,
+    hypervisors,
+    realtime,
+    templates,
+    vms,
+)
 
 __all__ = [
+    "auth",
+    "callbacks",
+    "deployments",
     "health",
     "hypervisors",
-    "vms",
+    "realtime",
     "templates",
-    "deployments",
+    "vms",
 ]

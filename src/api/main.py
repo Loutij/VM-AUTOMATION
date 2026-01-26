@@ -20,7 +20,7 @@ from src.common.exceptions import VMAutomationError
 from src.common.logging import get_logger, setup_logging
 
 # Routers
-from src.api.routers import auth, callbacks, health, hypervisors, vms, deployments, templates
+from src.api.routers import auth, callbacks, health, hypervisors, vms, deployments, templates, realtime
 
 logger = get_logger(__name__)
 
@@ -225,6 +225,12 @@ def register_routes(app: FastAPI) -> None:
         callbacks.router,
         prefix=f"{api_prefix}/callbacks",
         tags=["Callbacks"],
+    )
+    
+    app.include_router(
+        realtime.router,
+        prefix=f"{api_prefix}/realtime",
+        tags=["Realtime"],
     )
 
 

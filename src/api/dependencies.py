@@ -31,6 +31,9 @@ security = HTTPBearer(auto_error=False)
 # Type alias pour injection de session DB
 DbSession = Annotated[AsyncSession, Depends(get_db_session)]
 
+# Alias pour compatibilité
+get_db = get_db_session
+
 
 # =============================================================================
 # Authentication
