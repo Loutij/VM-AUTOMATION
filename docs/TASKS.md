@@ -177,6 +177,9 @@
 | 3.5.2 | Polling PowerShell Direct | ✅ | Agent | execute_in_vm(), wait_for_vm_ready() |
 | 3.5.3 | Callback HTTP | ⬜ | - | Script post-install |
 | 3.5.4 | Timeout et gestion erreurs | ✅ | Agent | Intégré dans wait_for_vm_ready() |
+| 3.5.5 | Déploiement DISM | ✅ | Agent | deploy_with_dism() évite "Press any key" (~90s) |
+| 3.5.6 | Création ISO custom | ✅ | Agent | create_custom_iso() avec efisys_noprompt.bin |
+| 3.5.7 | OOBE automatique | 🔄 | - | EN COURS - nécessite image WIM syspreppée (voir HANDOFF.md) |
 
 ### 3.6 Gestion Partitionnement
 | ID | Tâche | Statut | Assigné | Notes |

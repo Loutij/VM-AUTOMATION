@@ -38,8 +38,10 @@ Outil interne d'automatisation complète du déploiement de machines virtuelles.
 | Template Cloud-init | TERMINÉ | Générique Linux |
 | Génération dynamique | TERMINÉ | Jinja2 avec injection paramètres |
 | Détection fin install | TERMINÉ | Heartbeat + PowerShell Direct |
-| Déploiement DISM | TERMINÉ | deploy_with_dism() - Déploie Windows directement sur VHD (évite "Press any key") |
+| Déploiement DISM | TERMINÉ | deploy_with_dism() - Déploie Windows directement sur VHD (~90s, évite "Press any key") |
 | Injection unattend | TERMINÉ | inject_unattend() - Injecte autounattend.xml via VHDX dédié |
+| Création ISO custom | TERMINÉ | create_custom_iso() - oscdimg.exe + efisys_noprompt.bin |
+| OOBE automatique | EN COURS | Windows OOBE reste manuel après DISM - voir docs/HANDOFF.md pour solutions |
 
 ### Module 4 : Post-Installation
 | Fonctionnalité | Statut | Description |
