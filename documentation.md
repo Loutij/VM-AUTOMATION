@@ -304,6 +304,31 @@ docker-compose -f docker-compose.prod.yml up -d
 
 ## Changelog
 
+### v0.8.0 (2026-01-27) - Marketplace Logiciels
+- **Catalogue de logiciels complet** :
+  - Plus de 100 packages organisés par catégorie
+  - 14 catégories : Rôles Windows, Accès distant, Bases de données, Serveurs web, Développement, Runtimes, Monitoring, Sécurité, Utilitaires, Navigateurs, Containers, Transfert fichiers, Réseau, Backup
+  - Support des différents gestionnaires : Chocolatey, Windows Feature, Windows Capability
+- **Profils pré-configurés** :
+  - `minimal` : 7-Zip, Notepad++, Chrome
+  - `serveur_web` : IIS, URL Rewrite, PHP, MySQL
+  - `controleur_domaine` : AD DS, DNS, DHCP, Windows Backup
+  - `developpement` : Git, VS Code, Node.js, Python, Docker
+  - `base_donnees` : SQL Server Express, SSMS
+  - `monitoring` : Zabbix Agent, Prometheus Exporter, Sysinternals
+  - `securite` : Sysinternals, Nmap, Wireshark, Malwarebytes
+  - `complet` : Combinaison des outils essentiels
+- **API Marketplace** :
+  - `GET /software-catalog` : liste paginée avec filtres (catégorie, recherche, featured)
+  - `GET /software-catalog/categories` : catégories avec compteurs
+  - `GET /software-catalog/profiles` : profils pré-configurés
+  - `POST /software-catalog/seed` : initialisation du catalogue par défaut
+- **Frontend Marketplace** :
+  - Page dédiée avec vue grille/liste
+  - Recherche et filtres par catégorie
+  - Sélection de profils pré-configurés
+  - Sélection "à la carte" intégrée au wizard de déploiement
+
 ### v0.7.0 (2026-01-27) - Intégration Post-Install Complète
 - **Workflow de déploiement complet** :
   - Nouvelles étapes : `WAITING_VM_READY` → `POST_CONFIGURATION` → `INSTALLING_SOFTWARE` → `FINALIZING`
