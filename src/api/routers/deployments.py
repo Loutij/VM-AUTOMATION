@@ -513,7 +513,8 @@ async def resume_deployment(
                 config = dep.config or {}
                 admin_password = config.get("admin_password", "")
                 credentials = ("Administrator", admin_password)
-                vm_name = vm_obj.hypervisor_vm_id or vm_obj.name
+                # Utiliser le nom de la VM, pas le GUID hypervisor_vm_id
+                vm_name = vm_obj.name
                 
                 logger.info("resume_starting", deployment_id=str(dep_id), vm_name=vm_name)
                 
