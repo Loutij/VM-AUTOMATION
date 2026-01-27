@@ -18,6 +18,8 @@ Outil interne d'automatisation complète du déploiement de machines virtuelles.
 | Gestion Virtual Switches | TERMINÉ | CRUD switches réseau |
 | Monitoring VM | TERMINÉ | Heartbeat, Integration Services, PowerShell Direct |
 | Infos réseau complètes | TERMINÉ | get_vm_network_info(), get_vm_network_summary() |
+| Synchronisation VMs | TERMINÉ | sync_all_vms() - Sync bidirectionnelle Hyper-V ↔ DB (état, IP, MAC, switch, VLAN) |
+| Détails VM complets | TERMINÉ | get_vm_full_details() - CPU, RAM, disques, réseau, services intégration |
 | Support VMware | À FAIRE | Client pyVmomi (futur) |
 
 ### Module 2 : Création de VMs
@@ -82,7 +84,7 @@ Outil interne d'automatisation complète du déploiement de machines virtuelles.
 | React Router | TERMINÉ | 7 routes configurées dans App.tsx |
 | Dashboard principal | TERMINÉ | Stats, déploiements récents |
 | Page Hyperviseurs | TERMINÉ | CRUD complet + test connexion |
-| Page VMs | TERMINÉ | Liste avec stats, filtres, actions (start/stop/restart/delete) |
+| Page VMs | TERMINÉ | Liste avec stats, filtres, actions, sync Hyper-V, détails complets |
 | Page Templates | TERMINÉ | CRUD grille avec filtres OS, duplicate |
 | Page Déploiements | TERMINÉ | Timeline, logs modal, cancel/retry, auto-refresh |
 | Wizard création VM | À FAIRE | Multi-étapes, validation |
@@ -281,7 +283,20 @@ docker-compose -f docker-compose.prod.yml up -d
 
 ## Changelog
 
-### v0.5.0 (2026-01-26) - En cours
+### v0.6.0 (2026-01-27) - En cours
+- **Synchronisation VMs Hyper-V ↔ DB** :
+  - Nouvel endpoint `POST /hypervisors/{id}/sync`
+  - Méthode `sync_all_vms()` : importe les VMs manquantes, met à jour l'état, marque les VMs supprimées
+  - Synchronisation IP, MAC, switch réseau, VLAN
+  - Bouton "Synchroniser avec Hyper-V" dans l'interface web
+- **Détails VM améliorés** :
+  - Fix script PowerShell trop long pour WinRM
+  - Panel détails complet : CPU, RAM, disques (taille/utilisé), réseau (IP/MAC/switch), services intégration
+- **Déploiement Windows** :
+  - Amélioration DISM avec bypass OOBE
+  - Configuration réseau automatique (Network Discovery, File Sharing)
+
+### v0.5.0 (2026-01-26)
 - **Avancement global** : ~70% (132/189 tâches)
 - **Récupération infos réseau complètes** :
   - get_vm_network_info() - IP, MAC, gateway, DNS, hostname
