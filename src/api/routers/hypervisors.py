@@ -452,3 +452,89 @@ async def list_physical_adapters(
     adapters = await client.list_physical_adapters()
     
     return adapters
+
+
+# =============================================================================
+# Synchronisation
+# =============================================================================
+
+
+class SyncOptions(BaseModel):
+    """Options de synchronisation."""
+    
+    import_new: bool = Field(
+        default=True,
+        description="Importer les VMs présentes sur Hyper-V mais pas en base"
+    )
+    update_existing: bool = Field(
+        default=True,
+        description="Mettre à jour l'état des VMs existantes"
+    )
+    mark_missing: bool = Field(
+        default=True,
+        description="Marquer les VMs en base qui n'existent plus sur Hyper-V"
+    )
+
+
+class SyncResult(BaseModel):
+    """Résultat de synchronisation."""
+    
+    success: bool
+    imported: int
+    updated: int
+    marked_missing: int
+    errors: list[str]
+    details: dict | None = None
+
+
+@router.post(
+    "/{hypervisor_id}/sync",
+    response_model=SyncResult,
+    summary="Synchroniser les VMs",
+    description="Synchronise les VMs entre l'hyperviseur et la base de données. "
+                "Importe les nouvelles VMs, met à jour les existantes, et marque celles supprimées.",
+)
+async def sync_hypervisor_vms(
+    db: DbSession,
+    hypervisor_id: UUID,
+    options: SyncOptions | None = None,
+) -> SyncResult:
+    """Synchronise les VMs de l'hyperviseur avec la base de données."""
+    logger.info(
+        "syncing_hypervisor_vms",
+        hypervisor_id=str(hypervisor_id),
+        options=options.model_dump() if options else None,
+    )
+    
+    if options is None:
+        options = SyncOptions()
+    
+    service = VMService(db)
+    
+    try:
+        result = await service.sync_all_vms(
+            hypervisor_id=hypervisor_id,
+            import_new=options.import_new,
+            update_existing=options.update_existing,
+            mark_missing=options.mark_missing,
+        )
+        
+        await db.commit()
+        
+        return SyncResult(
+            success=len(result["errors"]) == 0,
+            imported=result["imported"],
+            updated=result["updated"],
+            marked_missing=result["marked_missing"],
+            errors=result["errors"],
+            details=result["details"],
+        )
+    except Exception as e:
+        logger.error("sync_failed", hypervisor_id=str(hypervisor_id), error=str(e))
+        return SyncResult(
+            success=False,
+            imported=0,
+            updated=0,
+            marked_missing=0,
+            errors=[f"Erreur de synchronisation: {str(e)}"],
+        )

@@ -32,6 +32,7 @@ from src.domain.models import (
     OSTemplate,
     VirtualMachine,
     VMState,
+    VMStatus,
 )
 from src.domain.template_engine import get_template_engine
 from src.integrations.hypervisors import HyperVClient, VMSpecs
@@ -356,6 +357,181 @@ class VMService:
             await self.db.flush()
         
         return vm
+
+    async def sync_all_vms(
+        self,
+        hypervisor_id: UUID,
+        import_new: bool = True,
+        update_existing: bool = True,
+        mark_missing: bool = True,
+    ) -> dict[str, Any]:
+        """
+        Synchronise toutes les VMs d'un hyperviseur avec la base de données.
+        
+        Args:
+            hypervisor_id: ID de l'hyperviseur
+            import_new: Importer les VMs présentes sur Hyper-V mais pas en DB
+            update_existing: Mettre à jour l'état des VMs existantes
+            mark_missing: Marquer les VMs en DB qui n'existent plus sur Hyper-V
+            
+        Returns:
+            Résumé de la synchronisation avec compteurs
+        """
+        result = {
+            "imported": 0,
+            "updated": 0,
+            "marked_missing": 0,
+            "errors": [],
+            "details": {
+                "imported_vms": [],
+                "updated_vms": [],
+                "missing_vms": [],
+            },
+        }
+        
+        # Récupérer l'hyperviseur et le client
+        hypervisor = await self.get_hypervisor(hypervisor_id)
+        client = await self._get_hypervisor_client(hypervisor_id)
+        
+        # Récupérer les VMs depuis Hyper-V
+        try:
+            hyperv_vms = await client.list_vms()
+        except Exception as e:
+            logger.error("sync_list_vms_failed", error=str(e))
+            result["errors"].append(f"Impossible de lister les VMs Hyper-V: {str(e)}")
+            return result
+        
+        # Créer un dictionnaire des VMs Hyper-V par nom et par ID
+        hyperv_by_name = {vm.name.lower(): vm for vm in hyperv_vms}
+        hyperv_by_id = {vm.id: vm for vm in hyperv_vms}
+        
+        # Récupérer les VMs existantes en DB pour cet hyperviseur
+        db_vms = await self.list_vms(hypervisor_id=hypervisor_id)
+        db_by_name = {vm.name.lower(): vm for vm in db_vms}
+        db_by_hyperv_id = {vm.hypervisor_vm_id: vm for vm in db_vms if vm.hypervisor_vm_id}
+        
+        # Mapper les états Hyper-V vers VMState
+        state_mapping = {
+            "Running": VMState.RUNNING,
+            "Off": VMState.STOPPED,
+            "Paused": VMState.PAUSED,
+            "Saved": VMState.SUSPENDED,
+            "2": VMState.RUNNING,  # Certaines versions retournent des codes
+            "3": VMState.STOPPED,
+        }
+        
+        # 1. Importer les nouvelles VMs (présentes sur Hyper-V mais pas en DB)
+        if import_new:
+            for hyperv_vm in hyperv_vms:
+                # Vérifier si la VM existe déjà en DB (par nom ou par ID Hyper-V)
+                if hyperv_vm.name.lower() in db_by_name:
+                    continue
+                if hyperv_vm.id in db_by_hyperv_id:
+                    continue
+                
+                try:
+                    # Créer l'entrée en DB
+                    new_vm = VirtualMachine(
+                        id=uuid4(),
+                        name=hyperv_vm.name,
+                        hypervisor_id=hypervisor_id,
+                        hypervisor_vm_id=hyperv_vm.id,
+                        cpu_count=hyperv_vm.cpu_count or 2,
+                        ram_gb=int(hyperv_vm.ram_gb or 4),
+                        disk_gb=60,  # Valeur par défaut, sera mise à jour si possible
+                        network_switch=settings.hyperv_default_switch,
+                        state=state_mapping.get(str(hyperv_vm.state), VMState.UNKNOWN),
+                        status=VMStatus.CREATED,
+                        generation=hyperv_vm.generation or 2,
+                    )
+                    self.db.add(new_vm)
+                    result["imported"] += 1
+                    result["details"]["imported_vms"].append({
+                        "name": hyperv_vm.name,
+                        "hyperv_id": hyperv_vm.id,
+                        "state": str(hyperv_vm.state),
+                    })
+                    logger.info(
+                        "vm_imported",
+                        name=hyperv_vm.name,
+                        hyperv_id=hyperv_vm.id,
+                    )
+                except Exception as e:
+                    error_msg = f"Erreur import VM '{hyperv_vm.name}': {str(e)}"
+                    result["errors"].append(error_msg)
+                    logger.error("vm_import_error", name=hyperv_vm.name, error=str(e))
+        
+        # 2. Mettre à jour les VMs existantes
+        if update_existing:
+            for db_vm in db_vms:
+                # Trouver la VM correspondante sur Hyper-V
+                hyperv_vm = None
+                if db_vm.hypervisor_vm_id and db_vm.hypervisor_vm_id in hyperv_by_id:
+                    hyperv_vm = hyperv_by_id[db_vm.hypervisor_vm_id]
+                elif db_vm.name.lower() in hyperv_by_name:
+                    hyperv_vm = hyperv_by_name[db_vm.name.lower()]
+                
+                if hyperv_vm:
+                    try:
+                        # Mettre à jour l'état
+                        new_state = state_mapping.get(str(hyperv_vm.state), VMState.UNKNOWN)
+                        old_state = db_vm.state
+                        
+                        db_vm.state = new_state
+                        db_vm.hypervisor_vm_id = hyperv_vm.id  # S'assurer que l'ID est lié
+                        
+                        # Mettre à jour les specs si différentes
+                        if hyperv_vm.cpu_count and hyperv_vm.cpu_count != db_vm.cpu_count:
+                            db_vm.cpu_count = hyperv_vm.cpu_count
+                        if hyperv_vm.ram_gb and int(hyperv_vm.ram_gb) != db_vm.ram_gb:
+                            db_vm.ram_gb = int(hyperv_vm.ram_gb)
+                        
+                        result["updated"] += 1
+                        result["details"]["updated_vms"].append({
+                            "name": db_vm.name,
+                            "old_state": old_state.value,
+                            "new_state": new_state.value,
+                        })
+                    except Exception as e:
+                        error_msg = f"Erreur mise à jour VM '{db_vm.name}': {str(e)}"
+                        result["errors"].append(error_msg)
+                        logger.error("vm_update_error", name=db_vm.name, error=str(e))
+        
+        # 3. Marquer les VMs manquantes (en DB mais plus sur Hyper-V)
+        if mark_missing:
+            for db_vm in db_vms:
+                # Vérifier si la VM existe sur Hyper-V
+                exists_on_hyperv = (
+                    db_vm.name.lower() in hyperv_by_name or
+                    (db_vm.hypervisor_vm_id and db_vm.hypervisor_vm_id in hyperv_by_id)
+                )
+                
+                if not exists_on_hyperv and db_vm.state != VMState.UNKNOWN:
+                    db_vm.state = VMState.UNKNOWN
+                    db_vm.status = VMStatus.DELETED
+                    result["marked_missing"] += 1
+                    result["details"]["missing_vms"].append({
+                        "name": db_vm.name,
+                        "db_id": str(db_vm.id),
+                    })
+                    logger.warning(
+                        "vm_marked_missing",
+                        name=db_vm.name,
+                        db_id=str(db_vm.id),
+                    )
+        
+        await self.db.flush()
+        
+        logger.info(
+            "sync_completed",
+            hypervisor=hypervisor.name,
+            imported=result["imported"],
+            updated=result["updated"],
+            marked_missing=result["marked_missing"],
+            errors=len(result["errors"]),
+        )
+        
+        return result
 
     # =========================================================================
     # Template Operations

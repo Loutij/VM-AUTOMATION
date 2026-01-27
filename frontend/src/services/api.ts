@@ -175,6 +175,49 @@ export const hypervisorsApi = {
     const response = await apiClient.get<PhysicalAdapter[]>(`/hypervisors/${id}/physical-adapters`);
     return response.data;
   },
+
+  // Synchronisation des VMs avec Hyper-V
+  syncVms: async (
+    id: string,
+    options?: {
+      import_new?: boolean;
+      update_existing?: boolean;
+      mark_missing?: boolean;
+    }
+  ): Promise<{
+    success: boolean;
+    imported: number;
+    updated: number;
+    marked_missing: number;
+    errors: string[];
+    details?: {
+      imported_vms: { name: string; hyperv_id: string; state: string }[];
+      updated_vms: { name: string; old_state: string; new_state: string }[];
+      missing_vms: { name: string; db_id: string }[];
+    };
+  }> => {
+    const response = await apiClient.post(`/hypervisors/${id}/sync`, options || {}, {
+      timeout: 60000, // 60s pour la synchronisation
+    });
+    return response.data;
+  },
+
+  // Lister les VMs directement depuis Hyper-V (non filtrées par la DB)
+  listHypervisorVms: async (id: string): Promise<{
+    id: string;
+    name: string;
+    state: string;
+    cpu_count: number;
+    ram_gb: number;
+    uptime?: string;
+    status?: string;
+    notes?: string;
+    generation?: number;
+    path?: string;
+  }[]> => {
+    const response = await apiClient.get(`/hypervisors/${id}/vms`);
+    return response.data;
+  },
 };
 
 // ============================================

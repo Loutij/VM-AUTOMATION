@@ -20,6 +20,7 @@ import {
   Clock,
   Camera,
   Maximize2,
+  CloudDownload,
 } from 'lucide-react';
 import { Header } from '../components/layout';
 import {
@@ -122,6 +123,35 @@ export function VirtualMachines() {
     },
     onError: () => {
       addToast({ type: 'error', title: 'Erreur lors de la suppression' });
+    },
+  });
+
+  // Sync VMs mutation
+  const syncMutation = useMutation({
+    mutationFn: (hypervisorId: string) => hypervisorsApi.syncVms(hypervisorId),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['vms'] });
+      if (result.success) {
+        const messages: string[] = [];
+        if (result.imported > 0) messages.push(`${result.imported} importée(s)`);
+        if (result.updated > 0) messages.push(`${result.updated} mise(s) à jour`);
+        if (result.marked_missing > 0) messages.push(`${result.marked_missing} marquée(s) absente(s)`);
+        
+        addToast({
+          type: 'success',
+          title: 'Synchronisation terminée',
+          description: messages.length > 0 ? messages.join(', ') : 'Aucun changement',
+        });
+      } else {
+        addToast({
+          type: 'warning',
+          title: 'Synchronisation avec erreurs',
+          description: result.errors.join(', '),
+        });
+      }
+    },
+    onError: () => {
+      addToast({ type: 'error', title: 'Erreur lors de la synchronisation' });
     },
   });
 
@@ -433,14 +463,41 @@ export function VirtualMachines() {
               ))}
             </select>
           </div>
-          <Button
-            variant="secondary"
-            leftIcon={<RefreshCw size={18} />}
-            onClick={() => refetch()}
-            isLoading={vmsLoading}
-          >
-            Actualiser
-          </Button>
+          <div className="flex gap-2">
+            {selectedHypervisor !== 'all' && (
+              <Button
+                variant="primary"
+                leftIcon={<CloudDownload size={18} />}
+                onClick={() => syncMutation.mutate(selectedHypervisor)}
+                isLoading={syncMutation.isPending}
+                title="Synchronise les VMs entre Hyper-V et la base de données"
+              >
+                Synchroniser avec Hyper-V
+              </Button>
+            )}
+            {selectedHypervisor === 'all' && hypervisors.length > 0 && (
+              <Button
+                variant="primary"
+                leftIcon={<CloudDownload size={18} />}
+                onClick={() => {
+                  // Synchroniser tous les hyperviseurs
+                  hypervisors.forEach((h) => syncMutation.mutate(h.id));
+                }}
+                isLoading={syncMutation.isPending}
+                title="Synchronise les VMs de tous les hyperviseurs"
+              >
+                Synchroniser tout
+              </Button>
+            )}
+            <Button
+              variant="secondary"
+              leftIcon={<RefreshCw size={18} />}
+              onClick={() => refetch()}
+              isLoading={vmsLoading}
+            >
+              Actualiser
+            </Button>
+          </div>
         </div>
 
         {/* Data table */}
