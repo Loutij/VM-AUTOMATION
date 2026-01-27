@@ -405,8 +405,28 @@ class DeploymentLog(Base):
         return f"<DeploymentLog(id={self.id}, level={self.level}, step={self.step})>"
 
 
+class SoftwareCategory(str, enum.Enum):
+    """Catégories de logiciels pour la marketplace."""
+
+    UTILITIES = "utilities"
+    DEVELOPMENT = "development"
+    DATABASE = "database"
+    WEBSERVER = "webserver"
+    MONITORING = "monitoring"
+    SECURITY = "security"
+    NETWORKING = "networking"
+    OFFICE = "office"
+    MEDIA = "media"
+    RUNTIME = "runtime"
+    OTHER = "other"
+
+
 class SoftwarePackage(Base, TimestampMixin):
-    """Modèle pour un package logiciel."""
+    """
+    Modèle pour un package logiciel dans la marketplace.
+    
+    Représente un logiciel installable avec sa configuration par défaut.
+    """
 
     __tablename__ = "software_packages"
 
@@ -415,19 +435,85 @@ class SoftwarePackage(Base, TimestampMixin):
         primary_key=True,
         default=uuid4,
     )
-    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    # Identifiants
+    name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    display_name: Mapped[str] = mapped_column(String(150), nullable=False)
     version: Mapped[str] = mapped_column(String(50), default="latest", nullable=False)
+    
+    # Description
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    short_description: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    
+    # Catégorie et tags
+    category: Mapped[SoftwareCategory] = mapped_column(
+        Enum(SoftwareCategory, values_callable=lambda x: [e.value for e in x]),
+        default=SoftwareCategory.OTHER,
+        nullable=False,
+    )
+    tags: Mapped[list[str]] = mapped_column(
+        JSONB, default=list, nullable=False
+    )
+    
+    # Compatibilité OS
     os_family: Mapped[OSFamily | None] = mapped_column(
         Enum(OSFamily, values_callable=lambda x: [e.value for e in x]),
         nullable=True,
         comment="NULL = compatible tous OS"
     )
+    
+    # Package manager et commandes
+    package_manager: Mapped[str] = mapped_column(
+        String(20), default="chocolatey", nullable=False,
+        comment="chocolatey, winget, apt, dnf"
+    )
+    package_id: Mapped[str] = mapped_column(
+        String(100), nullable=False,
+        comment="ID du package dans le gestionnaire (ex: 7zip, notepadplusplus)"
+    )
     install_command_windows: Mapped[str | None] = mapped_column(Text, nullable=True)
     install_command_linux: Mapped[str | None] = mapped_column(Text, nullable=True)
-    category: Mapped[str] = mapped_column(
-        String(50), default="other", nullable=False
+    
+    # Configuration par défaut
+    default_config: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, default=dict, nullable=False,
+        comment="Configuration par défaut du logiciel après installation"
     )
+    config_schema: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB, nullable=True,
+        comment="Schéma JSON des options de configuration disponibles"
+    )
+    
+    # Métadonnées
+    icon: Mapped[str | None] = mapped_column(
+        String(255), nullable=True,
+        comment="URL ou nom d'icône"
+    )
+    website: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    documentation_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    
+    # Dépendances et conflits
+    dependencies: Mapped[list[str]] = mapped_column(
+        JSONB, default=list, nullable=False,
+        comment="Liste des package_id requis"
+    )
+    conflicts: Mapped[list[str]] = mapped_column(
+        JSONB, default=list, nullable=False,
+        comment="Liste des package_id incompatibles"
+    )
+    
+    # Statut
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_featured: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False,
+        comment="Afficher en vedette dans la marketplace"
+    )
+    install_time_minutes: Mapped[int] = mapped_column(
+        Integer, default=5, nullable=False,
+        comment="Temps d'installation estimé en minutes"
+    )
+    
+    # Statistiques
+    install_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     # Relations
     vm_installations: Mapped[list["VMSoftware"]] = relationship(
@@ -436,7 +522,7 @@ class SoftwarePackage(Base, TimestampMixin):
     )
 
     def __repr__(self) -> str:
-        return f"<SoftwarePackage(id={self.id}, name={self.name}, version={self.version})>"
+        return f"<SoftwarePackage(id={self.id}, name={self.name}, category={self.category})>"
 
 
 class VMSoftware(Base):

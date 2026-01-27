@@ -53,7 +53,7 @@ export interface UseWebSocketReturn {
   disconnect: () => void;
 }
 
-const DEFAULT_WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/v1/ws`;
+const DEFAULT_WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/v1/realtime/ws`;
 
 /**
  * Hook pour gérer les connexions WebSocket avec reconnexion automatique
