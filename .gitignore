@@ -228,7 +228,10 @@ templates/kickstart/generated/
 
 # Celery
 celerybeat-schedule
+celerybeat-schedule-shm
+celerybeat-schedule-wal
 celerybeat.pid
+*.pid
 
 # Docker
 docker-compose.override.yml

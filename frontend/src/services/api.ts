@@ -449,6 +449,10 @@ export const deploymentsApi = {
       created_at: log.created_at,
     }));
   },
+
+  delete: async (id: string): Promise<void> => {
+    await apiClient.delete(`/deployments/${id}`);
+  },
 };
 
 // ============================================

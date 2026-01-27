@@ -373,3 +373,53 @@ async def get_deployment_logs(
         details=log.details,
         created_at=log.created_at,
     ) for log in logs]
+
+
+@router.delete(
+    "/{deployment_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Supprimer un déploiement",
+    description="Supprime un déploiement terminé, échoué ou annulé.",
+)
+async def delete_deployment(
+    db: DbSession,
+    deployment_id: UUID,
+) -> None:
+    """Supprime un déploiement et ses logs associés."""
+    logger.info("deleting_deployment", deployment_id=str(deployment_id))
+    
+    from sqlalchemy import select, delete as sql_delete
+    from src.domain.models import Deployment, DeploymentLog
+    
+    # Vérifier que le déploiement existe
+    result = await db.execute(
+        select(Deployment).where(Deployment.id == deployment_id)
+    )
+    deployment = result.scalar_one_or_none()
+    
+    if not deployment:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Deployment not found")
+    
+    # Vérifier que le déploiement n'est pas en cours
+    if deployment.status not in (
+        DeploymentStatus.COMPLETED,
+        DeploymentStatus.FAILED,
+        DeploymentStatus.CANCELLED,
+    ):
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete an active deployment. Cancel it first."
+        )
+    
+    # Supprimer les logs associés
+    await db.execute(
+        sql_delete(DeploymentLog).where(DeploymentLog.deployment_id == deployment_id)
+    )
+    
+    # Supprimer le déploiement
+    await db.delete(deployment)
+    await db.commit()
+    
+    logger.info("deployment_deleted", deployment_id=str(deployment_id))

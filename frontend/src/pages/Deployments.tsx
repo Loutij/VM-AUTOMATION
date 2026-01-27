@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
@@ -13,6 +13,7 @@ import {
   XCircle,
   Loader2,
   FileText,
+  Trash2,
 } from 'lucide-react';
 import { Header } from '../components/layout';
 import {
@@ -39,15 +40,19 @@ export function Deployments() {
   const queryClient = useQueryClient();
   const { addToast } = useToast();
 
-  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'completed' | 'failed'>(
+  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'completed' | 'failed' | 'cancelled'>(
     'all'
   );
   const [selectedDeployment, setSelectedDeployment] = useState<Deployment | null>(null);
   const [isLogsModalOpen, setIsLogsModalOpen] = useState(false);
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [deploymentLogs, setDeploymentLogs] = useState<DeploymentLog[]>([]);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
   const [logsError, setLogsError] = useState<string | null>(null);
+  
+  // Track previous statuses for animations
+  const previousStatuses = useRef<Record<string, string>>({});
 
   // Fetch deployments
   const { data: deployments = [], isLoading, refetch } = useQuery({
@@ -82,6 +87,38 @@ export function Deployments() {
     },
   });
 
+  // Delete mutation
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => deploymentsApi.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['deployments'] });
+      addToast({ type: 'success', title: 'Déploiement supprimé' });
+      setIsDeleteModalOpen(false);
+      setSelectedDeployment(null);
+    },
+    onError: () => {
+      addToast({ type: 'error', title: 'Erreur lors de la suppression' });
+    },
+  });
+
+  // Effect to track status changes for animations
+  useEffect(() => {
+    deployments.forEach((d) => {
+      const prevStatus = previousStatuses.current[d.id];
+      if (prevStatus && prevStatus !== d.status) {
+        // Status changed - could trigger animation or notification here
+        if (d.status === 'completed') {
+          addToast({ type: 'success', title: `${d.name} terminé avec succès` });
+        } else if (d.status === 'failed') {
+          addToast({ type: 'error', title: `${d.name} a échoué` });
+        } else if (d.status === 'cancelled') {
+          addToast({ type: 'warning', title: `${d.name} annulé` });
+        }
+      }
+      previousStatuses.current[d.id] = d.status;
+    });
+  }, [deployments, addToast]);
+
   const handleViewLogs = async (deployment: Deployment) => {
     setSelectedDeployment(deployment);
     setIsLogsModalOpen(true);
@@ -109,12 +146,18 @@ export function Deployments() {
     retryMutation.mutate(deployment.id);
   };
 
+  const handleDelete = (deployment: Deployment) => {
+    setSelectedDeployment(deployment);
+    setIsDeleteModalOpen(true);
+  };
+
   const filteredDeployments = deployments.filter((d) => {
     if (filterStatus === 'all') return true;
     if (filterStatus === 'active')
       return !['completed', 'failed', 'cancelled'].includes(d.status);
     if (filterStatus === 'completed') return d.status === 'completed';
     if (filterStatus === 'failed') return d.status === 'failed';
+    if (filterStatus === 'cancelled') return d.status === 'cancelled';
     return true;
   });
 
@@ -127,6 +170,7 @@ export function Deployments() {
   ).length;
   const completedCount = deployments.filter((d) => d.status === 'completed').length;
   const failedCount = deployments.filter((d) => d.status === 'failed').length;
+  const cancelledCount = deployments.filter((d) => d.status === 'cancelled').length;
 
   const isActive = (status: DeploymentStatus) =>
     !['completed', 'failed', 'cancelled'].includes(status);
@@ -176,7 +220,7 @@ export function Deployments() {
       <Header title="Déploiements" />
       <div className="p-6">
         {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
           <div className="card p-4 flex items-center gap-4">
             <div className="w-12 h-12 bg-primary-600/20 rounded-lg flex items-center justify-center">
               <Rocket size={24} className="text-primary-500" />
@@ -188,7 +232,7 @@ export function Deployments() {
           </div>
           <div className="card p-4 flex items-center gap-4">
             <div className="w-12 h-12 bg-blue-500/20 rounded-lg flex items-center justify-center">
-              <Loader2 size={24} className="text-blue-500 animate-spin" />
+              <Loader2 size={24} className={`text-blue-500 ${activeCount > 0 ? 'animate-spin' : ''}`} />
             </div>
             <div>
               <p className="text-2xl font-bold text-white">{activeCount}</p>
@@ -213,12 +257,21 @@ export function Deployments() {
               <p className="text-sm text-dark-400">Échoués</p>
             </div>
           </div>
+          <div className="card p-4 flex items-center gap-4">
+            <div className="w-12 h-12 bg-yellow-500/20 rounded-lg flex items-center justify-center">
+              <X size={24} className="text-yellow-500" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-white">{cancelledCount}</p>
+              <p className="text-sm text-dark-400">Annulés</p>
+            </div>
+          </div>
         </div>
 
         {/* Filters and actions */}
         <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center bg-dark-800 rounded-lg p-1">
-            {(['all', 'active', 'completed', 'failed'] as const).map((status) => (
+          <div className="flex items-center bg-dark-800 rounded-lg p-1 flex-wrap gap-1">
+            {(['all', 'active', 'completed', 'failed', 'cancelled'] as const).map((status) => (
               <button
                 key={status}
                 onClick={() => setFilterStatus(status)}
@@ -228,10 +281,11 @@ export function Deployments() {
                     : 'text-dark-300 hover:text-white'
                 }`}
               >
-                {status === 'all' && 'Tous'}
-                {status === 'active' && 'En cours'}
-                {status === 'completed' && 'Terminés'}
-                {status === 'failed' && 'Échoués'}
+                {status === 'all' && `Tous (${deployments.length})`}
+                {status === 'active' && `En cours (${activeCount})`}
+                {status === 'completed' && `Terminés (${completedCount})`}
+                {status === 'failed' && `Échoués (${failedCount})`}
+                {status === 'cancelled' && `Annulés (${cancelledCount})`}
               </button>
             ))}
           </div>
@@ -271,7 +325,20 @@ export function Deployments() {
         ) : (
           <div className="space-y-4">
             {sortedDeployments.map((deployment) => (
-              <div key={deployment.id} className="card p-6">
+              <div 
+                key={deployment.id} 
+                className={`card p-6 transition-all duration-300 border-l-4 ${
+                  deployment.status === 'completed' 
+                    ? 'border-l-green-500' 
+                    : deployment.status === 'failed' 
+                    ? 'border-l-red-500' 
+                    : deployment.status === 'cancelled'
+                    ? 'border-l-yellow-500'
+                    : isActive(deployment.status)
+                    ? 'border-l-blue-500'
+                    : 'border-l-dark-600'
+                }`}
+              >
                 <div className="flex items-start justify-between mb-4">
                   <div>
                     <div className="flex items-center gap-3">
@@ -317,6 +384,17 @@ export function Deployments() {
                         isLoading={retryMutation.isPending}
                       >
                         Relancer
+                      </Button>
+                    )}
+                    {['completed', 'failed', 'cancelled'].includes(deployment.status) && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        leftIcon={<Trash2 size={16} />}
+                        onClick={() => handleDelete(deployment)}
+                        className="text-red-500 hover:text-red-400 hover:bg-red-500/10"
+                      >
+                        Supprimer
                       </Button>
                     )}
                   </div>
@@ -465,6 +543,21 @@ export function Deployments() {
           confirmText="Annuler le déploiement"
           variant="danger"
           isLoading={cancelMutation.isPending}
+        />
+
+        {/* Delete confirmation modal */}
+        <ConfirmModal
+          isOpen={isDeleteModalOpen}
+          onClose={() => {
+            setIsDeleteModalOpen(false);
+            setSelectedDeployment(null);
+          }}
+          onConfirm={() => selectedDeployment && deleteMutation.mutate(selectedDeployment.id)}
+          title="Supprimer le déploiement"
+          message={`Êtes-vous sûr de vouloir supprimer le déploiement "${selectedDeployment?.name}" ? Cette action est irréversible et supprimera également tous les logs associés.`}
+          confirmText="Supprimer définitivement"
+          variant="danger"
+          isLoading={deleteMutation.isPending}
         />
       </div>
     </div>
