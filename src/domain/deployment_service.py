@@ -397,15 +397,28 @@ class DeploymentService:
         Déploie Windows via DISM sur le VHDX de la VM.
         
         Cette méthode:
-        1. Récupère le chemin ISO depuis le template
+        1. Récupère le chemin ISO depuis le template en DB
         2. Génère le fichier unattend.xml
         3. Appelle deploy_with_dism du client Hyper-V
         """
         config = deployment.config
-        template_config = config.get("template") or {}
         
-        # Récupérer le chemin ISO depuis le template
-        iso_path = template_config.get("iso_path")
+        # Récupérer le template depuis la DB pour avoir le chemin ISO
+        iso_path = None
+        if deployment.os_template_id:
+            from sqlalchemy import select
+            template_result = await self.db.execute(
+                select(OSTemplate).where(OSTemplate.id == deployment.os_template_id)
+            )
+            template = template_result.scalar_one_or_none()
+            if template:
+                iso_path = template.iso_path
+        
+        # Fallback sur la config si pas trouvé en DB
+        if not iso_path:
+            template_config = config.get("template") or {}
+            iso_path = template_config.get("iso_path")
+        
         if not iso_path:
             raise DeploymentStepError(
                 str(deployment.id),
