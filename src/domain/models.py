@@ -410,6 +410,8 @@ class SoftwareCategory(str, enum.Enum):
 
     # Rôles Windows Server
     WINDOWS_ROLE = "windows_role"
+    # Services d'entreprise (AD, PKI, Federation)
+    ENTERPRISE_SERVICES = "enterprise_services"
     # Accès à distance
     REMOTE_ACCESS = "remote_access"
     # Base de données
@@ -436,6 +438,8 @@ class SoftwareCategory(str, enum.Enum):
     NETWORK = "network"
     # Sauvegarde
     BACKUP = "backup"
+    # Messagerie et collaboration
+    MESSAGING = "messaging"
     # Autres
     OTHER = "other"
 

@@ -304,6 +304,47 @@ docker-compose -f docker-compose.prod.yml up -d
 
 ## Changelog
 
+### v0.8.2 (2026-01-27) - Catalogue Services d'Entreprise Enrichi
+- **Services Active Directory enrichis** :
+  - AD DS avec configuration complète (mode forêt/domaine, niveau fonctionnel, DSRM, réplication)
+  - DNS Server avec zones, transfert, DNSSEC
+  - DHCP Server avec scopes, options, failover
+- **Nouveaux services d'entreprise Windows** :
+  - AD CS (Certificate Authority) : PKI, hiérarchie CA, modèles certificats
+  - AD FS (Federation Services) : SSO, SAML, OAuth/OIDC
+  - NPS (Network Policy Server) : RADIUS, 802.1X, VPN auth
+  - RRAS (Routing and Remote Access) : VPN IKEv2/SSTP, NAT, routage
+  - WDS (Windows Deployment Services) : déploiement PXE
+  - Web Application Proxy : reverse proxy avec AD FS
+  - Windows Admin Center : console d'admin web
+- **SQL Server configurations avancées** :
+  - SQL Server Express 2022 avec collation, chemins personnalisés, FILESTREAM
+  - SQL Server Standard 2022 avec features, TempDB, compte de service
+  - Azure Data Studio pour l'édition moderne
+- **SSH enrichi** :
+  - Configuration complète : authentification, shell par défaut, forwarding, bannière
+  - Scripts post-installation automatiques
+- **Services Linux ajoutés** :
+  - Samba AD DC : contrôleur de domaine AD compatible
+  - FreeIPA Server : gestion d'identité Linux (LDAP, Kerberos, PKI)
+  - BIND9 DNS, ISC DHCP Server
+  - MariaDB, PostgreSQL avec configuration avancée
+  - nginx, Apache avec SSL/TLS
+  - Fail2ban, Docker CE, Prometheus, Grafana
+- **Nouvelles catégories** :
+  - `enterprise_services` : services d'infrastructure d'entreprise
+  - `messaging` : messagerie et collaboration
+- **Nouveaux profils pré-configurés** :
+  - `serveur_web_linux` : Stack LEMP
+  - `controleur_domaine_linux` : FreeIPA
+  - `base_donnees_linux` : PostgreSQL + MariaDB
+  - `monitoring_linux` : Prometheus + Grafana
+  - `infrastructure_vpn` : RRAS + NPS + PKI
+  - `pki_entreprise` : CA d'entreprise
+  - `federation_identite` : AD FS + WAP
+  - `deploiement_reseau` : WDS + WSUS
+- **Migration Alembic** : ajout catégories `enterprise_services` et `messaging`
+
 ### v0.8.1 (2026-01-27) - Correction de Bugs et Cohérence Types
 - **Corrections Critiques (Migrations Alembic)** :
   - VMState enum : valeurs minuscules (`running`, `stopped`, `paused`, `saved`, `unknown`)

@@ -18,6 +18,7 @@ import { Button, Input, Modal, Skeleton, StatusBadge } from '../components/ui';
 // Mapping des icônes par catégorie
 const CATEGORY_ICONS: Record<string, string> = {
   windows_role: '🖥️',
+  enterprise_services: '🏢',
   remote_access: '🔐',
   database: '🗄️',
   webserver: '🌐',
@@ -31,6 +32,7 @@ const CATEGORY_ICONS: Record<string, string> = {
   file_transfer: '🔄',
   network: '📡',
   backup: '💾',
+  messaging: '📧',
   other: '📁',
 };
 
