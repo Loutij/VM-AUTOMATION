@@ -69,7 +69,7 @@ class DeploymentCreate(BaseModel):
 
     vm_name: str = Field(..., min_length=1, max_length=50, description="Nom de la VM")
     hypervisor_id: UUID = Field(..., description="ID de l'hyperviseur")
-    template_id: UUID = Field(..., description="ID du template OS")
+    os_template_id: UUID = Field(..., description="ID du template OS")
     cpu_count: int = Field(default=2, ge=1, le=64, description="CPUs")
     ram_gb: int = Field(default=4, ge=1, le=512, description="RAM en GB")
     disk_gb: int = Field(default=60, ge=20, le=2048, description="Disque en GB")
@@ -215,7 +215,7 @@ async def create_deployment(
         "creating_deployment",
         vm_name=deployment.vm_name,
         hypervisor_id=str(deployment.hypervisor_id),
-        template_id=str(deployment.template_id),
+        template_id=str(deployment.os_template_id),
     )
     
     service = DeploymentService(db)
@@ -244,7 +244,7 @@ async def create_deployment(
     created = await service.create_deployment(
         vm_name=deployment.vm_name,
         hypervisor_id=deployment.hypervisor_id,
-        template_id=deployment.template_id,
+        template_id=deployment.os_template_id,
         cpu_count=deployment.cpu_count,
         ram_gb=deployment.ram_gb,
         disk_gb=deployment.disk_gb,
