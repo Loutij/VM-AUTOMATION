@@ -13,6 +13,11 @@ import type {
   VirtualSwitch,
   CreateSwitchRequest,
   PhysicalAdapter,
+  SoftwarePackage,
+  SoftwareCategory_Info,
+  SoftwareProfile,
+  SoftwareList,
+  ProfileList,
 } from '../types';
 
 // Configuration de base
@@ -585,6 +590,70 @@ export const dashboardApi = {
         failed_deployments: 0,
       };
     }
+  },
+};
+
+// ============================================
+// Software Catalog API (Marketplace)
+// ============================================
+
+export const softwareApi = {
+  // Lister les logiciels avec filtres
+  list: async (params?: {
+    page?: number;
+    page_size?: number;
+    category?: string;
+    os_family?: string;
+    search?: string;
+    featured_only?: boolean;
+    active_only?: boolean;
+  }): Promise<SoftwareList> => {
+    const response = await apiClient.get<SoftwareList>('/software-catalog', { params });
+    return response.data;
+  },
+
+  // Obtenir un logiciel par ID
+  get: async (id: string): Promise<SoftwarePackage> => {
+    const response = await apiClient.get<SoftwarePackage>(`/software-catalog/${id}`);
+    return response.data;
+  },
+
+  // Obtenir un logiciel par nom
+  getByName: async (name: string): Promise<SoftwarePackage> => {
+    const response = await apiClient.get<SoftwarePackage>(`/software-catalog/by-name/${name}`);
+    return response.data;
+  },
+
+  // Lister les catégories
+  getCategories: async (): Promise<SoftwareCategory_Info[]> => {
+    const response = await apiClient.get<SoftwareCategory_Info[]>('/software-catalog/categories');
+    return response.data;
+  },
+
+  // Lister les logiciels en vedette
+  getFeatured: async (limit = 10): Promise<SoftwarePackage[]> => {
+    const response = await apiClient.get<SoftwarePackage[]>('/software-catalog/featured', {
+      params: { limit },
+    });
+    return response.data;
+  },
+
+  // Lister les profils
+  getProfiles: async (): Promise<ProfileList> => {
+    const response = await apiClient.get<ProfileList>('/software-catalog/profiles');
+    return response.data;
+  },
+
+  // Obtenir un profil par nom
+  getProfile: async (name: string): Promise<SoftwareProfile> => {
+    const response = await apiClient.get<SoftwareProfile>(`/software-catalog/profiles/${name}`);
+    return response.data;
+  },
+
+  // Initialiser le catalogue (seed)
+  seedCatalog: async (): Promise<{ created: number; skipped: number }> => {
+    const response = await apiClient.post<{ created: number; skipped: number }>('/software-catalog/seed');
+    return response.data;
   },
 };
 

@@ -12,6 +12,7 @@ from src.api.routers import (
     health,
     hypervisors,
     realtime,
+    software_catalog,
     templates,
     vms,
 )
@@ -23,6 +24,7 @@ __all__ = [
     "health",
     "hypervisors",
     "realtime",
+    "software_catalog",
     "templates",
     "vms",
 ]

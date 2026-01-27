@@ -27,18 +27,11 @@ import {
 } from 'lucide-react';
 import { Header } from '../components/layout';
 import { Button, Input, Select, Switch, Modal, useToast } from '../components/ui';
-import { hypervisorsApi, templatesApi, deploymentsApi } from '../services/api';
-import type { DeploymentConfig, SwitchType } from '../types';
+import { hypervisorsApi, templatesApi, deploymentsApi, softwareApi } from '../services/api';
+import type { DeploymentConfig, SwitchType, SoftwareProfile } from '../types';
 
-// Profils logiciels disponibles
-const SOFTWARE_PROFILES = [
-  { id: 'minimal', name: 'Minimal', description: '7zip, Notepad++', packages: ['7zip', 'notepadplusplus'] },
-  { id: 'tools', name: 'Outils système', description: '+ Sysinternals, Process Explorer', packages: ['7zip', 'notepadplusplus', 'sysinternals'] },
-  { id: 'development', name: 'Développement', description: 'Git, VS Code, Node.js, Python', packages: ['git', 'vscode', 'nodejs', 'python'] },
-  { id: 'webserver', name: 'Serveur Web', description: 'IIS, URL Rewrite', packages: ['iis-webserver', 'urlrewrite'] },
-  { id: 'database', name: 'Base de données', description: 'SQL Server Express, SSMS', packages: ['sql-server-express', 'ssms'] },
-  { id: 'monitoring', name: 'Monitoring', description: 'Zabbix Agent', packages: ['zabbix-agent'] },
-];
+// Import du composant Marketplace pour la sélection à la carte
+import { Marketplace } from './Marketplace';
 
 // Services Windows
 const WINDOWS_SERVICES = [
@@ -148,6 +141,9 @@ export function NewDeployment() {
     notes: '',
   });
 
+  // State pour le modal de sélection de logiciels (marketplace)
+  const [isMarketplaceModalOpen, setIsMarketplaceModalOpen] = useState(false);
+
   // Fetch hyperviseurs
   const { data: hypervisors = [], isLoading: hypervisorsLoading } = useQuery({
     queryKey: ['hypervisors'],
@@ -173,6 +169,14 @@ export function NewDeployment() {
     queryFn: () => hypervisorsApi.listPhysicalAdapters(formData.hypervisor_id),
     enabled: !!formData.hypervisor_id && isCreateSwitchModalOpen,
   });
+
+  // Fetch profils logiciels depuis la marketplace
+  const { data: softwareProfilesData } = useQuery({
+    queryKey: ['software-profiles'],
+    queryFn: softwareApi.getProfiles,
+  });
+
+  const softwareProfiles: SoftwareProfile[] = softwareProfilesData?.profiles || [];
 
   // Mutation pour créer un switch
   const createSwitchMutation = useMutation({
@@ -237,7 +241,7 @@ export function NewDeployment() {
   // Hyperviseur et template sélectionnés
   const selectedHypervisor = hypervisors.find((h) => h.id === formData.hypervisor_id);
   const selectedTemplate = templates.find((t) => t.id === formData.template_id);
-  const selectedProfile = SOFTWARE_PROFILES.find((p) => p.id === formData.software_profile);
+  const selectedProfile = softwareProfiles.find((p) => p.name === formData.software_profile);
 
   // Validation par étape
   const validateStep = (step: number): boolean => {
@@ -999,16 +1003,29 @@ export function NewDeployment() {
 
               {/* Profil logiciels */}
               <div className="border border-dark-600 rounded-lg p-4">
-                <h3 className="text-sm font-medium text-dark-200 mb-4 flex items-center gap-2">
-                  <Package size={16} />
-                  Profil logiciels (optionnel)
-                </h3>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-medium text-dark-200 flex items-center gap-2">
+                    <Package size={16} />
+                    Logiciels à installer
+                  </h3>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setIsMarketplaceModalOpen(true)}
+                  >
+                    <Package size={14} className="mr-1" />
+                    Sélection à la carte
+                  </Button>
+                </div>
+
+                {/* Profils pré-définis */}
+                <p className="text-xs text-dark-400 mb-3">Profils pré-configurés :</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {SOFTWARE_PROFILES.map((profile) => (
+                  {softwareProfiles.map((profile) => (
                     <label
-                      key={profile.id}
+                      key={profile.name}
                       className={`p-3 rounded-lg border cursor-pointer transition-colors ${
-                        formData.software_profile === profile.id
+                        formData.software_profile === profile.name && formData.custom_packages.length === 0
                           ? 'border-primary-500 bg-primary-500/10'
                           : 'border-dark-600 hover:border-dark-500'
                       }`}
@@ -1016,20 +1033,21 @@ export function NewDeployment() {
                       <input
                         type="radio"
                         name="software_profile"
-                        value={profile.id}
-                        checked={formData.software_profile === profile.id}
+                        value={profile.name}
+                        checked={formData.software_profile === profile.name && formData.custom_packages.length === 0}
                         onChange={(e) =>
-                          setFormData({ ...formData, software_profile: e.target.value })
+                          setFormData({ ...formData, software_profile: e.target.value, custom_packages: [] })
                         }
                         className="sr-only"
                       />
-                      <p className="font-medium text-white">{profile.name}</p>
+                      <p className="font-medium text-white">{profile.display_name}</p>
                       <p className="text-xs text-dark-400 mt-1">{profile.description}</p>
+                      <p className="text-xs text-primary-400 mt-1">{profile.package_count} packages</p>
                     </label>
                   ))}
                   <label
                     className={`p-3 rounded-lg border cursor-pointer transition-colors ${
-                      formData.software_profile === ''
+                      formData.software_profile === '' && formData.custom_packages.length === 0
                         ? 'border-primary-500 bg-primary-500/10'
                         : 'border-dark-600 hover:border-dark-500'
                     }`}
@@ -1038,14 +1056,43 @@ export function NewDeployment() {
                       type="radio"
                       name="software_profile"
                       value=""
-                      checked={formData.software_profile === ''}
-                      onChange={() => setFormData({ ...formData, software_profile: '' })}
+                      checked={formData.software_profile === '' && formData.custom_packages.length === 0}
+                      onChange={() => setFormData({ ...formData, software_profile: '', custom_packages: [] })}
                       className="sr-only"
                     />
                     <p className="font-medium text-white">Aucun</p>
                     <p className="text-xs text-dark-400 mt-1">Pas de logiciels supplémentaires</p>
                   </label>
                 </div>
+
+                {/* Packages personnalisés sélectionnés */}
+                {formData.custom_packages.length > 0 && (
+                  <div className="mt-4 pt-4 border-t border-dark-600">
+                    <p className="text-xs text-dark-400 mb-2">Sélection personnalisée ({formData.custom_packages.length} packages) :</p>
+                    <div className="flex flex-wrap gap-2">
+                      {formData.custom_packages.map((pkg) => (
+                        <span
+                          key={pkg}
+                          className="px-2 py-1 bg-primary-500/20 text-primary-400 text-xs rounded-full flex items-center gap-1"
+                        >
+                          {pkg}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setFormData({
+                                ...formData,
+                                custom_packages: formData.custom_packages.filter((p) => p !== pkg),
+                              })
+                            }
+                            className="hover:text-white"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Jonction domaine AD */}
@@ -1214,13 +1261,29 @@ export function NewDeployment() {
                     Logiciels
                   </h3>
                   <div className="text-sm">
-                    {selectedProfile ? (
+                    {formData.custom_packages.length > 0 ? (
                       <div>
-                        <span className="text-white font-medium">{selectedProfile.name}</span>
+                        <span className="text-white font-medium">Sélection personnalisée</span>
+                        <div className="flex flex-wrap gap-1 mt-2">
+                          {formData.custom_packages.slice(0, 5).map((pkg) => (
+                            <span key={pkg} className="px-2 py-0.5 bg-primary-500/20 text-primary-400 text-xs rounded">
+                              {pkg}
+                            </span>
+                          ))}
+                          {formData.custom_packages.length > 5 && (
+                            <span className="text-xs text-dark-400">
+                              +{formData.custom_packages.length - 5} autres
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ) : selectedProfile ? (
+                      <div>
+                        <span className="text-white font-medium">{selectedProfile.display_name}</span>
                         <p className="text-xs text-dark-400 mt-1">{selectedProfile.description}</p>
                       </div>
                     ) : (
-                      <span className="text-dark-400">Aucun profil sélectionné</span>
+                      <span className="text-dark-400">Aucun logiciel sélectionné</span>
                     )}
                   </div>
                 </div>
@@ -1365,6 +1428,34 @@ export function NewDeployment() {
             value={newSwitchData.notes}
             onChange={(e) => setNewSwitchData({ ...newSwitchData, notes: e.target.value })}
             placeholder="Description du switch..."
+          />
+        </div>
+      </Modal>
+
+      {/* Modal Marketplace - Sélection à la carte */}
+      <Modal
+        isOpen={isMarketplaceModalOpen}
+        onClose={() => setIsMarketplaceModalOpen(false)}
+        title="Sélection des logiciels"
+        size="xl"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setIsMarketplaceModalOpen(false)}>
+              Annuler
+            </Button>
+            <Button onClick={() => setIsMarketplaceModalOpen(false)}>
+              Valider la sélection ({formData.custom_packages.length})
+            </Button>
+          </>
+        }
+      >
+        <div className="h-[60vh] overflow-y-auto -mx-4 px-4">
+          <Marketplace
+            selectionMode={true}
+            selectedPackages={formData.custom_packages}
+            onSelectionChange={(packages) =>
+              setFormData({ ...formData, custom_packages: packages, software_profile: '' })
+            }
           />
         </div>
       </Modal>

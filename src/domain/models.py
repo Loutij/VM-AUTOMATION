@@ -408,16 +408,35 @@ class DeploymentLog(Base):
 class SoftwareCategory(str, enum.Enum):
     """Catégories de logiciels pour la marketplace."""
 
-    UTILITIES = "utilities"
-    DEVELOPMENT = "development"
+    # Rôles Windows Server
+    WINDOWS_ROLE = "windows_role"
+    # Accès à distance
+    REMOTE_ACCESS = "remote_access"
+    # Base de données
     DATABASE = "database"
+    # Serveurs web
     WEBSERVER = "webserver"
-    MONITORING = "monitoring"
-    SECURITY = "security"
-    NETWORKING = "networking"
-    OFFICE = "office"
-    MEDIA = "media"
+    # Développement
+    DEVELOPMENT = "development"
+    # Runtimes et langages
     RUNTIME = "runtime"
+    # Monitoring
+    MONITORING = "monitoring"
+    # Sécurité
+    SECURITY = "security"
+    # Utilitaires
+    UTILITIES = "utilities"
+    # Navigateurs
+    BROWSER = "browser"
+    # Containers et virtualisation
+    CONTAINERS = "containers"
+    # Transfert de fichiers
+    FILE_TRANSFER = "file_transfer"
+    # Réseau
+    NETWORK = "network"
+    # Sauvegarde
+    BACKUP = "backup"
+    # Autres
     OTHER = "other"
 
 

@@ -11,6 +11,7 @@ import {
   Templates,
   Deployments,
   NewDeployment,
+  Marketplace,
   Settings,
   Help,
   Login,
@@ -51,6 +52,7 @@ function App() {
                 <Route path="/templates" element={<Templates />} />
                 <Route path="/deployments" element={<Deployments />} />
                 <Route path="/deployments/new" element={<NewDeployment />} />
+                <Route path="/marketplace" element={<Marketplace />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/help" element={<Help />} />
               </Route>

@@ -5,6 +5,7 @@ import {
   Monitor,
   FileCode,
   Rocket,
+  Package,
   Settings,
   HelpCircle,
   ChevronLeft,
@@ -24,6 +25,7 @@ const navItems: NavItem[] = [
   { to: '/vms', icon: <Monitor size={20} />, label: 'Machines Virtuelles' },
   { to: '/templates', icon: <FileCode size={20} />, label: 'Templates' },
   { to: '/deployments', icon: <Rocket size={20} />, label: 'Déploiements' },
+  { to: '/marketplace', icon: <Package size={20} />, label: 'Marketplace' },
 ];
 
 const bottomNavItems: NavItem[] = [

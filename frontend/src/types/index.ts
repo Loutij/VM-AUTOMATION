@@ -333,3 +333,95 @@ export const DEFAULT_SETTINGS: AppSettings = {
     refreshInterval: 30,
   },
 };
+
+// ==============================================
+// Types pour la Marketplace de logiciels
+// ==============================================
+
+export type SoftwareCategory =
+  | 'windows_role'
+  | 'remote_access'
+  | 'database'
+  | 'webserver'
+  | 'development'
+  | 'runtime'
+  | 'monitoring'
+  | 'security'
+  | 'utilities'
+  | 'browser'
+  | 'containers'
+  | 'file_transfer'
+  | 'network'
+  | 'backup'
+  | 'other';
+
+export interface SoftwarePackage {
+  id: string;
+  name: string;
+  display_name: string;
+  version: string;
+  description?: string;
+  short_description?: string;
+  category: SoftwareCategory;
+  tags: string[];
+  os_family?: 'windows' | 'linux';
+  package_manager: string;
+  package_id: string;
+  install_command_windows?: string;
+  install_command_linux?: string;
+  default_config: Record<string, unknown>;
+  config_schema?: {
+    fields: ConfigField[];
+  };
+  icon?: string;
+  website?: string;
+  documentation_url?: string;
+  dependencies: string[];
+  conflicts: string[];
+  is_active: boolean;
+  is_featured: boolean;
+  install_time_minutes: number;
+  install_count: number;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface ConfigField {
+  name: string;
+  type: 'string' | 'number' | 'boolean' | 'select';
+  label: string;
+  description?: string;
+  required?: boolean;
+  default?: unknown;
+  options?: { value: string; label: string }[];
+}
+
+export interface SoftwareCategory_Info {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  emoji?: string;
+  count: number;
+}
+
+export interface SoftwareProfile {
+  name: string;
+  display_name: string;
+  description: string;
+  icon: string;
+  packages: string[];
+  package_count: number;
+}
+
+export interface SoftwareList {
+  items: SoftwarePackage[];
+  total: number;
+  page: number;
+  page_size: number;
+  categories: Record<string, number>;
+}
+
+export interface ProfileList {
+  profiles: SoftwareProfile[];
+}
