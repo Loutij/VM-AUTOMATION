@@ -535,6 +535,7 @@ async def get_vm_details(
 class PostInstallRequest(BaseModel):
     """Configuration pour le post-install manuel."""
     
+    admin_username: str = Field(default="Administrateur", description="Nom d'utilisateur admin (Administrateur pour FR, Administrator pour EN)")
     admin_password: str = Field(..., description="Mot de passe administrateur de la VM")
     # Services
     enable_rdp: bool = Field(default=False, description="Activer Remote Desktop")
@@ -610,8 +611,11 @@ async def execute_post_install(
     software_installed: list[str] = []
     reboot_required = False
     
-    credentials = ("Administrator", config.admin_password)
-    vm_name = vm.hypervisor_vm_id or vm.name
+    # Utiliser .\ pour spécifier un compte local (pas domaine)
+    local_username = f".\\{config.admin_username}" if not config.admin_username.startswith(".\\") else config.admin_username
+    credentials = (local_username, config.admin_password)
+    # IMPORTANT: -VMName utilise le NOM de la VM, pas son ID Hyper-V
+    vm_name = vm.name
     
     try:
         # Vérifier que la VM est accessible via PowerShell Direct
@@ -743,6 +747,81 @@ async def execute_post_install(
             status_code=500,
             detail=f"Erreur lors du post-install: {str(e)}"
         )
+    finally:
+        client.close()
+
+
+class ExecuteScriptRequest(BaseModel):
+    """Requête pour exécuter un script sur une VM."""
+    admin_username: str = Field(default="Administrateur", description="Nom utilisateur admin")
+    admin_password: str = Field(..., description="Mot de passe admin")
+    script: str = Field(..., description="Script PowerShell à exécuter")
+    timeout: int = Field(default=120, ge=10, le=3600, description="Timeout en secondes")
+
+
+class ExecuteScriptResponse(BaseModel):
+    """Réponse d'exécution de script."""
+    success: bool
+    output: str | None = None
+    error: str | None = None
+
+
+@router.post(
+    "/{vm_id}/execute",
+    response_model=ExecuteScriptResponse,
+    summary="Exécuter un script sur la VM",
+    description="Exécute un script PowerShell sur la VM via PowerShell Direct.",
+)
+async def execute_script_on_vm(
+    db: DbSession,
+    vm_id: UUID,
+    request: ExecuteScriptRequest,
+) -> ExecuteScriptResponse:
+    """Exécute un script PowerShell sur une VM."""
+    logger.info("execute_script_on_vm", vm_id=str(vm_id), script_length=len(request.script))
+    
+    service = VMService(db)
+    vm = await service.get_vm(vm_id)
+    
+    if not vm:
+        raise HTTPException(status_code=404, detail="VM non trouvée")
+    
+    if not vm.hypervisor_id:
+        raise HTTPException(status_code=400, detail="VM sans hyperviseur associé")
+    
+    hypervisor = await service.get_hypervisor(vm.hypervisor_id)
+    if not hypervisor:
+        raise HTTPException(status_code=404, detail="Hyperviseur non trouvé")
+    
+    client = HyperVClient(
+        host=hypervisor.host,
+        username=hypervisor.username,
+        password=hypervisor.password,
+        use_ssl=hypervisor.use_ssl,
+    )
+    
+    try:
+        local_username = f".\\{request.admin_username}" if not request.admin_username.startswith(".\\") else request.admin_username
+        credentials = (local_username, request.admin_password)
+        vm_name = vm.name
+        
+        result = await client.execute_in_vm(vm_name, request.script, credentials, timeout=request.timeout)
+        
+        output_str = None
+        if result.output:
+            if isinstance(result.output, dict) and "value" in result.output:
+                output_str = str(result.output.get("value"))
+            else:
+                output_str = str(result.output)
+        
+        return ExecuteScriptResponse(
+            success=result.success,
+            output=output_str,
+            error=result.error,
+        )
+    except Exception as e:
+        logger.error("execute_script_failed", vm_id=str(vm_id), error=str(e))
+        raise HTTPException(status_code=500, detail=f"Erreur: {str(e)}")
     finally:
         client.close()
 
