@@ -531,18 +531,18 @@ async def resume_deployment(
                 check_script = "if(Test-Path $env:ProgramData\\chocolatey\\bin\\choco.exe){'CHOCO_OK'}else{'CHOCO_MISSING'}"
                 check_result = await client.execute_in_vm(vm_name, check_script, credentials, timeout=60)
                 
-                choco_installed = check_result.success and check_result.output and "CHOCO_OK" in check_result.output
-                logger.info("resume_choco_check", vm_name=vm_name, installed=choco_installed, output=check_result.output[:100] if check_result.output else "")
+                choco_installed = check_result.success and check_result.output and "CHOCO_OK" in str(check_result.output)
+                logger.info("resume_choco_check", vm_name=vm_name, installed=choco_installed, output=str(check_result.output)[:100] if check_result.output else "")
                 
                 if not choco_installed:
                     # Installer Chocolatey
                     install_script = "Set-ExecutionPolicy Bypass -Scope Process -Force;[Net.ServicePointManager]::SecurityProtocol=[Net.ServicePointManager]::SecurityProtocol -bor 3072;iex ((New-Object Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))"
                     result = await client.execute_in_vm(vm_name, install_script, credentials, timeout=300)
-                    logger.info("resume_choco_install_result", vm_name=vm_name, success=result.success, output=result.output[:300] if result.output else "", error=result.error)
+                    logger.info("resume_choco_install_result", vm_name=vm_name, success=result.success, output=str(result.output)[:300] if result.output else "", error=result.error)
                     
                     # Vérifier à nouveau
                     check2 = await client.execute_in_vm(vm_name, check_script, credentials, timeout=60)
-                    if not (check2.success and check2.output and "CHOCO_OK" in check2.output):
+                    if not (check2.success and check2.output and "CHOCO_OK" in str(check2.output)):
                         raise Exception(f"Chocolatey install failed: {result.error or result.output or 'Unknown'}")
                 
                 logger.info("resume_chocolatey_ready", vm_name=vm_name)
@@ -558,7 +558,7 @@ async def resume_deployment(
 """
                     result = await client.execute_in_vm(vm_name, install_script, credentials, timeout=300)
                     if result.success:
-                        logger.info("resume_package_installed", vm_name=vm_name, package=pkg_name, output=result.output[:100] if result.output else "")
+                        logger.info("resume_package_installed", vm_name=vm_name, package=pkg_name, output=str(result.output)[:100] if result.output else "")
                     else:
                         logger.warning("resume_package_failed", vm_name=vm_name, package=pkg_name, error=result.error)
                     
