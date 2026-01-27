@@ -203,6 +203,7 @@ export interface DeploymentConfig {
   // Logiciels
   software_profile?: string; // minimal, tools, development, webserver, database, monitoring
   packages?: string[]; // Packages Chocolatey supplémentaires
+  package_configs?: Record<string, Record<string, unknown>>; // Configurations par package
   // Windows Update
   enable_windows_update?: boolean;
   // Commandes post-install personnalisées
@@ -405,6 +406,7 @@ export interface ConfigField {
   type: 'string' | 'number' | 'boolean' | 'select';
   label: string;
   description?: string;
+  placeholder?: string;
   required?: boolean;
   default?: unknown;
   options?: { value: string; label: string }[];

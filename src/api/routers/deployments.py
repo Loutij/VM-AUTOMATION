@@ -86,6 +86,7 @@ class DeploymentCreate(BaseModel):
     # Logiciels
     software_profile: str | None = Field(None, description="Profil logiciel (minimal, tools, development, webserver, database, monitoring)")
     packages: list[str] | None = Field(None, description="Packages Chocolatey supplémentaires")
+    package_configs: dict[str, dict[str, Any]] | None = Field(None, description="Configurations des packages (ex: {'zabbix-agent2': {'server': '192.168.1.1'}})")
     # Windows Update
     enable_windows_update: bool = Field(default=False, description="Installer les mises à jour Windows")
     # Post-install
@@ -279,6 +280,7 @@ async def create_deployment(
         security=security,
         software_profile=deployment.software_profile,
         packages=deployment.packages,
+        package_configs=deployment.package_configs,
         enable_windows_update=deployment.enable_windows_update,
         post_install_commands=deployment.post_install_commands,
     )

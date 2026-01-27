@@ -1897,14 +1897,15 @@ MONITORING = [
         "website": "https://www.zabbix.com/",
         "is_featured": True,
         "install_time_minutes": 3,
-        "default_config": {"server": "", "hostname": "", "listen_port": 10050},
+        "default_config": {"server": "172.16.0.126", "hostname": "", "server_active": "172.16.0.126"},
         "config_schema": {
             "fields": [
-                {"name": "server", "type": "string", "label": "Serveur Zabbix", "required": True},
-                {"name": "hostname", "type": "string", "label": "Hostname", "required": False},
-                {"name": "listen_port", "type": "number", "label": "Port", "default": 10050},
+                {"name": "server", "type": "string", "label": "Serveur Zabbix (IP/DNS)", "required": True, "placeholder": "172.16.0.126"},
+                {"name": "server_active", "type": "string", "label": "ServerActive (IP:Port)", "required": False, "placeholder": "172.16.0.126"},
+                {"name": "hostname", "type": "string", "label": "Hostname (vide = auto)", "required": False, "placeholder": "Nom NetBIOS de la machine"},
             ]
         },
+        "post_install_script": "$cfg='C:\\ProgramData\\zabbix\\zabbix_agentd.conf';if(Test-Path $cfg){$c=Get-Content $cfg;$c=$c-replace'^Server=.*',\"Server={server}\"-replace'^ServerActive=.*',\"ServerActive={server_active}\";if('{hostname}'){$c=$c-replace'^Hostname=.*',\"Hostname={hostname}\"};Set-Content $cfg $c;Restart-Service 'Zabbix Agent' -EA 0}",
     },
     {
         "name": "zabbix-agent2",
@@ -1918,8 +1919,17 @@ MONITORING = [
         "package_id": "zabbix-agent2",
         "icon": "Activity",
         "website": "https://www.zabbix.com/",
+        "is_featured": True,
         "install_time_minutes": 3,
-        "default_config": {"server": "", "hostname": ""},
+        "default_config": {"server": "172.16.0.126", "hostname": "", "server_active": "172.16.0.126"},
+        "config_schema": {
+            "fields": [
+                {"name": "server", "type": "string", "label": "Serveur Zabbix (IP/DNS)", "required": True, "placeholder": "172.16.0.126"},
+                {"name": "server_active", "type": "string", "label": "ServerActive (IP:Port)", "required": False, "placeholder": "172.16.0.126"},
+                {"name": "hostname", "type": "string", "label": "Hostname (vide = auto)", "required": False, "placeholder": "Nom NetBIOS de la machine"},
+            ]
+        },
+        "post_install_script": "$cfg=(Get-WmiObject Win32_Service -Filter \"Name like '%zabbix%2%'\").PathName -replace '.*-c \"([^\"]+)\".*','$1';if($cfg -and (Test-Path $cfg)){$c=Get-Content $cfg;$c=$c-replace'^Server=.*',\"Server={server}\"-replace'^ServerActive=.*',\"ServerActive={server_active}\";if('{hostname}'){$c=$c-replace'^Hostname=.*',\"Hostname={hostname}\"};Set-Content $cfg $c;Restart-Service 'Zabbix Agent 2' -EA 0}",
     },
     {
         "name": "prometheus-exporter",

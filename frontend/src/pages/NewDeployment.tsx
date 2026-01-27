@@ -29,7 +29,7 @@ import {
 import { Header } from '../components/layout';
 import { Button, Input, Select, Switch, Modal, useToast } from '../components/ui';
 import { hypervisorsApi, templatesApi, deploymentsApi, softwareApi } from '../services/api';
-import type { DeploymentConfig, SwitchType, SoftwareProfile } from '../types';
+import type { DeploymentConfig, SwitchType, SoftwareProfile, SoftwarePackage, ConfigField } from '../types';
 
 // Import du composant Marketplace pour la sélection à la carte
 import { Marketplace } from './Marketplace';
@@ -147,6 +147,11 @@ export function NewDeployment() {
 
   // State pour le modal de sélection de logiciels (marketplace)
   const [isMarketplaceModalOpen, setIsMarketplaceModalOpen] = useState(false);
+  
+  // State pour les configurations des packages
+  const [packageConfigs, setPackageConfigs] = useState<Record<string, Record<string, unknown>>>({});
+  const [configModalPackage, setConfigModalPackage] = useState<SoftwarePackage | null>(null);
+  const [pendingConfigPackages, setPendingConfigPackages] = useState<SoftwarePackage[]>([]);
 
   // Fetch hyperviseurs
   const { data: hypervisors = [], isLoading: hypervisorsLoading } = useQuery({
@@ -181,6 +186,14 @@ export function NewDeployment() {
   });
 
   const softwareProfiles: SoftwareProfile[] = softwareProfilesData?.profiles || [];
+
+  // Fetch tous les packages pour obtenir leurs config_schema
+  const { data: allSoftwareData } = useQuery({
+    queryKey: ['all-software'],
+    queryFn: () => softwareApi.list({ page_size: 500 }),
+  });
+
+  const allSoftware: SoftwarePackage[] = allSoftwareData?.items || [];
 
   // Mutation pour créer un switch
   const createSwitchMutation = useMutation({
@@ -378,6 +391,10 @@ export function NewDeployment() {
     // Packages personnalisés supplémentaires
     if (formData.custom_packages && formData.custom_packages.length > 0) {
       config.packages = formData.custom_packages;
+      // Inclure les configurations des packages
+      if (Object.keys(packageConfigs).length > 0) {
+        config.package_configs = packageConfigs;
+      }
     }
 
     // Domaine AD
@@ -418,6 +435,55 @@ export function NewDeployment() {
   const formatMemory = (mb: number) => {
     if (mb >= 1024) return `${mb / 1024} GB`;
     return `${mb} MB`;
+  };
+
+  // Gérer la fermeture du modal Marketplace et détecter les packages nécessitant configuration
+  const handleMarketplaceClose = () => {
+    setIsMarketplaceModalOpen(false);
+    
+    // Trouver les packages sélectionnés qui ont un config_schema
+    const packagesNeedingConfig = formData.custom_packages
+      .map(pkgName => allSoftware.find(s => s.name === pkgName))
+      .filter((pkg): pkg is SoftwarePackage => 
+        pkg !== undefined && 
+        pkg.config_schema?.fields && 
+        pkg.config_schema.fields.length > 0 &&
+        !packageConfigs[pkg.name] // Pas encore configuré
+      );
+    
+    if (packagesNeedingConfig.length > 0) {
+      setPendingConfigPackages(packagesNeedingConfig);
+      setConfigModalPackage(packagesNeedingConfig[0]);
+    }
+  };
+
+  // Sauvegarder la configuration d'un package
+  const handleSavePackageConfig = (pkgName: string, config: Record<string, unknown>) => {
+    setPackageConfigs(prev => ({ ...prev, [pkgName]: config }));
+    
+    // Passer au package suivant ou fermer
+    const remaining = pendingConfigPackages.filter(p => p.name !== pkgName);
+    setPendingConfigPackages(remaining);
+    
+    if (remaining.length > 0) {
+      setConfigModalPackage(remaining[0]);
+    } else {
+      setConfigModalPackage(null);
+    }
+  };
+
+  // Ignorer la configuration d'un package
+  const handleSkipPackageConfig = () => {
+    if (configModalPackage) {
+      const remaining = pendingConfigPackages.filter(p => p.name !== configModalPackage.name);
+      setPendingConfigPackages(remaining);
+      
+      if (remaining.length > 0) {
+        setConfigModalPackage(remaining[0]);
+      } else {
+        setConfigModalPackage(null);
+      }
+    }
   };
 
   return (
@@ -1499,7 +1565,7 @@ export function NewDeployment() {
             <Button variant="secondary" onClick={() => setIsMarketplaceModalOpen(false)}>
               Annuler
             </Button>
-            <Button onClick={() => setIsMarketplaceModalOpen(false)}>
+            <Button onClick={handleMarketplaceClose}>
               Valider la sélection ({formData.custom_packages.length})
             </Button>
           </>
@@ -1515,6 +1581,91 @@ export function NewDeployment() {
           />
         </div>
       </Modal>
+
+      {/* Modal de configuration des packages */}
+      {configModalPackage && configModalPackage.config_schema && (
+        <Modal
+          isOpen={!!configModalPackage}
+          onClose={handleSkipPackageConfig}
+          title={`Configuration de ${configModalPackage.display_name}`}
+          size="md"
+          footer={
+            <>
+              <Button variant="secondary" onClick={handleSkipPackageConfig}>
+                Ignorer
+              </Button>
+              <Button
+                onClick={() => {
+                  const form = document.getElementById('pkg-config-form') as HTMLFormElement;
+                  if (form) {
+                    const formData = new FormData(form);
+                    const config: Record<string, unknown> = {};
+                    configModalPackage.config_schema?.fields.forEach(field => {
+                      const value = formData.get(field.name);
+                      if (value !== null && value !== '') {
+                        config[field.name] = field.type === 'number' ? Number(value) : value;
+                      }
+                    });
+                    handleSavePackageConfig(configModalPackage.name, config);
+                  }
+                }}
+              >
+                Enregistrer
+              </Button>
+            </>
+          }
+        >
+          <form id="pkg-config-form" className="space-y-4">
+            <p className="text-sm text-dark-400 mb-4">
+              Ce logiciel nécessite une configuration. Remplissez les champs ci-dessous.
+            </p>
+            {configModalPackage.config_schema.fields.map((field: ConfigField) => (
+              <div key={field.name}>
+                <label className="block text-sm font-medium text-dark-200 mb-1">
+                  {field.label}
+                  {field.required && <span className="text-red-500 ml-1">*</span>}
+                </label>
+                {field.type === 'boolean' ? (
+                  <input
+                    type="checkbox"
+                    name={field.name}
+                    defaultChecked={field.default as boolean}
+                    className="h-4 w-4 rounded border-dark-600 bg-dark-700"
+                  />
+                ) : field.type === 'select' && field.options ? (
+                  <select
+                    name={field.name}
+                    defaultValue={field.default as string}
+                    className="w-full px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white"
+                    required={field.required}
+                  >
+                    {field.options.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type={field.type === 'number' ? 'number' : 'text'}
+                    name={field.name}
+                    defaultValue={field.default as string | number}
+                    placeholder={field.placeholder || ''}
+                    required={field.required}
+                    className="w-full px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white placeholder-dark-400"
+                  />
+                )}
+                {field.description && (
+                  <p className="text-xs text-dark-400 mt-1">{field.description}</p>
+                )}
+              </div>
+            ))}
+          </form>
+          {pendingConfigPackages.length > 1 && (
+            <p className="text-xs text-dark-400 mt-4">
+              {pendingConfigPackages.length - 1} autre(s) package(s) à configurer
+            </p>
+          )}
+        </Modal>
+      )}
     </div>
   );
 }

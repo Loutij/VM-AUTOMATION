@@ -151,6 +151,7 @@ class DeploymentService:
         security: dict[str, Any] | None = None,
         software_profile: str | None = None,
         packages: list[str] | None = None,
+        package_configs: dict[str, dict[str, Any]] | None = None,
         enable_windows_update: bool = False,
         post_install_commands: list[str] | None = None,
         **kwargs: Any,
@@ -174,6 +175,7 @@ class DeploymentService:
             security: Configuration de sécurité (politiques de mot de passe)
             software_profile: Profil logiciel (minimal, tools, development, etc.)
             packages: Packages Chocolatey supplémentaires
+            package_configs: Configurations des packages (ex: {'zabbix-agent2': {'server': '192.168.1.1'}})
             enable_windows_update: Installer les mises à jour Windows
             post_install_commands: Commandes post-installation personnalisées
             
@@ -209,6 +211,7 @@ class DeploymentService:
             "security": security or {},
             "software_profile": software_profile,
             "packages": packages or [],
+            "package_configs": package_configs or {},
             "enable_windows_update": enable_windows_update,
             "post_install_commands": post_install_commands or [],
             "template": {
@@ -966,6 +969,46 @@ class DeploymentService:
                 deployment, DeploymentStep.INSTALLING_SOFTWARE,
                 summary, "info"
             )
+            
+            # 5. Exécuter les scripts de configuration des packages
+            package_configs = config.get("package_configs", {})
+            if package_configs:
+                from src.domain.software_catalog import get_software_by_name
+                
+                await self._log_step(
+                    deployment, DeploymentStep.INSTALLING_SOFTWARE,
+                    f"Configuring {len(package_configs)} package(s)...", "info"
+                )
+                
+                for pkg_name, pkg_config in package_configs.items():
+                    software_def = get_software_by_name(pkg_name)
+                    if software_def and software_def.get("post_install_script"):
+                        script = software_def["post_install_script"]
+                        # Remplacer les placeholders par les valeurs configurées
+                        for key, value in pkg_config.items():
+                            script = script.replace(f"{{{key}}}", str(value) if value else "")
+                        
+                        try:
+                            await self._log_step(
+                                deployment, DeploymentStep.INSTALLING_SOFTWARE,
+                                f"Configuring {pkg_name}...", "info"
+                            )
+                            result_script = await client.execute_in_vm(vm_name, script, credentials, timeout=120)
+                            if result_script.success:
+                                await self._log_step(
+                                    deployment, DeploymentStep.INSTALLING_SOFTWARE,
+                                    f"✅ {pkg_name} configured", "info"
+                                )
+                            else:
+                                await self._log_step(
+                                    deployment, DeploymentStep.INSTALLING_SOFTWARE,
+                                    f"⚠️ {pkg_name} config failed: {result_script.error}", "warning"
+                                )
+                        except Exception as cfg_e:
+                            await self._log_step(
+                                deployment, DeploymentStep.INSTALLING_SOFTWARE,
+                                f"⚠️ {pkg_name} config error: {cfg_e}", "warning"
+                            )
             
             logger.info(
                 "deployment_software_install_complete",
