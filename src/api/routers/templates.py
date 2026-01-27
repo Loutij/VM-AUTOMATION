@@ -5,6 +5,7 @@
 Endpoints CRUD pour la gestion des templates OS.
 """
 
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -63,8 +64,8 @@ class OSTemplateResponse(OSTemplateBase):
 
     id: UUID
     is_active: bool
-    created_at: str
-    updated_at: str | None
+    created_at: datetime
+    updated_at: datetime | None
 
     class Config:
         from_attributes = True

@@ -294,11 +294,11 @@ export function VirtualMachines() {
           </div>
           <div className="flex items-center gap-1.5 text-dark-300">
             <MemoryStick size={14} />
-            <span>{formatMemory(vm.memory_mb)}</span>
+            <span>{vm.ram_gb} Go</span>
           </div>
           <div className="flex items-center gap-1.5 text-dark-300">
             <HardDrive size={14} />
-            <span>{vm.disk_size_gb} GB</span>
+            <span>{vm.disk_gb} GB</span>
           </div>
         </div>
       ),

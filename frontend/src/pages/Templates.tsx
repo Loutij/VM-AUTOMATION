@@ -31,23 +31,23 @@ import type { OSTemplate, OSFamily, Hypervisor } from '../types';
 interface TemplateFormData {
   name: string;
   os_family: OSFamily;
-  os_version: string;
+  os_type: string;
   description: string;
   iso_path: string;
-  default_cpu: string;
-  default_memory_mb: string;
-  default_disk_gb: string;
+  min_cpu: string;
+  min_ram_gb: string;
+  min_disk_gb: string;
 }
 
 const defaultFormData: TemplateFormData = {
   name: '',
   os_family: 'windows',
-  os_version: '',
+  os_type: '',
   description: '',
   iso_path: '',
-  default_cpu: '2',
-  default_memory_mb: '4096',
-  default_disk_gb: '60',
+  min_cpu: '2',
+  min_ram_gb: '4',
+  min_disk_gb: '60',
 };
 
 export function Templates() {
@@ -128,12 +128,12 @@ export function Templates() {
       setFormData({
         name: template.name,
         os_family: template.os_family,
-        os_version: template.os_version,
+        os_type: template.os_type,
         description: template.description || '',
         iso_path: template.iso_path || '',
-        default_cpu: template.default_cpu.toString(),
-        default_memory_mb: template.default_memory_mb.toString(),
-        default_disk_gb: template.default_disk_gb.toString(),
+        min_cpu: template.min_cpu.toString(),
+        min_ram_gb: template.min_ram_gb.toString(),
+        min_disk_gb: template.min_disk_gb.toString(),
       });
     } else {
       setSelectedTemplate(null);
@@ -153,12 +153,12 @@ export function Templates() {
     const payload = {
       name: formData.name,
       os_family: formData.os_family,
-      os_version: formData.os_version,
+      os_type: formData.os_type,
       description: formData.description || undefined,
       iso_path: formData.iso_path || undefined,
-      default_cpu: parseInt(formData.default_cpu),
-      default_memory_mb: parseInt(formData.default_memory_mb),
-      default_disk_gb: parseInt(formData.default_disk_gb),
+      min_cpu: parseInt(formData.min_cpu),
+      min_ram_gb: parseInt(formData.min_ram_gb),
+      min_disk_gb: parseInt(formData.min_disk_gb),
     };
 
     if (selectedTemplate) {
@@ -178,12 +178,12 @@ export function Templates() {
     setFormData({
       name: `${template.name} (copie)`,
       os_family: template.os_family,
-      os_version: template.os_version,
+      os_type: template.os_type,
       description: template.description || '',
       iso_path: template.iso_path || '',
-      default_cpu: template.default_cpu.toString(),
-      default_memory_mb: template.default_memory_mb.toString(),
-      default_disk_gb: template.default_disk_gb.toString(),
+      min_cpu: template.min_cpu.toString(),
+      min_ram_gb: template.min_ram_gb.toString(),
+      min_disk_gb: template.min_disk_gb.toString(),
     });
     setIsModalOpen(true);
   };
@@ -327,7 +327,7 @@ export function Templates() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <h3 className="font-semibold text-white truncate pr-8">{template.name}</h3>
-                    <p className="text-sm text-dark-400">{template.os_version}</p>
+                    <p className="text-sm text-dark-400">{template.os_type}</p>
                   </div>
                 </div>
 
@@ -339,9 +339,9 @@ export function Templates() {
 
                 {/* Default specs */}
                 <div className="mt-4 pt-4 border-t border-dark-700 flex items-center gap-4 text-xs text-dark-400">
-                  <span>{template.default_cpu} vCPU</span>
-                  <span>{formatMemory(template.default_memory_mb)}</span>
-                  <span>{template.default_disk_gb} GB</span>
+                  <span>{template.min_cpu} vCPU</span>
+                  <span>{template.min_ram_gb} Go</span>
+                  <span>{template.min_disk_gb} GB</span>
                 </div>
               </div>
             ))}
@@ -392,9 +392,9 @@ export function Templates() {
             </div>
 
             <Input
-              label="Version OS"
-              value={formData.os_version}
-              onChange={(e) => setFormData({ ...formData, os_version: e.target.value })}
+              label="Type d'OS"
+              value={formData.os_type}
+              onChange={(e) => setFormData({ ...formData, os_type: e.target.value })}
               placeholder="Server 2022 Standard"
               required
             />
@@ -443,18 +443,18 @@ export function Templates() {
                 type="number"
                 min="1"
                 max="64"
-                value={formData.default_cpu}
-                onChange={(e) => setFormData({ ...formData, default_cpu: e.target.value })}
+                value={formData.min_cpu}
+                onChange={(e) => setFormData({ ...formData, min_cpu: e.target.value })}
                 required
               />
               <Input
                 label="RAM par défaut (MB)"
                 type="number"
-                min="512"
-                step="512"
-                value={formData.default_memory_mb}
+                min="1"
+                step="1"
+                value={formData.min_ram_gb}
                 onChange={(e) =>
-                  setFormData({ ...formData, default_memory_mb: e.target.value })
+                  setFormData({ ...formData, min_ram_gb: e.target.value })
                 }
                 required
               />
@@ -462,9 +462,9 @@ export function Templates() {
                 label="Disque par défaut (GB)"
                 type="number"
                 min="20"
-                value={formData.default_disk_gb}
+                value={formData.min_disk_gb}
                 onChange={(e) =>
-                  setFormData({ ...formData, default_disk_gb: e.target.value })
+                  setFormData({ ...formData, min_disk_gb: e.target.value })
                 }
                 required
               />

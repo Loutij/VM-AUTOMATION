@@ -299,8 +299,8 @@ export interface AppSettings {
   // Valeurs par défaut pour les déploiements
   defaultDeployment: {
     cpu_count: number;
-    memory_mb: number;
-    disk_size_gb: number;
+    ram_gb: number;
+    disk_gb: number;
     network_switch: string;
   };
   
@@ -324,8 +324,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
   defaultDeployment: {
     cpu_count: 2,
-    memory_mb: 4096,
-    disk_size_gb: 60,
+    ram_gb: 4,
+    disk_gb: 60,
     network_switch: 'Default Switch',
   },
   display: {

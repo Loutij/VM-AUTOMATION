@@ -6,7 +6,7 @@ Endpoints pour la gestion des déploiements de VMs.
 """
 
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Query, status
@@ -128,7 +128,7 @@ class DeploymentLogEntry(BaseModel):
     id: UUID
     step: str
     message: str
-    level: str
+    level: Literal["debug", "info", "warning", "error"]
     details: dict[str, Any]
     created_at: datetime
 

@@ -396,18 +396,18 @@ export function Settings() {
                 min={512}
                 max={131072}
                 step={512}
-                value={localSettings.defaultDeployment.memory_mb}
-                onChange={(e) => updateNestedSetting('defaultDeployment', 'memory_mb', parseInt(e.target.value) || 4096)}
+                value={localSettings.defaultDeployment.ram_gb}
+                onChange={(e) => updateNestedSetting('defaultDeployment', 'ram_gb', parseInt(e.target.value) || 4)}
                 leftIcon={<Server size={18} />}
-                helperText={`${(localSettings.defaultDeployment.memory_mb / 1024).toFixed(1)} Go`}
+                helperText={`${localSettings.defaultDeployment.ram_gb} Go`}
               />
               <Input
                 label="Disque (Go)"
                 type="number"
                 min={20}
                 max={2048}
-                value={localSettings.defaultDeployment.disk_size_gb}
-                onChange={(e) => updateNestedSetting('defaultDeployment', 'disk_size_gb', parseInt(e.target.value) || 60)}
+                value={localSettings.defaultDeployment.disk_gb}
+                onChange={(e) => updateNestedSetting('defaultDeployment', 'disk_gb', parseInt(e.target.value) || 60)}
                 leftIcon={<HardDrive size={18} />}
               />
               <Input

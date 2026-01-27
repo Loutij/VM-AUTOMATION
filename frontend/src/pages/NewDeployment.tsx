@@ -43,13 +43,13 @@ const WINDOWS_SERVICES = [
 interface DeploymentFormData {
   // Étape 1: Sélection hyperviseur et template
   hypervisor_id: string;
-  template_id: string;
+  os_template_id: string;
   // Étape 2: Configuration VM
   vm_name: string;
   hostname: string;
   cpu_count: number;
-  memory_mb: number;
-  disk_size_gb: number;
+  ram_gb: number;
+  disk_gb: number;
   vhdx_path: string; // Emplacement du disque virtuel
   // Étape 3: Réseau
   network_switch: string;
@@ -84,12 +84,12 @@ interface DeploymentFormData {
 
 const defaultFormData: DeploymentFormData = {
   hypervisor_id: '',
-  template_id: '',
+  os_template_id: '',
   vm_name: '',
   hostname: '',
   cpu_count: 2,
-  memory_mb: 4096,
-  disk_size_gb: 60,
+  ram_gb: 4,
+  disk_gb: 60,
   vhdx_path: '', // Vide = utiliser le chemin par défaut de l'hyperviseur
   network_switch: '',
   vlan_id: null,
@@ -211,14 +211,16 @@ export function NewDeployment() {
     if (switches.length > 0 && !formData.network_switch) {
       setFormData((prev) => ({ ...prev, network_switch: switches[0].name }));
     }
+    // Note: formData.network_switch is intentionally excluded to prevent infinite loops
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [switches]);
 
   // Mutation pour créer le déploiement
   const createMutation = useMutation({
     mutationFn: (data: {
-      name: string;
+      vm_name: string;
       hypervisor_id: string;
-      template_id: string;
+      os_template_id: string;
       config: DeploymentConfig;
     }) => deploymentsApi.create(data),
     onSuccess: (deployment) => {
@@ -240,20 +242,20 @@ export function NewDeployment() {
 
   // Hyperviseur et template sélectionnés
   const selectedHypervisor = hypervisors.find((h) => h.id === formData.hypervisor_id);
-  const selectedTemplate = templates.find((t) => t.id === formData.template_id);
+  const selectedTemplate = templates.find((t) => t.id === formData.os_template_id);
   const selectedProfile = softwareProfiles.find((p) => p.name === formData.software_profile);
 
   // Validation par étape
   const validateStep = (step: number): boolean => {
     switch (step) {
       case 1:
-        return !!formData.hypervisor_id && !!formData.template_id;
+        return !!formData.hypervisor_id && !!formData.os_template_id;
       case 2:
         return (
           !!formData.vm_name &&
           formData.cpu_count >= 1 &&
-          formData.memory_mb >= 512 &&
-          formData.disk_size_gb >= 20
+          formData.ram_gb >= 1 &&
+          formData.disk_gb >= 20
         );
       case 3:
         if (formData.use_static_ip && !formData.ip_address) return false;
@@ -299,8 +301,8 @@ export function NewDeployment() {
     const config: DeploymentConfig = {
       vm_name: formData.vm_name,
       cpu_count: formData.cpu_count,
-      memory_mb: formData.memory_mb,
-      disk_size_gb: formData.disk_size_gb,
+      ram_gb: formData.ram_gb,
+      disk_gb: formData.disk_gb,
       vhdx_path: formData.vhdx_path || undefined, // Emplacement du disque virtuel
       hostname: formData.hostname || formData.vm_name,
       admin_password: formData.admin_password || undefined,
@@ -356,9 +358,9 @@ export function NewDeployment() {
     }
 
     createMutation.mutate({
-      name: formData.vm_name,
+      vm_name: formData.vm_name,
       hypervisor_id: formData.hypervisor_id,
-      template_id: formData.template_id,
+      os_template_id: formData.os_template_id,
       config: config,
     });
   };
@@ -368,10 +370,10 @@ export function NewDeployment() {
     const template = templates.find((t) => t.id === templateId);
     setFormData((prev) => ({
       ...prev,
-      template_id: templateId,
-      cpu_count: template?.default_cpu || prev.cpu_count,
-      memory_mb: template?.default_memory_mb || prev.memory_mb,
-      disk_size_gb: template?.default_disk_gb || prev.disk_size_gb,
+      os_template_id: templateId,
+      cpu_count: template?.min_cpu || prev.cpu_count,
+      ram_gb: template?.min_ram_gb || prev.ram_gb,
+      disk_gb: template?.min_disk_gb || prev.disk_gb,
     }));
   };
 
@@ -540,7 +542,7 @@ export function NewDeployment() {
                         <label
                           key={t.id}
                           className={`flex items-center gap-3 p-4 rounded-lg border cursor-pointer transition-colors ${
-                            formData.template_id === t.id
+                            formData.os_template_id === t.id
                               ? 'border-primary-500 bg-primary-500/10'
                               : 'border-dark-600 hover:border-dark-500 bg-dark-700/50'
                           }`}
@@ -549,18 +551,18 @@ export function NewDeployment() {
                             type="radio"
                             name="template"
                             value={t.id}
-                            checked={formData.template_id === t.id}
+                            checked={formData.os_template_id === t.id}
                             onChange={() => handleTemplateChange(t.id)}
                             className="sr-only"
                           />
                           <div
                             className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
-                              formData.template_id === t.id
+                              formData.os_template_id === t.id
                                 ? 'border-primary-500'
                                 : 'border-dark-500'
                             }`}
                           >
-                            {formData.template_id === t.id && (
+                            {formData.os_template_id === t.id && (
                               <div className="w-2 h-2 rounded-full bg-primary-500" />
                             )}
                           </div>
@@ -579,7 +581,7 @@ export function NewDeployment() {
                           </div>
                           <div className="flex-1">
                             <p className="font-medium text-white">{t.name}</p>
-                            <p className="text-sm text-dark-400">{t.os_version}</p>
+                            <p className="text-sm text-dark-400">{t.os_type}</p>
                           </div>
                         </label>
                       ))}
@@ -649,17 +651,17 @@ export function NewDeployment() {
                     RAM
                   </label>
                   <Select
-                    value={formData.memory_mb.toString()}
+                    value={formData.ram_gb.toString()}
                     onChange={(e) =>
-                      setFormData({ ...formData, memory_mb: parseInt(e.target.value) })
+                      setFormData({ ...formData, ram_gb: parseInt(e.target.value) })
                     }
                     options={[
-                      { value: '1024', label: '1 GB' },
-                      { value: '2048', label: '2 GB' },
-                      { value: '4096', label: '4 GB' },
-                      { value: '8192', label: '8 GB' },
-                      { value: '16384', label: '16 GB' },
-                      { value: '32768', label: '32 GB' },
+                      { value: '1', label: '1 Go' },
+                      { value: '2', label: '2 Go' },
+                      { value: '4', label: '4 Go' },
+                      { value: '8', label: '8 Go' },
+                      { value: '16', label: '16 Go' },
+                      { value: '32', label: '32 Go' },
                     ]}
                   />
                 </div>
@@ -670,9 +672,9 @@ export function NewDeployment() {
                     Disque
                   </label>
                   <Select
-                    value={formData.disk_size_gb.toString()}
+                    value={formData.disk_gb.toString()}
                     onChange={(e) =>
-                      setFormData({ ...formData, disk_size_gb: parseInt(e.target.value) })
+                      setFormData({ ...formData, disk_gb: parseInt(e.target.value) })
                     }
                     options={[
                       { value: '40', label: '40 GB' },
@@ -1203,7 +1205,7 @@ export function NewDeployment() {
                     <div className="flex justify-between">
                       <span className="text-dark-300">CPU / RAM / Disque</span>
                       <span className="text-white font-medium">
-                        {formData.cpu_count} vCPU / {formatMemory(formData.memory_mb)} / {formData.disk_size_gb} GB
+                        {formData.cpu_count} vCPU / {formData.ram_gb} Go / {formData.disk_gb} GB
                       </span>
                     </div>
                   </div>
