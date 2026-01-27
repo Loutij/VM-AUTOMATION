@@ -487,6 +487,7 @@ async def resume_deployment(
     
     async def run_resume_background(dep_id, vm_id):
         """Reprend le déploiement en arrière-plan."""
+        from src.common.database import db_session
         try:
             async with db_session() as session:
                 bg_service = DeploymentService(session)
