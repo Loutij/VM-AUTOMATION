@@ -1,7 +1,7 @@
 # HANDOFF - Transfert de Session Agent
 
 **Date**: 2026-01-27  
-**Session précédente**: Déploiement automatique Windows via DISM - OOBE BYPASS RÉSOLU
+**Session précédente**: Déploiement DISM via Interface Web - FONCTIONNEL
 
 ---
 
@@ -9,14 +9,20 @@
 
 ### Ce qui fonctionne ✅
 
-1. **Déploiement DISM** (`deploy_with_dism()` dans `hyperv_client.py`)
+1. **Déploiement DISM via Interface Web** ✅ NOUVEAU
+   - L'endpoint POST `/api/v1/deployments` avec `auto_start: true` lance DISM automatiquement
+   - Utilise `asyncio.create_task()` pour exécuter en arrière-plan
+   - La VM est créée, DISM applique l'image, et la VM démarre
+   - Temps total : ~2-3 minutes
+
+2. **Déploiement DISM** (`deploy_with_dism()` dans `hyperv_client.py`)
    - Applique une image Windows directement sur le VHD via DISM
    - Partitionne automatiquement (EFI + MSR + Windows)
    - Configure le bootloader UEFI
    - **Évite le "Press any key to boot from CD or DVD"**
    - Temps de déploiement: ~2-2.5 minutes
 
-2. **OOBE Bypass RÉSOLU** ✅
+3. **OOBE Bypass RÉSOLU** ✅
    - Le namespace `wcm` a été ajouté au template unattend.xml
    - Fichier unattend.xml placé dans tous les emplacements possibles
    - Configuration du registre offline pour bypass OOBE

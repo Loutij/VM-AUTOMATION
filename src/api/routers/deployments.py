@@ -222,11 +222,24 @@ async def create_deployment(
     
     await db.commit()
     
-    # Lancer le déploiement en arrière-plan si auto_start
+    # Lancer le déploiement DISM automatiquement
     if deployment.auto_start:
-        # Note: Pour un vrai système, utiliser Celery ou un worker
-        # background_tasks.add_task(service.start_deployment, created.id)
-        pass
+        import asyncio
+        from src.common.database import db_session
+        
+        async def run_deployment_background(deployment_id):
+            """Exécute le déploiement DISM en arrière-plan."""
+            try:
+                async with db_session() as session:
+                    bg_service = DeploymentService(session)
+                    await bg_service.start_deployment(deployment_id)
+                    await session.commit()
+                    logger.info("background_deployment_completed", deployment_id=str(deployment_id))
+            except Exception as e:
+                logger.error("background_deployment_failed", deployment_id=str(deployment_id), error=str(e))
+        
+        # Lancer en arrière-plan
+        asyncio.create_task(run_deployment_background(created.id))
     
     return DeploymentResponse(
         id=created.id,
