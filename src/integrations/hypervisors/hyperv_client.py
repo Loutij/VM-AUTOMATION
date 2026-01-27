@@ -2334,6 +2334,7 @@ class HyperVClient(BaseHypervisor):
         Capture un screenshot de l'écran de la VM.
         
         Utilise WMI pour obtenir une image thumbnail de la VM.
+        L'image est convertie de RGB16 brut vers PNG.
         
         Args:
             vm_id: ID ou nom de la VM
@@ -2389,9 +2390,12 @@ class HyperVClient(BaseHypervisor):
             throw "Failed to capture screenshot. Return code: $($result.ReturnValue)"
         }}
         
-        # Convertir en base64
-        $base64 = [Convert]::ToBase64String($result.ImageData)
-        Write-Output $base64
+        # Retourner les infos: width, height et données en base64
+        @{{
+            Width = {width}
+            Height = {height}
+            Data = [Convert]::ToBase64String($result.ImageData)
+        }} | ConvertTo-Json -Compress
         """
         
         result = await self._execute(script, timeout=30)
@@ -2404,11 +2408,74 @@ class HyperVClient(BaseHypervisor):
             )
             return None
         
-        base64_data = result.stdout.strip()
+        # Parser le JSON
+        data = self._parse_json_output(result.stdout)
         
-        if not base64_data:
+        if not data or not data.get("Data"):
             logger.warning("hyperv_screenshot_empty", vm_id=vm_id)
             return None
         
-        logger.info("hyperv_screenshot_captured", vm_id=vm_id, size=len(base64_data))
-        return base64_data
+        # Convertir RGB16 brut en PNG
+        try:
+            import base64
+            from io import BytesIO
+            from PIL import Image
+            
+            # Décoder les données base64
+            raw_data = base64.b64decode(data["Data"])
+            img_width = data.get("Width", width)
+            img_height = data.get("Height", height)
+            
+            # Les données Hyper-V ont un header de 4 bytes
+            # Format: 2 bytes width + 2 bytes height (ou autre metadata)
+            header_size = 4
+            if len(raw_data) > img_width * img_height * 2:
+                raw_data = raw_data[header_size:]
+            
+            # Calculer le nombre de pixels attendu
+            expected_pixels = img_width * img_height
+            actual_pixels = len(raw_data) // 2
+            
+            # Ajuster les dimensions si nécessaire
+            if actual_pixels != expected_pixels:
+                logger.warning(
+                    "hyperv_screenshot_size_mismatch",
+                    expected=expected_pixels,
+                    actual=actual_pixels,
+                )
+            
+            # Les données sont en RGB565 (16 bits par pixel)
+            # Convertir en RGB888
+            pixels = []
+            for i in range(0, min(len(raw_data), expected_pixels * 2), 2):
+                if i + 1 < len(raw_data):
+                    # Little endian
+                    pixel = raw_data[i] | (raw_data[i + 1] << 8)
+                    # RGB565: RRRRRGGGGGGBBBBB
+                    r = ((pixel >> 11) & 0x1F) << 3
+                    g = ((pixel >> 5) & 0x3F) << 2
+                    b = (pixel & 0x1F) << 3
+                    pixels.append((r, g, b))
+            
+            # Compléter si manquant
+            while len(pixels) < expected_pixels:
+                pixels.append((0, 0, 0))
+            
+            # Créer l'image
+            img = Image.new("RGB", (img_width, img_height))
+            img.putdata(pixels[:expected_pixels])
+            
+            # Sauvegarder en PNG dans un buffer
+            buffer = BytesIO()
+            img.save(buffer, format="PNG", optimize=True)
+            buffer.seek(0)
+            
+            # Encoder en base64
+            png_b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
+            
+            logger.info("hyperv_screenshot_captured", vm_id=vm_id, size=len(png_b64))
+            return png_b64
+            
+        except Exception as e:
+            logger.error("hyperv_screenshot_conversion_failed", vm_id=vm_id, error=str(e))
+            return None

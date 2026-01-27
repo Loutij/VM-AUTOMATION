@@ -49,15 +49,15 @@ class Settings(BaseSettings):
         default=30, description="Durée de validité du token en minutes"
     )
     cors_origins: str = Field(
-        default="http://localhost:3000,http://localhost:5173",
-        description="Origines CORS autorisées (comma-separated)",
+        default="*",
+        description="Origines CORS autorisées (comma-separated ou * pour toutes)",
     )
 
     @property
     def cors_origins_list(self) -> list[str]:
         """Retourne les origines CORS sous forme de liste."""
-        if not self.cors_origins:
-            return ["http://localhost:3000", "http://localhost:5173"]
+        if not self.cors_origins or self.cors_origins.strip() == "*":
+            return ["*"]
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
     # -------------------------------------------------------------------------
