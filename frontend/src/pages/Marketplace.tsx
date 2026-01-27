@@ -18,7 +18,6 @@ import { Button, Input, Modal, Skeleton, StatusBadge } from '../components/ui';
 // Mapping des icônes par catégorie
 const CATEGORY_ICONS: Record<string, string> = {
   windows_role: '🖥️',
-  enterprise_services: '🏢',
   remote_access: '🔐',
   database: '🗄️',
   webserver: '🌐',
@@ -32,8 +31,31 @@ const CATEGORY_ICONS: Record<string, string> = {
   file_transfer: '🔄',
   network: '📡',
   backup: '💾',
-  messaging: '📧',
   other: '📁',
+};
+
+// Mapping des icônes par profil
+const PROFILE_ICONS: Record<string, string> = {
+  minimal: '📦',
+  serveur_web: '🌐',
+  serveur_web_linux: '🐧',
+  controleur_domaine: '👥',
+  controleur_domaine_linux: '🐧',
+  developpement: '👨‍💻',
+  base_donnees: '🗄️',
+  base_donnees_windows: '🗄️',
+  base_donnees_linux: '🐧',
+  monitoring: '📊',
+  monitoring_linux: '📊',
+  securite: '🛡️',
+  serveur_fichiers: '📁',
+  infrastructure_vpn: '🔐',
+  pki_entreprise: '🔑',
+  federation_identite: '🔗',
+  deploiement_reseau: '🚀',
+  complet: '📦',
+  file_server: '📁',
+  hyperv_host: '🖥️',
 };
 
 interface MarketplaceProps {
@@ -193,7 +215,7 @@ export function Marketplace({
                 onClick={() => selectProfile(profile)}
                 className="flex flex-col items-center p-3 rounded-lg bg-gray-700/50 hover:bg-gray-700 border border-gray-600 hover:border-blue-500 transition-all group"
               >
-                <span className="text-2xl mb-1">{CATEGORY_ICONS[profile.name] || '📦'}</span>
+                <span className="text-2xl mb-1">{PROFILE_ICONS[profile.name] || '📦'}</span>
                 <span className="text-sm font-medium text-white group-hover:text-blue-400">
                   {profile.display_name}
                 </span>
