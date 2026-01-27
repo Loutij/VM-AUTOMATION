@@ -444,8 +444,12 @@ async def download_rdp(
     # Utiliser l'IP si disponible, sinon le nom de la VM
     address = vm.ip_address or vm.name
     
-    # Contenu du fichier RDP
+    # Username par défaut si non fourni
+    default_username = username or ".\\Administrateur"
+    
+    # Contenu du fichier RDP avec credentials pré-remplis
     rdp_content = f"""full address:s:{address}
+username:s:{default_username}
 prompt for credentials:i:1
 administrative session:i:1
 screen mode id:i:2
@@ -473,10 +477,6 @@ bitmapcachepersistenable:i:1
 autoreconnection enabled:i:1
 authentication level:i:2
 """
-    
-    # Ajouter le nom d'utilisateur si fourni
-    if username:
-        rdp_content += f"username:s:{username}\n"
     
     return Response(
         content=rdp_content,

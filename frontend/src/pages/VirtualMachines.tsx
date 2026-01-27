@@ -182,9 +182,13 @@ export function VirtualMachines() {
   };
 
   const handleDownloadRdp = (vm: VirtualMachine) => {
-    const rdpUrl = vmsApi.getRdpUrl(vm.id, 'Administrator');
+    const rdpUrl = vmsApi.getRdpUrl(vm.id);
     window.open(rdpUrl, '_blank');
-    addToast({ type: 'success', title: `Fichier RDP pour "${vm.name}" téléchargé` });
+    addToast({ 
+      type: 'success', 
+      title: `Fichier RDP pour "${vm.name}" téléchargé`,
+      message: 'Identifiants: .\\Administrateur / TempP@ss123!'
+    });
   };
 
   const handleCaptureScreenshot = async (vm: VirtualMachine) => {
