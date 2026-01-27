@@ -1,17 +1,16 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
-  MagnifyingGlassIcon,
-  FunnelIcon,
-  Squares2X2Icon,
-  ListBulletIcon,
-  StarIcon,
-  ClockIcon,
-  ArrowDownTrayIcon,
-  CheckIcon,
-  XMarkIcon,
-  InformationCircleIcon,
-} from '@heroicons/react/24/outline';
-import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid';
+  Search,
+  Filter,
+  LayoutGrid,
+  List,
+  Star,
+  Clock,
+  Download,
+  Check,
+  X,
+  Info,
+} from 'lucide-react';
 import { softwareApi } from '../services/api';
 import type { SoftwarePackage, SoftwareCategory_Info, SoftwareProfile } from '../types';
 import { Button, Input, Modal, Skeleton, StatusBadge } from '../components/ui';
@@ -174,7 +173,7 @@ export function Marketplace({
           )}
           {selected.size > 0 && (
             <Button variant="ghost" onClick={clearSelection}>
-              <XMarkIcon className="h-4 w-4 mr-1" />
+              <X size={16} className="mr-1" />
               Tout désélectionner
             </Button>
           )}
@@ -208,7 +207,7 @@ export function Marketplace({
       {/* Barre de recherche et filtres */}
       <div className="flex flex-col sm:flex-row gap-4">
         <div className="relative flex-1">
-          <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+          <Search size={20} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <Input
             type="text"
             placeholder="Rechercher un logiciel..."
@@ -235,13 +234,13 @@ export function Marketplace({
               onClick={() => setViewMode('grid')}
               className={`p-2 ${viewMode === 'grid' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`}
             >
-              <Squares2X2Icon className="h-5 w-5 text-white" />
+              <LayoutGrid size={20} className="text-white" />
             </button>
             <button
               onClick={() => setViewMode('list')}
               className={`p-2 ${viewMode === 'list' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'}`}
             >
-              <ListBulletIcon className="h-5 w-5 text-white" />
+              <List size={20} className="text-white" />
             </button>
           </div>
         </div>
@@ -344,7 +343,7 @@ function SoftwareCard({ software, isSelected, onToggle, onDetails, selectionMode
       {/* Badge featured */}
       {software.is_featured && (
         <div className="absolute top-2 right-2">
-          <StarIconSolid className="h-5 w-5 text-yellow-400" />
+          <Star size={20} className="text-yellow-400 fill-yellow-400" />
         </div>
       )}
 
@@ -358,7 +357,7 @@ function SoftwareCard({ software, isSelected, onToggle, onDetails, selectionMode
               : 'border-gray-500 hover:border-blue-500'
           }`}
         >
-          {isSelected && <CheckIcon className="h-4 w-4 text-white" />}
+          {isSelected && <Check size={16} className="text-white" />}
         </button>
       )}
 
@@ -399,7 +398,7 @@ function SoftwareCard({ software, isSelected, onToggle, onDetails, selectionMode
         {/* Footer avec temps et actions */}
         <div className="flex items-center justify-between pt-3 border-t border-gray-700">
           <div className="flex items-center text-xs text-gray-400">
-            <ClockIcon className="h-4 w-4 mr-1" />
+            <Clock size={16} className="mr-1" />
             {software.install_time_minutes} min
           </div>
           <div className="flex gap-2">
@@ -407,7 +406,7 @@ function SoftwareCard({ software, isSelected, onToggle, onDetails, selectionMode
               onClick={onDetails}
               className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-400 hover:text-white transition-colors"
             >
-              <InformationCircleIcon className="h-5 w-5" />
+              <Info size={20} />
             </button>
             <button
               onClick={onToggle}
@@ -418,9 +417,9 @@ function SoftwareCard({ software, isSelected, onToggle, onDetails, selectionMode
               }`}
             >
               {isSelected ? (
-                <CheckIcon className="h-5 w-5" />
+                <Check size={20} />
               ) : (
-                <ArrowDownTrayIcon className="h-5 w-5" />
+                <Download size={20} />
               )}
             </button>
           </div>
@@ -455,7 +454,7 @@ function SoftwareListItem({
             : 'border-gray-500 hover:border-blue-500'
         }`}
       >
-        {isSelected && <CheckIcon className="h-4 w-4 text-white" />}
+        {isSelected && <Check size={16} className="text-white" />}
       </button>
 
       {/* Icône */}
@@ -467,7 +466,7 @@ function SoftwareListItem({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <h3 className="font-semibold text-white">{software.display_name}</h3>
-          {software.is_featured && <StarIconSolid className="h-4 w-4 text-yellow-400" />}
+          {software.is_featured && <Star size={16} className="text-yellow-400 fill-yellow-400" />}
         </div>
         <p className="text-sm text-gray-400 truncate">
           {software.short_description || software.description}
@@ -488,7 +487,7 @@ function SoftwareListItem({
 
       {/* Temps */}
       <div className="flex items-center text-xs text-gray-400 flex-shrink-0">
-        <ClockIcon className="h-4 w-4 mr-1" />
+        <Clock size={16} className="mr-1" />
         {software.install_time_minutes} min
       </div>
 
@@ -497,7 +496,7 @@ function SoftwareListItem({
         onClick={onDetails}
         className="p-2 rounded-lg hover:bg-gray-700 text-gray-400 hover:text-white transition-colors"
       >
-        <InformationCircleIcon className="h-5 w-5" />
+        <Info size={20} />
       </button>
     </div>
   );
@@ -626,12 +625,12 @@ function SoftwareDetailsModal({
           >
             {isSelected ? (
               <>
-                <CheckIcon className="h-4 w-4 mr-2" />
+                <Check size={16} className="mr-2" />
                 Sélectionné
               </>
             ) : (
               <>
-                <ArrowDownTrayIcon className="h-4 w-4 mr-2" />
+                <Download size={16} className="mr-2" />
                 Sélectionner
               </>
             )}
