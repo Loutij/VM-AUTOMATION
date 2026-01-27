@@ -304,6 +304,29 @@ docker-compose -f docker-compose.prod.yml up -d
 
 ## Changelog
 
+### v0.8.1 (2026-01-27) - Correction de Bugs et Cohérence Types
+- **Corrections Critiques (Migrations Alembic)** :
+  - VMState enum : valeurs minuscules (`running`, `stopped`, `paused`, `saved`, `unknown`)
+  - DeploymentStatus enum : valeurs alignées avec modèle Python (`creating_vm`, `installing_os`, `post_install`, `in_progress`)
+  - SoftwareCategory enum : `networking` → `network`, toutes les catégories incluses
+  - Correction chaîne down_revision dans migrations
+  - Uniformisation `hypervisor_vm_id` (remplace `hyperv_id`)
+- **Alignement Types Frontend/Backend** :
+  - `memory_mb` → `ram_gb` (backend utilise GB)
+  - `disk_size_gb` → `disk_gb`
+  - `os_version` → `os_type`
+  - `template_id` → `os_template_id`
+  - `default_cpu/memory/disk` → `min_cpu/ram_gb/disk_gb`
+  - `DeploymentLog.status` → `DeploymentLog.level`
+- **Corrections Code** :
+  - `DeploymentLogEntry.level` : type `Literal["debug", "info", "warning", "error"]`
+  - `CATEGORY_INFO` : ajout catégorie `other`
+  - `OSTemplateResponse` : `created_at`/`updated_at` en `datetime`
+  - Suppression import `Depends` inutilisé dans `vms.py`
+  - React useEffect : ajout commentaire eslint-disable pour dépendance intentionnellement exclue
+- **Nouveau Script de Validation** :
+  - `scripts/validate_enums.py` : vérifie la cohérence des enums entre migrations, modèles et frontend
+
 ### v0.8.0 (2026-01-27) - Marketplace Logiciels
 - **Catalogue de logiciels complet** :
   - Plus de 100 packages organisés par catégorie
