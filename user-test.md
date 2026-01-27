@@ -10,25 +10,28 @@
 
 ## Résumé Exécutif
 
-| Catégorie | Critique | Majeur | Mineur | Total |
-|-----------|----------|--------|--------|-------|
-| Bugs | 2 | 4 | 3 | 9 |
-| UX/UI | 0 | 3 | 5 | 8 |
-| Incohérences | 0 | 2 | 2 | 4 |
-| Manques | 0 | 3 | 2 | 5 |
+| Catégorie | Critique | Majeur | Mineur | Total | Corrigés |
+|-----------|----------|--------|--------|-------|----------|
+| Bugs | 2 | 4 | 3 | 9 | 6 |
+| UX/UI | 0 | 3 | 5 | 8 | 1 |
+| Incohérences | 0 | 2 | 2 | 4 | 0 |
+| Manques | 0 | 3 | 2 | 5 | 0 |
+
+**Bugs corrigés le 27/01/2026**: BUG-001, BUG-002, BUG-003, BUG-004, BUG-009, UX-001
 
 ---
 
 ## BUGS CRITIQUES
 
-### BUG-001: Nom du déploiement non affiché
+### BUG-001: Nom du déploiement non affiché ✅ CORRIGÉ
 - **Page**: Dashboard, Déploiements
 - **Description**: La colonne "Nom" des déploiements récents est vide. Impossible d'identifier quel déploiement est affiché.
 - **Reproduction**: Aller sur Dashboard → Section "Déploiements récents" → La colonne Nom est vide
 - **Impact**: L'utilisateur ne peut pas distinguer ses déploiements
 - **Priorité**: CRITIQUE
+- **Correction**: Ajout de la propriété `name` comme alias de `vm_name` dans le type Deployment et le mapper API
 
-### BUG-002: Validation formulaire sans feedback utilisateur
+### BUG-002: Validation formulaire sans feedback utilisateur ✅ CORRIGÉ
 - **Page**: Nouveau déploiement (/deployments/new)
 - **Description**: Quand on clique sur "Suivant" sans remplir les champs obligatoires, rien ne se passe. Pas de message d'erreur visible.
 - **Reproduction**: 
@@ -40,24 +43,27 @@
 - **Erreur console**: `API Error: Request failed with status code 422`
 - **Impact**: L'utilisateur ne comprend pas pourquoi le formulaire ne progresse pas
 - **Priorité**: CRITIQUE
+- **Correction**: Ajout de messages d'erreur visuels + toast notifications pour la validation
 
 ---
 
 ## BUGS MAJEURS
 
-### BUG-003: Colonne VMs des hyperviseurs affiche "-"
+### BUG-003: Colonne VMs des hyperviseurs affiche "-" ✅ CORRIGÉ
 - **Page**: Hyperviseurs (/hypervisors)
 - **Description**: La colonne "VMs" de l'hyperviseur affiche "-" alors qu'il y a 3 VMs sur le Dashboard
 - **Reproduction**: Aller sur Hyperviseurs → Voir colonne VMs = "-"
 - **Attendu**: Devrait afficher "3" (nombre de VMs gérées)
 - **Priorité**: MAJEURE
+- **Correction**: Ajout de vm_count dans le schéma HypervisorResponse et calcul dans l'endpoint list_hypervisors
 
-### BUG-004: Titre de page HTML générique
+### BUG-004: Titre de page HTML générique ✅ CORRIGÉ
 - **Page**: Toutes les pages
 - **Description**: Le titre de l'onglet du navigateur est "frontend" au lieu de "VM Automation - [Page]"
 - **Reproduction**: Ouvrir n'importe quelle page → Regarder le titre de l'onglet
 - **Impact**: Mauvais référencement, confusion avec plusieurs onglets ouverts
 - **Priorité**: MAJEURE
+- **Correction**: Changement du titre dans index.html de "frontend" à "VM Automation"
 
 ### BUG-005: Templates liste seulement 1 template alors que déploiement en liste 7
 - **Page**: Templates (/templates)
@@ -96,22 +102,24 @@
 - **Attendu**: Bouton responsive ou icône + texte adaptatif
 - **Priorité**: MINEURE
 
-### BUG-009: Stepper du formulaire - dernier step tronqué
+### BUG-009: Stepper du formulaire - dernier step tronqué ✅ CORRIGÉ
 - **Page**: Nouveau déploiement (/deployments/new)
 - **Description**: Le dernier step du stepper affiche "Résu..." au lieu de "Résumé"
 - **Reproduction**: Aller sur /deployments/new → Observer le stepper
 - **Priorité**: MINEURE
+- **Correction**: Amélioration du CSS du stepper avec whitespace-nowrap et meilleur responsive
 
 ---
 
 ## PROBLÈMES UX/UI
 
-### UX-001: Incohérence de vocabulaire - État des VMs
+### UX-001: Incohérence de vocabulaire - État des VMs ✅ CORRIGÉ
 - **Description**: 
   - Stats en haut: "En cours d'exécution"
   - Tableau: "En cours"
 - **Suggestion**: Uniformiser vers "En cours d'exécution" ou "Running"
 - **Priorité**: MAJEURE
+- **Correction**: StatusBadge modifié pour afficher "En cours d'exécution" pour l'état running
 
 ### UX-002: Pas de sélection par défaut dans le formulaire de déploiement
 - **Description**: L'hyperviseur et le template ne sont pas pré-sélectionnés
@@ -244,4 +252,5 @@
 
 ---
 
-*Rapport généré le 27/01/2026 à 15:00*
+*Rapport généré le 27/01/2026 à 15:00*  
+*Mis à jour le 27/01/2026 à 16:00 - Corrections appliquées*
