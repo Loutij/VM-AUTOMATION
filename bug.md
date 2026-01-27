@@ -431,4 +431,182 @@ Créer un script qui vérifie automatiquement :
 
 ---
 
-*Rapport généré automatiquement par analyse statique du code source.*
+## Incohérences Système (Runtime)
+
+> Analyse effectuée le 27 janvier 2026 sur l'environnement de production.
+
+### 22. VHD Orphelins sur Hyper-V 🔴
+
+**Localisation:** `C:\HyperV\VirtualHardDisks\`
+
+Les fichiers VHDX suivants ne sont attachés à aucune VM active :
+
+| Fichier | Taille | Dernière modification |
+|---------|--------|----------------------|
+| `NOUVELLE_VM_DE_PRODbb.vhdx` | 8.57 GB | 27/01/2026 |
+| `NOUVELLE_VM_DE_PROD_aaaa.vhdx` | 0.19 GB | 27/01/2026 |
+| `NOUVELLE_VM_DE_PROD_ABC.vhdx` | 0.19 GB | 27/01/2026 |
+
+**Impact:** Espace disque gaspillé (~9 GB). Ces VHD proviennent probablement de déploiements échoués ou de VMs supprimées manuellement.
+
+**Action suggérée:** Supprimer ces fichiers après confirmation qu'ils ne sont pas nécessaires.
+
+---
+
+### 23. Dossiers de Configuration VM Orphelins 🔴
+
+**Localisation:** `C:\HyperV\VirtualMachines\`
+
+**27 dossiers trouvés**, mais seulement **3 VMs actives** sur Hyper-V :
+
+**VMs actives :**
+- `CM_NEW_VM`
+- `TEST_DISM_WEB`
+- `VM_LAB_08`
+
+**Dossiers orphelins (24) :**
+```
+CMA, CMA_2, CMA_32
+NOUVELLE_VM_DE_PROD, NOUVELLE_VM_DE_PROD00, NOUVELLE_VM_DE_PRODbb
+NOUVELLE_VM_DE_PROD_2, NOUVELLE_VM_DE_PROD_3, NOUVELLE_VM_DE_PROD_5
+NOUVELLE_VM_DE_PROD_aaaa, NOUVELLE_VM_DE_PROD_ABC
+TEST_DISM_AUTO
+VM_02, VM_02_LAB, VM_03
+VM_CMA, VM_LAB_CM, VM_LAB_CMA
+VM_LAB_03, VM_LAB_04, VM_LAB_05, VM_LAB_06, VM_LAB_07, VM_LAB_09, VM_LAB_10
+```
+
+**Impact:** Fichiers de configuration, snapshots et métadonnées inutiles occupant de l'espace disque.
+
+---
+
+### 24. VM "A" Fantôme dans la Base de Données 🔴
+
+**Table:** `virtual_machines`
+
+```sql
+id: 2be11b78-48aa-486e-8595-d6cedcd6332e
+name: A
+status: deleted
+state: unknown
+hypervisor_vm_id: a37126ef-abc6-42bc-aafa-2ea27c5e5730
+```
+
+**Problème:** Cette VM a un `hypervisor_vm_id` enregistré mais **n'existe pas sur Hyper-V**. Le statut est `deleted` mais l'entrée persiste en base.
+
+**Impact:** Données obsolètes qui peuvent fausser les statistiques et causer des erreurs si on tente d'interagir avec cette VM.
+
+**Action suggérée:** Supprimer cette entrée de la base ou ajouter un mécanisme de nettoyage automatique.
+
+---
+
+### 25. VMs sans Déploiement Associé 🟡
+
+**Table:** `virtual_machines` LEFT JOIN `deployments`
+
+Les VMs suivantes existent en base mais n'ont pas de déploiement associé :
+
+| VM | Status | State | Créée le |
+|----|--------|-------|----------|
+| `A` | deleted | unknown | 27/01/2026 15:28 |
+| `VM_LAB_08` | created | stopped | 27/01/2026 12:01 |
+| `TEST_DISM_WEB` | creating | running | 27/01/2026 13:27 |
+
+**Problème:** Ces VMs ont été créées mais leur déploiement n'a pas été correctement enregistré ou a été supprimé.
+
+---
+
+### 26. Statut VM Incohérent 🟡
+
+**Table:** `virtual_machines`
+
+| VM | Status DB | State DB | État réel Hyper-V |
+|----|-----------|----------|-------------------|
+| `CM_NEW_VM` | `creating` | `running` | Running ✓ |
+| `TEST_DISM_WEB` | `creating` | `running` | Running ✓ |
+| `VM_LAB_08` | `created` | `stopped` | Off ✓ |
+
+**Problème:** 
+- `CM_NEW_VM` et `TEST_DISM_WEB` ont `status=creating` alors qu'elles sont complètement opérationnelles
+- Le statut `creating` devrait être transitoire, pas permanent
+- Le statut `created` n'existe pas dans l'enum `VMStatus` du modèle Python
+
+**Impact:** Le frontend affiche des états incorrects pour ces VMs.
+
+---
+
+### 27. Catalogue Software Vide 🟡
+
+**Table:** `software_packages`
+
+```sql
+SELECT COUNT(*) FROM software_packages;
+-- Résultat: 0 lignes
+```
+
+**Problème:** Le catalogue de logiciels est vide alors que :
+1. Le code contient 100+ packages dans `src/domain/software_catalog.py`
+2. Le frontend Marketplace s'attend à afficher des logiciels
+3. L'endpoint `/api/software/seed` existe pour peupler le catalogue
+
+**Impact:** La fonctionnalité Marketplace est inutilisable sans seed initial.
+
+**Action suggérée:** Appeler `POST /api/software/seed` ou exécuter le seed automatiquement au démarrage.
+
+---
+
+### 28. Type de Colonne `category` Incorrect 🟡
+
+**Table:** `software_packages`
+
+**État actuel:**
+```sql
+category | character varying(50) | NOT NULL | DEFAULT 'other'
+```
+
+**Attendu (selon migration 003):**
+```sql
+category | softwarecategory (ENUM) | NOT NULL
+```
+
+**Problème:** La colonne `category` utilise `varchar(50)` au lieu de l'enum `softwarecategory`. La migration 003 prévoyait de convertir cette colonne mais cela ne semble pas avoir été appliqué.
+
+---
+
+### 29. Un Seul Template OS Disponible 🟡
+
+**Table:** `os_templates`
+
+```sql
+SELECT * FROM os_templates;
+-- 1 seul résultat: Windows_Server_2022
+```
+
+**Impact:** Le système ne peut déployer qu'un seul type d'OS. Il manque :
+- Windows 10/11
+- Windows Server 2019
+- Templates Linux (Ubuntu, Debian, Rocky)
+
+---
+
+## Résumé Mis à Jour
+
+| Priorité | Nombre | Description |
+|----------|--------|-------------|
+| 🔴 Critique (Code) | 4 | Bugs qui causent des erreurs runtime |
+| 🔴 Critique (Système) | 4 | Ressources orphelines, données fantômes |
+| 🟡 Modérée (Code) | 13 | Incohérences code source |
+| 🟡 Modérée (Système) | 5 | Incohérences données/état |
+| **Total** | **26** | Problèmes identifiés |
+
+### Actions Prioritaires Système
+
+1. **Nettoyer les VHD orphelins** - Libérer ~9 GB d'espace disque
+2. **Supprimer les dossiers VM orphelins** - 24 dossiers à nettoyer
+3. **Corriger les statuts VM** - Synchroniser DB avec état Hyper-V réel
+4. **Seed le catalogue software** - `POST /api/software/seed`
+5. **Ajouter des templates OS** - Activer le déploiement multi-OS
+
+---
+
+*Rapport généré automatiquement par analyse statique du code source et inspection runtime du système.*
