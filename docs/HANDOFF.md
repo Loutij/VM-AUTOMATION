@@ -1,7 +1,7 @@
 # HANDOFF - Transfert de Session Agent
 
 **Date**: 2026-01-27  
-**Session précédente**: Déploiement automatique Windows via DISM
+**Session précédente**: Déploiement automatique Windows via DISM - OOBE BYPASS RÉSOLU
 
 ---
 
@@ -14,100 +14,102 @@
    - Partitionne automatiquement (EFI + MSR + Windows)
    - Configure le bootloader UEFI
    - **Évite le "Press any key to boot from CD or DVD"**
-   - Temps de déploiement: ~90 secondes
+   - Temps de déploiement: ~2-2.5 minutes
 
-2. **Injection Unattend** (`inject_unattend()` dans `hyperv_client.py`)
+2. **OOBE Bypass RÉSOLU** ✅
+   - Le namespace `wcm` a été ajouté au template unattend.xml
+   - Fichier unattend.xml placé dans tous les emplacements possibles
+   - Configuration du registre offline pour bypass OOBE
+   - **Windows boot directement au bureau sans interaction manuelle**
+
+3. **Injection Unattend** (`inject_unattend()` dans `hyperv_client.py`)
    - Crée un VHDX dédié avec `autounattend.xml`
    - Supporte le base64 chunking pour surmonter les limites WinRM
 
-3. **Création ISO Custom** (`create_custom_iso()` dans `hyperv_client.py`)
+4. **Création ISO Custom** (`create_custom_iso()` dans `hyperv_client.py`)
    - Utilise `oscdimg.exe` + `efisys_noprompt.bin`
    - Windows ADK installé sur l'hyperviseur
 
-4. **Frontend React** - 8 pages fonctionnelles
-5. **Backend FastAPI** - Tous les endpoints CRUD
-6. **PowerShell Direct** - Communication avec les VMs
+5. **Frontend React** - 8 pages fonctionnelles
+6. **Backend FastAPI** - Tous les endpoints CRUD
+7. **Screenshot VM** - Capture d'écran en temps réel via `get_vm_screenshot()`
 
 ---
 
-## Problème Non Résolu ⚠️
+## Problème Partiellement Résolu ⚠️
 
-### OOBE Windows (Out-of-Box Experience)
+### Mot de passe Administrator
 
-**Symptôme**: Après le déploiement DISM, Windows démarre mais reste bloqué sur l'écran OOBE qui demande des interactions manuelles (région, clavier, mot de passe admin, etc.)
+**Symptôme**: Après le déploiement DISM, Windows boot au bureau mais le mot de passe Administrator n'est pas configuré correctement pour PowerShell Direct.
 
-**Tentatives effectuées**:
+**Ce qui a été tenté**:
 
-1. **Placement du unattend.xml dans plusieurs emplacements**:
-   - `C:\Windows\Panther\unattend.xml`
-   - `C:\Windows\System32\Sysprep\unattend.xml`
-   - `C:\unattend.xml`
-   - **Résultat**: Ignoré par Windows
+1. **Configuration via unattend.xml `<AdministratorPassword>`**
+   - Résultat: Non appliqué pour image DISM (non syspreppée)
 
-2. **Modification du registre offline**:
-   ```powershell
-   reg add "HKLM\OFFLINE_SW\Microsoft\Windows\CurrentVersion\Setup\OOBE" /v OOBEInProgress /t REG_DWORD /d 0 /f
-   reg add "HKLM\OFFLINE_SW\Microsoft\Windows\CurrentVersion\Setup\OOBE" /v SkipMachineOOBE /t REG_DWORD /d 1 /f
-   reg add "HKLM\OFFLINE_SW\Microsoft\Windows\CurrentVersion\Setup\OOBE" /v SkipUserOOBE /t REG_DWORD /d 1 /f
-   ```
-   - **Résultat**: Ignoré car Windows détecte un premier boot "frais"
+2. **FirstLogonCommands avec `net user Administrator "password"`**
+   - Résultat: Ne s'exécute pas car pas de "premier logon" réel
 
-3. **Script SetupComplete.cmd**:
+3. **SetupComplete.cmd**
    - Placé dans `C:\Windows\Setup\Scripts\`
-   - Active l'admin et configure WinRM
-   - **Résultat**: S'exécute APRÈS l'OOBE (pas avant)
+   - Contient `net user Administrator "Admin123!" /active:yes`
+   - Résultat: Semble ne pas s'exécuter ou échouer
 
-4. **AutoLogon via registre offline**:
-   - Configuré dans `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon`
-   - **Résultat**: Nécessite que l'OOBE soit terminé d'abord
+4. **Configuration AutoLogon via registre offline**
+   - Résultat: AutoLogon fonctionne (LogonCount=1) puis session se termine
 
-**Raison fondamentale**: Le déploiement DISM crée une image "neuve" qui n'a jamais été syspreppée. Windows détecte automatiquement qu'il doit passer par l'OOBE.
+**Raison fondamentale**: Pour une image DISM non-syspreppée, les mécanismes FirstLogonCommands et `<AdministratorPassword>` ne fonctionnent pas comme avec une installation normale depuis ISO.
 
 ---
 
-## Solutions Potentielles à Explorer
+## Solutions pour le Mot de Passe
 
-### Option 1: Image WIM pré-configurée (Recommandé)
-1. Déployer une VM manuellement une fois
-2. La configurer entièrement (admin, WinRM, etc.)
+### Option 1: Image WIM pré-configurée avec Sysprep (Recommandé)
+1. Déployer une VM avec DISM une fois
+2. Se connecter manuellement et configurer :
+   - Mot de passe Administrator
+   - WinRM activé
+   - Tout autre configuration nécessaire
 3. Utiliser Sysprep en mode Generalize + OOBE avec `/unattend`
 4. Capturer l'image avec DISM
-5. Utiliser cette image personnalisée pour tous les déploiements
+5. Utiliser cette image personnalisée pour tous les futurs déploiements
 
 ```powershell
-# Sur la VM template
+# Sur la VM template, après configuration
 C:\Windows\System32\Sysprep\sysprep.exe /generalize /oobe /shutdown /unattend:C:\unattend.xml
 
-# Sur l'hyperviseur - capturer
+# Sur l'hyperviseur - capturer l'image
 Dism /Capture-Image /ImageFile:C:\Images\CustomWindows.wim /CaptureDir:W:\ /Name:"Windows Server 2022 Custom"
 ```
 
-### Option 2: WDS/MDT (Infrastructure)
-- Windows Deployment Services pour le PXE boot
-- Microsoft Deployment Toolkit pour l'orchestration
-- 100% automatique mais nécessite infrastructure supplémentaire
+### Option 2: Configuration manuelle initiale
+- Le déploiement DISM est rapide (~2 min)
+- Windows boot directement au bureau (OOBE bypassé)
+- Première connexion : définir le mot de passe Administrator
+- PowerShell Direct fonctionne ensuite
 
-### Option 3: Hybrid DISM + VNC/RDP
-- Garder le déploiement DISM rapide (~90s)
-- Accepter l'OOBE manuel (5 clics)
-- Ou automatiser via VNC/RDP scripting
-
-### Option 4: `/Apply-Image` avec `/UnattendFile`
-```powershell
-Dism /Apply-Image /ImageFile:install.wim /Index:2 /ApplyDir:W:\ /UnattendFile:C:\unattend.xml
-```
-- À tester: le `/UnattendFile` pendant l'apply pourrait configurer l'OOBE
+### Option 3: Modifier le hash du mot de passe dans le registre SAM offline
+- Complexe car Windows utilise des hashes NT
+- Nécessite des outils spécialisés (chntpw, etc.)
+- Non recommandé pour production
 
 ---
 
-## VM de Test Actuelle
+## VMs de Test Actuelles
 
-**VM_LAB_06** sur Hyper-V 10.250.0.20
-- État: Running, mais OOBE bloqué
+### VM_LAB_08 et VM_LAB_09 sur Hyper-V 10.250.0.20
+
+**État**: Running, OOBE bypassé, Windows au bureau
 - Config: Gen2, 2 vCPU, 4 GB RAM, 60 GB VHDX
-- VHD: `C:\HyperV\VirtualHardDisks\VM_LAB_06.vhdx`
-- Credentials prévus: Administrator / Admin123!
-- PowerShell Direct: Ne fonctionne pas (OOBE non terminé)
+- Credentials: Administrator / mot de passe à définir manuellement
+- PowerShell Direct: Ne fonctionne pas (mot de passe non configuré)
+- Screenshot VM: Fonctionnel via `get_vm_screenshot()`
+
+**Pour configurer le mot de passe manuellement**:
+1. Se connecter via Hyper-V Manager (Enhanced Session) ou console
+2. Cliquer sur l'écran de verrouillage
+3. Définir le mot de passe Administrator
+4. PowerShell Direct fonctionnera ensuite
 
 ---
 

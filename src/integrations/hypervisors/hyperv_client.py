@@ -170,6 +170,88 @@ class HyperVClient(BaseHypervisor):
         logger.info("hyperv_vms_listed", count=len(vms), host=self.host)
         return vms
 
+    async def list_vms_with_network(self) -> list[dict]:
+        """
+        Liste toutes les VMs avec leurs informations réseau (IP, MAC, switch).
+        
+        Plus lent que list_vms car récupère aussi les infos réseau,
+        mais évite de faire N requêtes séparées.
+        
+        Returns:
+            Liste de dictionnaires avec toutes les infos VM + réseau
+        """
+        script = """
+        $result = @()
+        Get-VM | ForEach-Object {
+            $vm = $_
+            $nic = Get-VMNetworkAdapter -VM $vm -ErrorAction SilentlyContinue | Select-Object -First 1
+            
+            # Récupérer les IPs non-link-local
+            $allIps = @()
+            $primaryIp = $null
+            if ($nic -and $nic.IPAddresses) {
+                foreach ($ip in $nic.IPAddresses) {
+                    if ($ip -and $ip -ne '' -and $ip -notlike 'fe80:*') {
+                        $allIps += $ip
+                    }
+                }
+                if ($allIps.Count -gt 0) {
+                    $primaryIp = $allIps[0]
+                }
+            }
+            
+            $vmInfo = @{
+                id = $vm.VMId.ToString()
+                name = $vm.Name
+                state = $vm.State.ToString()
+                cpu_count = $vm.ProcessorCount
+                ram_gb = [math]::Round($vm.MemoryAssigned/1GB, 2)
+                uptime = $vm.Uptime.ToString()
+                status = $vm.Status
+                generation = $vm.Generation
+                path = $vm.Path
+                # Network info
+                ip_address = $primaryIp
+                ip_addresses = $allIps
+                mac_address = if ($nic) { $nic.MacAddress } else { $null }
+                switch_name = if ($nic) { $nic.SwitchName } else { $null }
+                vlan_id = $null
+            }
+            
+            # Récupérer VLAN si configuré
+            if ($nic) {
+                $vlan = Get-VMNetworkAdapterVlan -VMNetworkAdapter $nic -ErrorAction SilentlyContinue
+                if ($vlan -and $vlan.AccessVlanId -gt 0) {
+                    $vmInfo.vlan_id = $vlan.AccessVlanId
+                }
+            }
+            
+            $result += $vmInfo
+        }
+        $result | ConvertTo-Json -Depth 3
+        """
+        
+        result = await self._execute(script, timeout=60)
+        
+        if not result.success:
+            logger.warning(
+                "list_vms_with_network_failed",
+                error=result.stderr,
+            )
+            return []
+        
+        data = self._parse_json_output(result.stdout)
+        
+        if data is None:
+            return []
+        
+        # Normaliser en liste
+        if isinstance(data, dict):
+            data = [data]
+        
+        logger.info("hyperv_vms_with_network_listed", count=len(data), host=self.host)
+        return data
+
     async def get_vm(self, vm_id: str) -> VMInfo | None:
         """Récupère les informations d'une VM par son nom ou ID."""
         # Essayer par nom d'abord, puis par VMID
@@ -1310,10 +1392,16 @@ class HyperVClient(BaseHypervisor):
         # Démonter si déjà monté
         Dismount-VHD -Path $vhdPath -ErrorAction SilentlyContinue
         Dismount-DiskImage -ImagePath $isoPath -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
         
-        # Monter l'ISO
-        $iso = Mount-DiskImage -ImagePath $isoPath -PassThru
-        $isoDrive = ($iso | Get-Volume).DriveLetter
+        # Monter l'ISO et récupérer la lettre de lecteur
+        Mount-DiskImage -ImagePath $isoPath -StorageType ISO | Out-Null
+        Start-Sleep -Seconds 2
+        $isoDrive = (Get-DiskImage -ImagePath $isoPath | Get-Volume).DriveLetter
+        
+        if (-not $isoDrive) {{
+            throw "Failed to get ISO drive letter"
+        }}
         
         # Monter et partitionner le VHD
         $disk = Mount-VHD -Path $vhdPath -Passthru | Get-Disk
@@ -1376,17 +1464,25 @@ class HyperVClient(BaseHypervisor):
         
         logger.debug("hyperv_dism_image_applied", vm_id=vm_id)
         
-        # Étape 3: Ajouter unattend.xml si fourni (pour automatiser OOBE)
+        # Étape 3: Configuration complète pour automatiser l'OOBE
+        # Extraction du mot de passe admin depuis le unattend_content
+        admin_password = "Admin123!"  # Valeur par défaut
         if unattend_content:
+            import re
             import base64
+            
+            # Essayer d'extraire le mot de passe du unattend.xml
+            pwd_match = re.search(
+                r'<AdministratorPassword>\s*<Value>([^<]+)</Value>',
+                unattend_content
+            )
+            if pwd_match:
+                admin_password = pwd_match.group(1)
+            
             content_b64 = base64.b64encode(unattend_content.encode('utf-8')).decode('ascii')
             chunks = [content_b64[i:i+2000] for i in range(0, len(content_b64), 2000)]
             
-            panther_path = f"{win_drive}:\\Windows\\Panther"
             temp_b64 = f"{win_drive}:\\temp_unattend.b64"
-            
-            # Créer le dossier Panther s'il n'existe pas
-            await self._execute(f"New-Item -ItemType Directory -Path '{panther_path}' -Force | Out-Null")
             
             # Écrire le fichier en chunks
             for i, chunk in enumerate(chunks):
@@ -1395,17 +1491,135 @@ class HyperVClient(BaseHypervisor):
                 else:
                     await self._execute(f"[System.IO.File]::AppendAllText('{temp_b64}', '{chunk}')")
             
-            # Décoder et créer unattend.xml
+            # Placer unattend.xml dans TOUS les emplacements possibles
             script_unattend = f"""
             $b64 = [System.IO.File]::ReadAllText('{temp_b64}')
             $bytes = [System.Convert]::FromBase64String($b64)
             $content = [System.Text.Encoding]::UTF8.GetString($bytes)
-            [System.IO.File]::WriteAllText('{panther_path}\\unattend.xml', $content, [System.Text.Encoding]::UTF8)
+            
+            # Créer tous les répertoires nécessaires
+            $paths = @(
+                '{win_drive}:\\Windows\\Panther',
+                '{win_drive}:\\Windows\\Panther\\Unattend',
+                '{win_drive}:\\Windows\\System32\\Sysprep',
+                '{win_drive}:\\Windows\\Setup\\Scripts'
+            )
+            foreach ($p in $paths) {{
+                New-Item -ItemType Directory -Path $p -Force -ErrorAction SilentlyContinue | Out-Null
+            }}
+            
+            # Écrire le unattend.xml dans tous les emplacements possibles
+            $unattendPaths = @(
+                '{win_drive}:\\Windows\\Panther\\unattend.xml',
+                '{win_drive}:\\Windows\\Panther\\Unattend\\unattend.xml',
+                '{win_drive}:\\Windows\\System32\\Sysprep\\unattend.xml',
+                '{win_drive}:\\unattend.xml'
+            )
+            foreach ($up in $unattendPaths) {{
+                [System.IO.File]::WriteAllText($up, $content, [System.Text.Encoding]::UTF8)
+            }}
+            
             Remove-Item '{temp_b64}' -Force
-            Write-Output "Unattend written"
+            Write-Output "Unattend files written to all locations"
             """
-            await self._execute(script_unattend, timeout=30)
+            await self._execute(script_unattend, timeout=60)
             logger.debug("hyperv_dism_unattend_written", vm_id=vm_id)
+        
+        # Étape 3b: Configurer le registre offline pour bypass OOBE
+        script_registry = f"""
+        $winDrive = '{win_drive}:'
+        $softwareHive = "$winDrive\\Windows\\System32\\config\\SOFTWARE"
+        $systemHive = "$winDrive\\Windows\\System32\\config\\SYSTEM"
+        
+        # Charger les ruches du registre
+        reg load "HKLM\\OFFLINE_SW" "$softwareHive" 2>$null
+        reg load "HKLM\\OFFLINE_SYS" "$systemHive" 2>$null
+        
+        # Configuration OOBE - bypass tous les écrans
+        $oobeKey = "HKLM\\OFFLINE_SW\\Microsoft\\Windows\\CurrentVersion\\Setup\\OOBE"
+        reg add $oobeKey /v SetupDisplayedProductKey /t REG_DWORD /d 1 /f
+        reg add $oobeKey /v SetupDisplayedEula /t REG_DWORD /d 1 /f
+        reg add $oobeKey /v NetworkLocation /t REG_DWORD /d 1 /f
+        reg add $oobeKey /v SkipUserOOBE /t REG_DWORD /d 1 /f
+        reg add $oobeKey /v SkipMachineOOBE /t REG_DWORD /d 1 /f
+        reg add $oobeKey /v ProtectYourPC /t REG_DWORD /d 3 /f
+        reg add $oobeKey /v HideEULAPage /t REG_DWORD /d 1 /f
+        reg add $oobeKey /v HideLocalAccountScreen /t REG_DWORD /d 1 /f
+        reg add $oobeKey /v HideOnlineAccountScreens /t REG_DWORD /d 1 /f
+        reg add $oobeKey /v HideWirelessSetupInOOBE /t REG_DWORD /d 1 /f
+        
+        # Pointer vers le fichier unattend
+        $setupKey = "HKLM\\OFFLINE_SW\\Microsoft\\Windows\\CurrentVersion\\Setup"
+        reg add $setupKey /v UnattendFile /t REG_SZ /d "C:\\Windows\\Panther\\unattend.xml" /f
+        
+        # AutoLogon configuration
+        $winlogonKey = "HKLM\\OFFLINE_SW\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon"
+        reg add $winlogonKey /v AutoAdminLogon /t REG_SZ /d "1" /f
+        reg add $winlogonKey /v DefaultUserName /t REG_SZ /d "Administrator" /f
+        reg add $winlogonKey /v DefaultPassword /t REG_SZ /d "{admin_password}" /f
+        reg add $winlogonKey /v AutoLogonCount /t REG_DWORD /d 5 /f
+        
+        # Décharger les ruches
+        [gc]::Collect()
+        Start-Sleep -Seconds 2
+        reg unload "HKLM\\OFFLINE_SW"
+        reg unload "HKLM\\OFFLINE_SYS"
+        
+        Write-Output "REGISTRY_CONFIGURED"
+        """
+        
+        result = await self._execute(script_registry, timeout=120)
+        if result.success:
+            logger.debug("hyperv_dism_registry_configured", vm_id=vm_id)
+        else:
+            logger.warning(
+                "hyperv_dism_registry_config_warning",
+                vm_id=vm_id,
+                error=result.stderr,
+            )
+        
+        # Étape 3c: Créer SetupComplete.cmd pour finaliser la configuration au premier boot
+        setup_complete_content = f"""@echo off
+REM ============================================
+REM SetupComplete.cmd - Post-OOBE Configuration
+REM ============================================
+echo [%date% %time%] SetupComplete starting >> C:\\Windows\\Setup\\Scripts\\setup.log
+
+REM Activer le compte Administrator et définir le mot de passe
+net user Administrator "{admin_password}" /active:yes >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
+
+REM Configurer WinRM
+powershell -Command "Enable-PSRemoting -Force -SkipNetworkProfileCheck" >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
+powershell -Command "Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value '*' -Force" >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
+powershell -Command "winrm quickconfig -quiet" >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
+powershell -Command "Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False" >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
+
+REM Activer RDP
+reg add "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
+netsh advfirewall firewall set rule group="remote desktop" new enable=Yes >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
+
+REM Marquer la configuration comme terminée
+echo SETUP_COMPLETE > C:\\Windows\\Setup\\Scripts\\setup_done.flag
+
+echo [%date% %time%] SetupComplete finished >> C:\\Windows\\Setup\\Scripts\\setup.log
+"""
+        
+        # Encoder et écrire SetupComplete.cmd
+        import base64
+        setup_b64 = base64.b64encode(setup_complete_content.encode('utf-8')).decode('ascii')
+        
+        script_setup_complete = f"""
+        $setupDir = '{win_drive}:\\Windows\\Setup\\Scripts'
+        New-Item -ItemType Directory -Path $setupDir -Force -ErrorAction SilentlyContinue | Out-Null
+        
+        $content = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('{setup_b64}'))
+        [System.IO.File]::WriteAllText("$setupDir\\SetupComplete.cmd", $content)
+        
+        Write-Output "SetupComplete.cmd created"
+        """
+        
+        await self._execute(script_setup_complete, timeout=30)
+        logger.debug("hyperv_dism_setup_complete_created", vm_id=vm_id)
         
         # Étape 4: Configurer le bootloader
         script_boot = f"""
@@ -1444,6 +1658,33 @@ class HyperVClient(BaseHypervisor):
             if ($hdd) {{
                 Set-VMFirmware -VM $vm -FirstBootDevice $hdd
             }}
+            
+            # Corriger les permissions sur le VHDX pour Hyper-V
+            $vmId = $vm.VMId.ToString()
+            $vhdPath = '{vhd_path}'
+            $acl = Get-Acl $vhdPath
+            
+            # Ajouter permissions pour "NT VIRTUAL MACHINE\\Virtual Machines"
+            try {{
+                $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                    "NT VIRTUAL MACHINE\\Virtual Machines",
+                    "FullControl",
+                    "Allow"
+                )
+                $acl.AddAccessRule($rule)
+            }} catch {{ }}
+            
+            # Ajouter permissions pour le compte VM spécifique
+            try {{
+                $rule2 = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                    "NT VIRTUAL MACHINE\\$vmId",
+                    "FullControl",
+                    "Allow"
+                )
+                $acl.AddAccessRule($rule2)
+            }} catch {{ }}
+            
+            Set-Acl $vhdPath $acl -ErrorAction SilentlyContinue
             
             Write-Output "FINALIZE_SUCCESS"
         }} else {{

@@ -393,17 +393,17 @@ class VMService:
         hypervisor = await self.get_hypervisor(hypervisor_id)
         client = await self._get_hypervisor_client(hypervisor_id)
         
-        # Récupérer les VMs depuis Hyper-V
+        # Récupérer les VMs depuis Hyper-V avec infos réseau
         try:
-            hyperv_vms = await client.list_vms()
+            hyperv_vms = await client.list_vms_with_network()
         except Exception as e:
             logger.error("sync_list_vms_failed", error=str(e))
             result["errors"].append(f"Impossible de lister les VMs Hyper-V: {str(e)}")
             return result
         
         # Créer un dictionnaire des VMs Hyper-V par nom et par ID
-        hyperv_by_name = {vm.name.lower(): vm for vm in hyperv_vms}
-        hyperv_by_id = {vm.id: vm for vm in hyperv_vms}
+        hyperv_by_name = {vm["name"].lower(): vm for vm in hyperv_vms}
+        hyperv_by_id = {vm["id"]: vm for vm in hyperv_vms}
         
         # Récupérer les VMs existantes en DB pour cet hyperviseur
         db_vms = await self.list_vms(hypervisor_id=hypervisor_id)
@@ -420,46 +420,65 @@ class VMService:
             "3": VMState.STOPPED,
         }
         
+        # Fonction helper pour formater le MAC address
+        def format_mac(mac: str | None) -> str | None:
+            if not mac:
+                return None
+            # Hyper-V retourne le MAC sans séparateurs, on ajoute les ":"
+            mac = mac.replace("-", "").replace(":", "")
+            if len(mac) == 12:
+                return ":".join(mac[i:i+2] for i in range(0, 12, 2))
+            return mac
+        
         # 1. Importer les nouvelles VMs (présentes sur Hyper-V mais pas en DB)
         if import_new:
             for hyperv_vm in hyperv_vms:
+                vm_name = hyperv_vm.get("name", "")
+                vm_id = hyperv_vm.get("id", "")
+                
                 # Vérifier si la VM existe déjà en DB (par nom ou par ID Hyper-V)
-                if hyperv_vm.name.lower() in db_by_name:
+                if vm_name.lower() in db_by_name:
                     continue
-                if hyperv_vm.id in db_by_hyperv_id:
+                if vm_id in db_by_hyperv_id:
                     continue
                 
                 try:
-                    # Créer l'entrée en DB
+                    # Créer l'entrée en DB avec infos réseau
                     new_vm = VirtualMachine(
                         id=uuid4(),
-                        name=hyperv_vm.name,
+                        name=vm_name,
                         hypervisor_id=hypervisor_id,
-                        hypervisor_vm_id=hyperv_vm.id,
-                        cpu_count=hyperv_vm.cpu_count or 2,
-                        ram_gb=int(hyperv_vm.ram_gb or 4),
-                        disk_gb=60,  # Valeur par défaut, sera mise à jour si possible
-                        network_switch=settings.hyperv_default_switch,
-                        state=state_mapping.get(str(hyperv_vm.state), VMState.UNKNOWN),
+                        hypervisor_vm_id=vm_id,
+                        cpu_count=hyperv_vm.get("cpu_count") or 2,
+                        ram_gb=int(hyperv_vm.get("ram_gb") or 4),
+                        disk_gb=60,  # Valeur par défaut
+                        network_switch=hyperv_vm.get("switch_name") or settings.hyperv_default_switch,
+                        state=state_mapping.get(str(hyperv_vm.get("state")), VMState.UNKNOWN),
                         status=VMStatus.CREATED,
-                        generation=hyperv_vm.generation or 2,
+                        generation=hyperv_vm.get("generation") or 2,
+                        ip_address=hyperv_vm.get("ip_address"),
+                        mac_address=format_mac(hyperv_vm.get("mac_address")),
+                        vlan_id=hyperv_vm.get("vlan_id"),
                     )
                     self.db.add(new_vm)
                     result["imported"] += 1
                     result["details"]["imported_vms"].append({
-                        "name": hyperv_vm.name,
-                        "hyperv_id": hyperv_vm.id,
-                        "state": str(hyperv_vm.state),
+                        "name": vm_name,
+                        "hyperv_id": vm_id,
+                        "state": str(hyperv_vm.get("state")),
+                        "ip_address": hyperv_vm.get("ip_address"),
+                        "mac_address": format_mac(hyperv_vm.get("mac_address")),
                     })
                     logger.info(
                         "vm_imported",
-                        name=hyperv_vm.name,
-                        hyperv_id=hyperv_vm.id,
+                        name=vm_name,
+                        hyperv_id=vm_id,
+                        ip_address=hyperv_vm.get("ip_address"),
                     )
                 except Exception as e:
-                    error_msg = f"Erreur import VM '{hyperv_vm.name}': {str(e)}"
+                    error_msg = f"Erreur import VM '{vm_name}': {str(e)}"
                     result["errors"].append(error_msg)
-                    logger.error("vm_import_error", name=hyperv_vm.name, error=str(e))
+                    logger.error("vm_import_error", name=vm_name, error=str(e))
         
         # 2. Mettre à jour les VMs existantes
         if update_existing:
@@ -473,24 +492,55 @@ class VMService:
                 
                 if hyperv_vm:
                     try:
-                        # Mettre à jour l'état
-                        new_state = state_mapping.get(str(hyperv_vm.state), VMState.UNKNOWN)
-                        old_state = db_vm.state
+                        changes = []
                         
-                        db_vm.state = new_state
-                        db_vm.hypervisor_vm_id = hyperv_vm.id  # S'assurer que l'ID est lié
+                        # Mettre à jour l'état
+                        new_state = state_mapping.get(str(hyperv_vm.get("state")), VMState.UNKNOWN)
+                        if db_vm.state != new_state:
+                            changes.append(f"state: {db_vm.state.value} → {new_state.value}")
+                            db_vm.state = new_state
+                        
+                        # S'assurer que l'ID Hyper-V est lié
+                        db_vm.hypervisor_vm_id = hyperv_vm.get("id")
                         
                         # Mettre à jour les specs si différentes
-                        if hyperv_vm.cpu_count and hyperv_vm.cpu_count != db_vm.cpu_count:
-                            db_vm.cpu_count = hyperv_vm.cpu_count
-                        if hyperv_vm.ram_gb and int(hyperv_vm.ram_gb) != db_vm.ram_gb:
-                            db_vm.ram_gb = int(hyperv_vm.ram_gb)
+                        cpu = hyperv_vm.get("cpu_count")
+                        if cpu and cpu != db_vm.cpu_count:
+                            changes.append(f"cpu: {db_vm.cpu_count} → {cpu}")
+                            db_vm.cpu_count = cpu
+                            
+                        ram = hyperv_vm.get("ram_gb")
+                        if ram and int(ram) != db_vm.ram_gb:
+                            changes.append(f"ram: {db_vm.ram_gb} → {int(ram)}")
+                            db_vm.ram_gb = int(ram)
+                        
+                        # Mettre à jour les infos réseau
+                        new_ip = hyperv_vm.get("ip_address")
+                        if new_ip != db_vm.ip_address:
+                            changes.append(f"ip: {db_vm.ip_address} → {new_ip}")
+                            db_vm.ip_address = new_ip
+                        
+                        new_mac = format_mac(hyperv_vm.get("mac_address"))
+                        if new_mac != db_vm.mac_address:
+                            changes.append(f"mac: {db_vm.mac_address} → {new_mac}")
+                            db_vm.mac_address = new_mac
+                        
+                        new_switch = hyperv_vm.get("switch_name")
+                        if new_switch and new_switch != db_vm.network_switch:
+                            changes.append(f"switch: {db_vm.network_switch} → {new_switch}")
+                            db_vm.network_switch = new_switch
+                        
+                        new_vlan = hyperv_vm.get("vlan_id")
+                        if new_vlan != db_vm.vlan_id:
+                            changes.append(f"vlan: {db_vm.vlan_id} → {new_vlan}")
+                            db_vm.vlan_id = new_vlan
                         
                         result["updated"] += 1
                         result["details"]["updated_vms"].append({
                             "name": db_vm.name,
-                            "old_state": old_state.value,
-                            "new_state": new_state.value,
+                            "changes": changes,
+                            "ip_address": new_ip,
+                            "state": new_state.value,
                         })
                     except Exception as e:
                         error_msg = f"Erreur mise à jour VM '{db_vm.name}': {str(e)}"

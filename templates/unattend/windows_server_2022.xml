@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<unattend xmlns="urn:schemas-microsoft-com:unattend">
+<unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
     <!-- =================================================================== -->
     <!-- Windows Server 2022 - Unattended Installation Template              -->
     <!-- Variables Jinja2: {{ variable_name }}                               -->
@@ -245,25 +245,31 @@
 
             <!-- Script de premier démarrage -->
             <FirstLogonCommands>
-                <!-- Activer WinRM pour l'administration à distance -->
+                <!-- Définir le mot de passe Administrator explicitement -->
                 <SynchronousCommand wcm:action="add">
                     <Order>1</Order>
+                    <CommandLine>cmd /c net user Administrator "{{ admin_password | default('TempP@ss123!') }}" /active:yes</CommandLine>
+                    <Description>Set Administrator password</Description>
+                </SynchronousCommand>
+                <!-- Activer WinRM pour l'administration à distance -->
+                <SynchronousCommand wcm:action="add">
+                    <Order>2</Order>
                     <CommandLine>powershell -Command "Enable-PSRemoting -Force -SkipNetworkProfileCheck"</CommandLine>
                     <Description>Enable PowerShell Remoting</Description>
                 </SynchronousCommand>
                 <SynchronousCommand wcm:action="add">
-                    <Order>2</Order>
+                    <Order>3</Order>
                     <CommandLine>powershell -Command "Set-Item WSMan:\localhost\Client\TrustedHosts -Value '*' -Force"</CommandLine>
                     <Description>Configure WinRM TrustedHosts</Description>
                 </SynchronousCommand>
                 <SynchronousCommand wcm:action="add">
-                    <Order>3</Order>
+                    <Order>4</Order>
                     <CommandLine>powershell -Command "winrm quickconfig -quiet"</CommandLine>
                     <Description>Quick configure WinRM</Description>
                 </SynchronousCommand>
                 {% if join_domain %}
                 <SynchronousCommand wcm:action="add">
-                    <Order>4</Order>
+                    <Order>5</Order>
                     <CommandLine>powershell -Command "Add-Computer -DomainName '{{ domain_name }}' -Credential (New-Object PSCredential('{{ domain_user }}', (ConvertTo-SecureString '{{ domain_password }}' -AsPlainText -Force))) -OUPath '{{ domain_ou | default('') }}' -Restart"</CommandLine>
                     <Description>Join Active Directory Domain</Description>
                 </SynchronousCommand>
