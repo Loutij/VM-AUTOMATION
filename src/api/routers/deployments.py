@@ -512,7 +512,8 @@ async def resume_deployment(
                 
                 config = dep.config or {}
                 admin_password = config.get("admin_password", "")
-                credentials = ("Administrator", admin_password)
+                admin_user = config.get("admin_user", "Administrateur")  # FR par défaut
+                credentials = (admin_user, admin_password)
                 # Utiliser le nom de la VM, pas le GUID hypervisor_vm_id
                 vm_name = vm_obj.name
                 
