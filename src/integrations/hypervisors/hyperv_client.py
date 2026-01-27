@@ -320,6 +320,19 @@ class HyperVClient(BaseHypervisor):
         script = f"""
         $ErrorActionPreference = 'Stop'
         
+        # Nettoyer les fichiers orphelins si présents
+        $existingVm = Get-VM -Name '{specs.name}' -ErrorAction SilentlyContinue
+        if ($existingVm) {{
+            throw "Une VM avec le nom '{specs.name}' existe déjà. Supprimez-la d'abord."
+        }}
+        
+        # Vérifier si un VHDX orphelin existe et le supprimer
+        $vhdxPath = '{vhdx_path}'
+        if (Test-Path $vhdxPath) {{
+            Write-Warning "VHDX orphelin détecté, suppression: $vhdxPath"
+            Remove-Item $vhdxPath -Force
+        }}
+        
         # Créer la VM
         $vm = New-VM -Name '{specs.name}' `
             -Generation {specs.generation} `
