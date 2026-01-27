@@ -444,6 +444,129 @@ async def start_deployment(
 
 
 @router.post(
+    "/{deployment_id}/resume",
+    response_model=DeploymentResponse,
+    summary="Reprendre un déploiement",
+    description="Reprend un déploiement interrompu à son étape actuelle (post-install, installation logiciels, etc.).",
+)
+async def resume_deployment(
+    db: DbSession,
+    deployment_id: UUID,
+) -> DeploymentResponse:
+    """Reprend un déploiement interrompu."""
+    import traceback
+    from sqlalchemy import select
+    from src.domain.models import Deployment, VirtualMachine
+    
+    logger.info("resuming_deployment", deployment_id=str(deployment_id))
+    
+    # Récupérer le déploiement
+    result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
+    deployment = result.scalar_one_or_none()
+    
+    if not deployment:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Deployment not found")
+    
+    # Vérifier qu'il peut être repris
+    if deployment.status in (DeploymentStatus.COMPLETED, DeploymentStatus.CANCELLED):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=f"Cannot resume deployment in status {deployment.status.value}")
+    
+    if not deployment.vm_id:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Deployment has no VM linked. Cannot resume.")
+    
+    # Récupérer la VM
+    vm_result = await db.execute(select(VirtualMachine).where(VirtualMachine.id == deployment.vm_id))
+    vm = vm_result.scalar_one_or_none()
+    
+    if not vm:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="VM not found in database")
+    
+    async def run_resume_background(dep_id, vm_id):
+        """Reprend le déploiement en arrière-plan."""
+        try:
+            async with db_session() as session:
+                bg_service = DeploymentService(session)
+                dep_result = await session.execute(select(Deployment).where(Deployment.id == dep_id))
+                dep = dep_result.scalar_one()
+                vm_result = await session.execute(select(VirtualMachine).where(VirtualMachine.id == vm_id))
+                vm_obj = vm_result.scalar_one()
+                
+                # Déterminer quelle étape reprendre
+                current_step = dep.current_step or "post_configuration"
+                logger.info("resume_deployment_step", deployment_id=str(dep_id), step=current_step)
+                
+                if current_step in ("post_configuration", "post_install"):
+                    # Exécuter post-configuration
+                    await bg_service._execute_post_configuration(dep, vm_obj)
+                
+                # Installer les logiciels si configurés
+                config = dep.config or {}
+                software_profile = config.get("software_profile")
+                packages = config.get("packages", [])
+                
+                if software_profile or packages:
+                    await bg_service._update_deployment_status(
+                        dep, DeploymentStatus.INSTALLING_SOFTWARE, "installing_software"
+                    )
+                    await bg_service._install_software(dep, vm_obj)
+                
+                # Finalisation
+                await bg_service._update_deployment_status(
+                    dep, DeploymentStatus.IN_PROGRESS, "finalizing"
+                )
+                await bg_service._finalize_deployment(dep, vm_obj)
+                
+                # Terminé
+                await bg_service._update_deployment_status(
+                    dep, DeploymentStatus.COMPLETED, "completed"
+                )
+                await bg_service._log_step(dep, "completed", "Deployment resumed and completed successfully.")
+                
+                logger.info("resume_deployment_completed", deployment_id=str(dep_id))
+                
+        except Exception as e:
+            error_msg = f"{type(e).__name__}: {str(e)}"
+            logger.error("resume_deployment_failed", deployment_id=str(dep_id), error=error_msg, traceback=traceback.format_exc())
+            try:
+                async with db_session() as error_session:
+                    from sqlalchemy import update
+                    await error_session.execute(
+                        update(Deployment).where(Deployment.id == dep_id).values(
+                            status=DeploymentStatus.FAILED,
+                            current_step="failed",
+                            error_message=error_msg[:500]
+                        )
+                    )
+                    await error_session.commit()
+            except Exception as db_error:
+                logger.error("failed_to_mark_resume_failed", error=str(db_error))
+    
+    # Lancer en arrière-plan
+    import asyncio
+    asyncio.create_task(run_resume_background(deployment.id, deployment.vm_id))
+    
+    return DeploymentResponse(
+        id=deployment.id,
+        vm_name=deployment.vm_name,
+        hypervisor_id=deployment.hypervisor_id,
+        os_template_id=deployment.os_template_id,
+        vm_id=deployment.vm_id,
+        status=deployment.status.value,
+        progress=get_progress_from_status(deployment.status.value, deployment.current_step),
+        current_step=deployment.current_step,
+        error_message=deployment.error_message,
+        config=deployment.config,
+        created_at=deployment.created_at,
+        started_at=deployment.started_at,
+        completed_at=deployment.completed_at,
+    )
+
+
+@router.post(
     "/{deployment_id}/cancel",
     response_model=DeploymentResponse,
     summary="Annuler un déploiement",
