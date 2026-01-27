@@ -236,18 +236,21 @@ class DeploymentService:
         if not deployment:
             raise NotFoundError("Deployment", str(deployment_id))
         
-        if deployment.status not in (DeploymentStatus.PENDING, DeploymentStatus.FAILED):
+        # Permettre le démarrage si PENDING, FAILED, ou IN_PROGRESS (reprise après queue)
+        if deployment.status not in (DeploymentStatus.PENDING, DeploymentStatus.FAILED, DeploymentStatus.IN_PROGRESS):
             raise ValidationError(
                 f"Cannot start deployment in status {deployment.status}"
             )
         
-        # Marquer comme en cours
-        await self._update_deployment_status(
-            deployment,
-            DeploymentStatus.IN_PROGRESS,
-            DeploymentStep.VALIDATING,
-        )
-        deployment.started_at = datetime.now(timezone.utc)
+        # Marquer comme en cours (si pas déjà)
+        if deployment.status != DeploymentStatus.IN_PROGRESS:
+            await self._update_deployment_status(
+                deployment,
+                DeploymentStatus.IN_PROGRESS,
+                DeploymentStep.VALIDATING,
+            )
+        if not deployment.started_at:
+            deployment.started_at = datetime.now(timezone.utc)
         
         try:
             # Exécuter le workflow
