@@ -38,6 +38,8 @@ Outil interne d'automatisation complète du déploiement de machines virtuelles.
 | Template Cloud-init | TERMINÉ | Générique Linux |
 | Génération dynamique | TERMINÉ | Jinja2 avec injection paramètres |
 | Détection fin install | TERMINÉ | Heartbeat + PowerShell Direct |
+| Déploiement DISM | TERMINÉ | deploy_with_dism() - Déploie Windows directement sur VHD (évite "Press any key") |
+| Injection unattend | TERMINÉ | inject_unattend() - Injecte autounattend.xml via VHDX dédié |
 
 ### Module 4 : Post-Installation
 | Fonctionnalité | Statut | Description |

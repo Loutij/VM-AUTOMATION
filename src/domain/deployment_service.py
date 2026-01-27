@@ -401,60 +401,69 @@ class DeploymentService:
         ip_config = config.get("ip_config") or {}
         domain_join = config.get("domain_join") or {}
         
-        if os_family == "windows":
-            unattend_content = self.template_engine.render_windows_unattend(
-                hostname=config["hostname"],
-                admin_password=config["admin_password"],
-                static_ip=ip_config.get("static_ip", False),
-                ip_address=ip_config.get("ip_address"),
-                gateway=ip_config.get("gateway"),
-                dns_server_1=ip_config.get("dns_server_1", "8.8.8.8"),
-                dns_server_2=ip_config.get("dns_server_2"),
-                join_domain=bool(domain_join),
-                domain_name=domain_join.get("domain"),
-                domain_user=domain_join.get("user"),
-                domain_password=domain_join.get("password"),
-                post_install_commands=[
-                    {"command": cmd, "description": f"Custom command {i+1}"}
-                    for i, cmd in enumerate(config.get("post_install_commands") or [])
-                ],
-            )
-            
-            # Copier le fichier unattend sur l'hyperviseur et l'injecter dans l'ISO
-            # (Cette partie nécessite une implémentation spécifique pour Hyper-V)
-            logger.info(
-                "unattend_generated",
-                deployment_id=str(deployment.id),
-                length=len(unattend_content),
-            )
-            
-        elif os_family == "linux":
-            if "ubuntu" in template_config.get("name", "").lower():
-                content = self.template_engine.render_ubuntu_autoinstall(
+        # Récupérer le client Hyper-V
+        client = await self.vm_service._get_hypervisor_client(deployment.hypervisor_id)
+        
+        try:
+            if os_family == "windows":
+                unattend_content = self.template_engine.render_windows_unattend(
                     hostname=config["hostname"],
-                    username=config.get("username", "admin"),
+                    admin_password=config["admin_password"],
                     static_ip=ip_config.get("static_ip", False),
                     ip_address=ip_config.get("ip_address"),
                     gateway=ip_config.get("gateway"),
                     dns_server_1=ip_config.get("dns_server_1", "8.8.8.8"),
-                    post_install_commands=config.get("post_install_commands", []),
+                    dns_server_2=ip_config.get("dns_server_2"),
+                    join_domain=bool(domain_join),
+                    domain_name=domain_join.get("domain"),
+                    domain_user=domain_join.get("user"),
+                    domain_password=domain_join.get("password"),
+                    post_install_commands=[
+                        {"command": cmd, "description": f"Custom command {i+1}"}
+                        for i, cmd in enumerate(config.get("post_install_commands") or [])
+                    ],
                 )
-            else:
-                content = self.template_engine.render_debian_preseed(
-                    hostname=config["hostname"],
-                    username=config.get("username", "admin"),
-                    user_password=config["admin_password"],
-                    static_ip=ip_config.get("static_ip", False),
-                    ip_address=ip_config.get("ip_address"),
-                    gateway=ip_config.get("gateway"),
-                    post_install_commands=config.get("post_install_commands", []),
+                
+                # Injecter le fichier unattend dans la VM via un disque dédié
+                vm_identifier = vm.hypervisor_vm_id or vm.name
+                await client.inject_unattend(vm_identifier, unattend_content)
+                
+                logger.info(
+                    "unattend_injected",
+                    deployment_id=str(deployment.id),
+                    vm_id=str(vm.id),
+                    length=len(unattend_content),
                 )
-            
-            logger.info(
-                "preseed_generated",
-                deployment_id=str(deployment.id),
-                length=len(content),
-            )
+                
+            elif os_family == "linux":
+                if "ubuntu" in template_config.get("name", "").lower():
+                    content = self.template_engine.render_ubuntu_autoinstall(
+                        hostname=config["hostname"],
+                        username=config.get("username", "admin"),
+                        static_ip=ip_config.get("static_ip", False),
+                        ip_address=ip_config.get("ip_address"),
+                        gateway=ip_config.get("gateway"),
+                        dns_server_1=ip_config.get("dns_server_1", "8.8.8.8"),
+                        post_install_commands=config.get("post_install_commands", []),
+                    )
+                else:
+                    content = self.template_engine.render_debian_preseed(
+                        hostname=config["hostname"],
+                        username=config.get("username", "admin"),
+                        user_password=config["admin_password"],
+                        static_ip=ip_config.get("static_ip", False),
+                        ip_address=ip_config.get("ip_address"),
+                        gateway=ip_config.get("gateway"),
+                        post_install_commands=config.get("post_install_commands", []),
+                    )
+                
+                logger.info(
+                    "preseed_generated",
+                    deployment_id=str(deployment.id),
+                    length=len(content),
+                )
+        finally:
+            client.close()
 
     async def get_deployment(self, deployment_id: UUID) -> Deployment:
         """Récupère un déploiement par son ID."""

@@ -890,6 +890,574 @@ class HyperVClient(BaseHypervisor):
         logger.info("hyperv_boot_order_set", vm_id=vm_id, boot_order=boot_order)
         return True
 
+    async def inject_unattend(
+        self,
+        vm_id: str,
+        unattend_content: str,
+    ) -> bool:
+        """
+        Injecte un fichier autounattend.xml dans une VM via un disque VHDX dédié.
+        
+        Cette méthode crée un petit disque VHDX, y place le fichier autounattend.xml,
+        puis l'attache à la VM. Le Setup Windows détectera automatiquement ce fichier.
+        
+        Args:
+            vm_id: ID ou nom de la VM
+            unattend_content: Contenu XML du fichier autounattend.xml
+            
+        Returns:
+            True si succès
+            
+        Raises:
+            VMOperationError: En cas d'erreur
+        """
+        logger.info("hyperv_inject_unattend_start", vm_id=vm_id, content_length=len(unattend_content))
+        
+        # Échapper les caractères spéciaux pour PowerShell
+        # Remplacer les guillemets simples par deux guillemets simples
+        escaped_content = unattend_content.replace("'", "''")
+        
+        # Script PowerShell pour créer et attacher le disque unattend
+        # Divisé en étapes pour éviter les problèmes de longueur de commande
+        
+        # Étape 1: Créer le dossier et le VHDX
+        script_create = f"""
+        $vmName = '{vm_id}'
+        $unattendDir = 'C:\\HyperV\\Unattend'
+        $vhdxPath = "$unattendDir\\${{vmName}}_unattend.vhdx"
+        
+        # Créer le dossier s'il n'existe pas
+        if (-not (Test-Path $unattendDir)) {{
+            New-Item -ItemType Directory -Path $unattendDir -Force | Out-Null
+        }}
+        
+        # Arrêter la VM si nécessaire
+        $vm = Get-VM -Name $vmName -ErrorAction SilentlyContinue
+        if (-not $vm) {{
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq $vmName }}
+        }}
+        if (-not $vm) {{
+            throw "VM not found: $vmName"
+        }}
+        
+        if ($vm.State -eq 'Running') {{
+            Stop-VM -VM $vm -Force -TurnOff
+            Start-Sleep -Seconds 2
+        }}
+        
+        # Supprimer l'ancien disque unattend s'il existe
+        Get-VMHardDiskDrive -VM $vm | Where-Object {{ $_.Path -like '*unattend*' }} | Remove-VMHardDiskDrive -ErrorAction SilentlyContinue
+        if (Test-Path $vhdxPath) {{
+            Remove-Item $vhdxPath -Force
+        }}
+        
+        # Créer le VHDX
+        New-VHD -Path $vhdxPath -SizeBytes 50MB -Dynamic | Out-Null
+        $disk = Mount-VHD -Path $vhdxPath -Passthru
+        $disk | Initialize-Disk -PartitionStyle MBR
+        $partition = $disk | New-Partition -UseMaximumSize -AssignDriveLetter
+        $partition | Format-Volume -FileSystem FAT32 -NewFileSystemLabel "UNATTEND" -Confirm:$false | Out-Null
+        
+        @{{
+            VhdxPath = $vhdxPath
+            DriveLetter = $partition.DriveLetter
+        }} | ConvertTo-Json
+        """
+        
+        result = await self._execute(script_create, timeout=60)
+        
+        if not result.success:
+            raise VMOperationError(vm_id, "inject_unattend_create", result.stderr)
+        
+        # Parser le résultat pour obtenir la lettre de lecteur
+        data = self._parse_json_output(result.stdout)
+        if not data:
+            raise VMOperationError(vm_id, "inject_unattend_create", "Failed to parse disk info")
+        
+        drive_letter = data.get("DriveLetter")
+        vhdx_path = data.get("VhdxPath")
+        
+        logger.debug("hyperv_unattend_disk_created", drive_letter=drive_letter, vhdx_path=vhdx_path)
+        
+        # Étape 2: Écrire le fichier autounattend.xml en chunks pour éviter les limites WinRM
+        import base64
+        content_b64 = base64.b64encode(unattend_content.encode('utf-8')).decode('ascii')
+        
+        # Diviser en chunks de 2000 caractères pour rester sous la limite WinRM
+        chunk_size = 2000
+        chunks = [content_b64[i:i+chunk_size] for i in range(0, len(content_b64), chunk_size)]
+        
+        file_path = f"{drive_letter}:\\autounattend.xml"
+        temp_b64_path = f"{drive_letter}:\\temp_unattend.b64"
+        
+        # Écrire le premier chunk (crée le fichier)
+        script_first = f"""
+        $chunk = '{chunks[0]}'
+        [System.IO.File]::WriteAllText('{temp_b64_path}', $chunk)
+        Write-Output "Chunk 1/{len(chunks)} written"
+        """
+        result = await self._execute(script_first, timeout=30)
+        if not result.success:
+            await self._execute(f"Dismount-VHD -Path '{vhdx_path}' -ErrorAction SilentlyContinue")
+            raise VMOperationError(vm_id, "inject_unattend_write_chunk1", result.stderr)
+        
+        # Ajouter les chunks suivants
+        for i, chunk in enumerate(chunks[1:], start=2):
+            script_append = f"""
+            $chunk = '{chunk}'
+            [System.IO.File]::AppendAllText('{temp_b64_path}', $chunk)
+            Write-Output "Chunk {i}/{len(chunks)} written"
+            """
+            result = await self._execute(script_append, timeout=30)
+            if not result.success:
+                await self._execute(f"Dismount-VHD -Path '{vhdx_path}' -ErrorAction SilentlyContinue")
+                raise VMOperationError(vm_id, f"inject_unattend_write_chunk{i}", result.stderr)
+        
+        # Décoder le base64 et créer le fichier final
+        script_decode = f"""
+        $b64 = [System.IO.File]::ReadAllText('{temp_b64_path}')
+        $bytes = [System.Convert]::FromBase64String($b64)
+        $content = [System.Text.Encoding]::UTF8.GetString($bytes)
+        [System.IO.File]::WriteAllText('{file_path}', $content, [System.Text.Encoding]::UTF8)
+        Remove-Item '{temp_b64_path}' -Force
+        if (Test-Path '{file_path}') {{
+            Write-Output "File written successfully"
+        }} else {{
+            throw "Failed to write autounattend.xml"
+        }}
+        """
+        
+        result = await self._execute(script_decode, timeout=30)
+        
+        if not result.success:
+            await self._execute(f"Dismount-VHD -Path '{vhdx_path}' -ErrorAction SilentlyContinue")
+            raise VMOperationError(vm_id, "inject_unattend_decode", result.stderr)
+        
+        logger.debug("hyperv_unattend_file_written", vm_id=vm_id)
+        
+        # Étape 3: Démonter et attacher à la VM, configurer boot order
+        script_attach = f"""
+        $vmName = '{vm_id}'
+        $vhdxPath = '{vhdx_path}'
+        
+        # Démonter le VHD
+        Dismount-VHD -Path $vhdxPath
+        
+        # Récupérer la VM
+        $vm = Get-VM -Name $vmName -ErrorAction SilentlyContinue
+        if (-not $vm) {{
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq $vmName }}
+        }}
+        
+        # Attacher le disque unattend à la VM
+        Add-VMHardDiskDrive -VM $vm -Path $vhdxPath -ControllerType SCSI -ControllerNumber 0 -ControllerLocation 2
+        
+        # Configurer le boot order: DVD en premier
+        $dvd = Get-VMDvdDrive -VM $vm | Select-Object -First 1
+        if ($dvd) {{
+            Set-VMFirmware -VM $vm -FirstBootDevice $dvd
+        }}
+        
+        Write-Output "Unattend disk attached and boot order configured"
+        """
+        
+        result = await self._execute(script_attach, timeout=30)
+        
+        if not result.success:
+            raise VMOperationError(vm_id, "inject_unattend_attach", result.stderr)
+        
+        logger.info("hyperv_inject_unattend_complete", vm_id=vm_id)
+        return True
+
+    async def create_custom_iso(
+        self,
+        source_iso: str,
+        unattend_content: str,
+        output_iso: str | None = None,
+    ) -> str:
+        """
+        Crée une ISO personnalisée avec autounattend.xml inclus.
+        
+        Cette méthode copie le contenu de l'ISO source, ajoute autounattend.xml,
+        et recrée une nouvelle ISO bootable UEFI.
+        
+        Args:
+            source_iso: Chemin de l'ISO source
+            unattend_content: Contenu XML du fichier autounattend.xml
+            output_iso: Chemin de sortie (optionnel, généré automatiquement si non fourni)
+            
+        Returns:
+            Chemin de l'ISO personnalisée créée
+            
+        Raises:
+            VMOperationError: En cas d'erreur
+        """
+        import base64
+        
+        logger.info("hyperv_create_custom_iso_start", source_iso=source_iso)
+        
+        # Encoder le contenu en base64 pour éviter les problèmes de caractères
+        content_b64 = base64.b64encode(unattend_content.encode('utf-8')).decode('ascii')
+        
+        # Diviser en chunks
+        chunk_size = 2000
+        chunks = [content_b64[i:i+chunk_size] for i in range(0, len(content_b64), chunk_size)]
+        
+        # Étape 1: Préparer les dossiers et copier l'ISO
+        script_prepare = f"""
+        $sourceIso = '{source_iso}'
+        $tempDir = 'C:\\HyperV\\Temp\\ISO_Build'
+        $isoContentDir = "$tempDir\\ISOContent"
+        
+        # Nettoyer et créer les dossiers
+        if (Test-Path $tempDir) {{ Remove-Item $tempDir -Recurse -Force }}
+        New-Item -ItemType Directory -Path $isoContentDir -Force | Out-Null
+        
+        # Monter l'ISO source
+        $mountResult = Mount-DiskImage -ImagePath $sourceIso -PassThru
+        $driveLetter = ($mountResult | Get-Volume).DriveLetter
+        
+        Write-Output "ISO montée sur ${{driveLetter}}:"
+        
+        # Copier le contenu
+        Write-Output "Copie du contenu de l'ISO..."
+        Copy-Item -Path "${{driveLetter}}:\\*" -Destination $isoContentDir -Recurse -Force
+        
+        # Démonter l'ISO source
+        Dismount-DiskImage -ImagePath $sourceIso | Out-Null
+        
+        @{{
+            TempDir = $tempDir
+            IsoContentDir = $isoContentDir
+        }} | ConvertTo-Json
+        """
+        
+        result = await self._execute(script_prepare, timeout=300)
+        if not result.success:
+            raise VMOperationError("iso", "create_custom_iso_prepare", result.stderr)
+        
+        data = self._parse_json_output(result.stdout)
+        if not data:
+            raise VMOperationError("iso", "create_custom_iso_prepare", "Failed to parse result")
+        
+        temp_dir = data.get("TempDir")
+        iso_content_dir = data.get("IsoContentDir")
+        
+        logger.debug("hyperv_iso_content_copied", temp_dir=temp_dir)
+        
+        # Étape 2: Écrire autounattend.xml en chunks
+        temp_b64_path = f"{temp_dir}\\temp_unattend.b64"
+        
+        for i, chunk in enumerate(chunks):
+            if i == 0:
+                script = f"[System.IO.File]::WriteAllText('{temp_b64_path}', '{chunk}')"
+            else:
+                script = f"[System.IO.File]::AppendAllText('{temp_b64_path}', '{chunk}')"
+            
+            result = await self._execute(script, timeout=30)
+            if not result.success:
+                raise VMOperationError("iso", f"create_custom_iso_write_chunk{i}", result.stderr)
+        
+        # Décoder et créer autounattend.xml
+        script_decode = f"""
+        $b64 = [System.IO.File]::ReadAllText('{temp_b64_path}')
+        $bytes = [System.Convert]::FromBase64String($b64)
+        $content = [System.Text.Encoding]::UTF8.GetString($bytes)
+        [System.IO.File]::WriteAllText('{iso_content_dir}\\autounattend.xml', $content, [System.Text.Encoding]::UTF8)
+        Remove-Item '{temp_b64_path}' -Force
+        Write-Output "autounattend.xml created"
+        """
+        
+        result = await self._execute(script_decode, timeout=30)
+        if not result.success:
+            raise VMOperationError("iso", "create_custom_iso_decode", result.stderr)
+        
+        logger.debug("hyperv_autounattend_written")
+        
+        # Étape 3: Créer l'ISO avec oscdimg
+        if not output_iso:
+            import os
+            base_name = source_iso.rsplit('\\', 1)[-1].rsplit('.', 1)[0]
+            output_iso = f"C:\\HyperV\\ISOs\\{base_name}_AUTO.iso"
+        
+        script_create_iso = f"""
+        $isoContentDir = '{iso_content_dir}'
+        $outputIso = '{output_iso}'
+        $oscdimg = "C:\\Program Files (x86)\\Windows Kits\\10\\Assessment and Deployment Kit\\Deployment Tools\\amd64\\Oscdimg\\oscdimg.exe"
+        $efisys = "$isoContentDir\\efi\\microsoft\\boot\\efisys.bin"
+        $etfsboot = "$isoContentDir\\boot\\etfsboot.com"
+        
+        # Supprimer l'ancienne ISO si elle existe
+        if (Test-Path $outputIso) {{ Remove-Item $outputIso -Force }}
+        
+        # Créer l'ISO (UEFI + BIOS bootable)
+        Write-Output "Création de l'ISO..."
+        if ((Test-Path $efisys) -and (Test-Path $etfsboot)) {{
+            # Dual boot UEFI + BIOS
+            & $oscdimg -m -o -u2 -udfver102 -bootdata:2`#p0,e,b"$etfsboot"`#pEF,e,b"$efisys" $isoContentDir $outputIso
+        }} elseif (Test-Path $efisys) {{
+            # UEFI only
+            & $oscdimg -m -o -u2 -udfver102 -bootdata:1`#pEF,e,b"$efisys" $isoContentDir $outputIso
+        }} else {{
+            throw "Boot files not found in ISO"
+        }}
+        
+        if (Test-Path $outputIso) {{
+            $size = (Get-Item $outputIso).Length / 1GB
+            Write-Output "ISO créée: $outputIso ($([math]::Round($size, 2)) GB)"
+            
+            # Nettoyer
+            Remove-Item '{temp_dir}' -Recurse -Force -ErrorAction SilentlyContinue
+            
+            $outputIso
+        }} else {{
+            throw "Failed to create ISO"
+        }}
+        """
+        
+        result = await self._execute(script_create_iso, timeout=600)
+        if not result.success:
+            raise VMOperationError("iso", "create_custom_iso_build", result.stderr)
+        
+        # Extraire le chemin de l'ISO
+        output_lines = result.stdout.strip().split('\n')
+        created_iso = output_lines[-1].strip()
+        
+        logger.info("hyperv_custom_iso_created", output_iso=created_iso)
+        return created_iso
+
+    async def remove_unattend_disk(self, vm_id: str) -> bool:
+        """
+        Supprime le disque unattend d'une VM après l'installation.
+        
+        Args:
+            vm_id: ID ou nom de la VM
+            
+        Returns:
+            True si succès
+        """
+        script = f"""
+        $vmName = '{vm_id}'
+        $vm = Get-VM -Name $vmName -ErrorAction SilentlyContinue
+        if (-not $vm) {{
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq $vmName }}
+        }}
+        if ($vm) {{
+            $unattendDisk = Get-VMHardDiskDrive -VM $vm | Where-Object {{ $_.Path -like '*unattend*' }}
+            if ($unattendDisk) {{
+                $diskPath = $unattendDisk.Path
+                Remove-VMHardDiskDrive -VMHardDiskDrive $unattendDisk
+                if (Test-Path $diskPath) {{
+                    Remove-Item $diskPath -Force
+                }}
+                Write-Output "Unattend disk removed"
+            }} else {{
+                Write-Output "No unattend disk found"
+            }}
+        }} else {{
+            throw "VM not found"
+        }}
+        """
+        
+        result = await self._execute(script, timeout=30)
+        
+        if not result.success:
+            logger.warning("hyperv_remove_unattend_disk_failed", vm_id=vm_id, error=result.stderr)
+            return False
+        
+        logger.info("hyperv_unattend_disk_removed", vm_id=vm_id)
+        return True
+
+    async def deploy_with_dism(
+        self,
+        vm_id: str,
+        iso_path: str,
+        vhd_path: str,
+        image_index: int = 2,
+        unattend_content: str | None = None,
+    ) -> bool:
+        """
+        Déploie Windows sur une VM via DISM (sans installation interactive).
+        
+        Cette méthode applique directement l'image Windows sur le disque de la VM,
+        évitant ainsi le prompt "Press any key to boot from CD or DVD".
+        
+        Args:
+            vm_id: ID ou nom de la VM
+            iso_path: Chemin de l'ISO Windows sur l'hyperviseur
+            vhd_path: Chemin du VHD de la VM
+            image_index: Index de l'image dans le WIM (1=Core, 2=Desktop Experience)
+            unattend_content: Contenu du fichier unattend.xml pour automatiser l'OOBE
+            
+        Returns:
+            True si succès
+            
+        Raises:
+            VMOperationError: En cas d'erreur
+        """
+        logger.info(
+            "hyperv_deploy_dism_start",
+            vm_id=vm_id,
+            iso_path=iso_path,
+            image_index=image_index,
+        )
+        
+        # Étape 1: Préparer et partitionner le VHD
+        script_prepare = f"""
+        $vhdPath = '{vhd_path}'
+        $isoPath = '{iso_path}'
+        
+        # Démonter si déjà monté
+        Dismount-VHD -Path $vhdPath -ErrorAction SilentlyContinue
+        Dismount-DiskImage -ImagePath $isoPath -ErrorAction SilentlyContinue
+        
+        # Monter l'ISO
+        $iso = Mount-DiskImage -ImagePath $isoPath -PassThru
+        $isoDrive = ($iso | Get-Volume).DriveLetter
+        
+        # Monter et partitionner le VHD
+        $disk = Mount-VHD -Path $vhdPath -Passthru | Get-Disk
+        Clear-Disk -Number $disk.Number -RemoveData -Confirm:$false -ErrorAction SilentlyContinue
+        Initialize-Disk -Number $disk.Number -PartitionStyle GPT
+        
+        # Partition EFI (100MB FAT32)
+        $efi = New-Partition -DiskNumber $disk.Number -Size 100MB -GptType '{{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}}' -AssignDriveLetter
+        Format-Volume -Partition $efi -FileSystem FAT32 -NewFileSystemLabel "System" -Confirm:$false | Out-Null
+        
+        # Partition MSR (16MB)
+        New-Partition -DiskNumber $disk.Number -Size 16MB -GptType '{{e3c9e316-0b5c-4db8-817d-f92df00215ae}}' | Out-Null
+        
+        # Partition Windows (reste de l'espace)
+        $win = New-Partition -DiskNumber $disk.Number -UseMaximumSize -AssignDriveLetter
+        Format-Volume -Partition $win -FileSystem NTFS -NewFileSystemLabel "Windows" -Confirm:$false | Out-Null
+        
+        @{{
+            IsoDrive = $isoDrive
+            EfiDrive = $efi.DriveLetter
+            WinDrive = $win.DriveLetter
+        }} | ConvertTo-Json
+        """
+        
+        result = await self._execute(script_prepare, timeout=120)
+        if not result.success:
+            raise VMOperationError(vm_id, "deploy_dism_prepare", result.stderr)
+        
+        data = self._parse_json_output(result.stdout)
+        if not data:
+            raise VMOperationError(vm_id, "deploy_dism_prepare", "Failed to parse partition info")
+        
+        iso_drive = data.get("IsoDrive")
+        efi_drive = data.get("EfiDrive")
+        win_drive = data.get("WinDrive")
+        
+        logger.debug(
+            "hyperv_dism_partitions_created",
+            iso_drive=iso_drive,
+            efi_drive=efi_drive,
+            win_drive=win_drive,
+        )
+        
+        # Étape 2: Appliquer l'image Windows avec DISM
+        script_dism = f"""
+        Dism /Apply-Image /ImageFile:{iso_drive}:\\sources\\install.wim /Index:{image_index} /ApplyDir:{win_drive}:\\
+        if ($LASTEXITCODE -eq 0) {{
+            Write-Output "DISM_SUCCESS"
+        }} else {{
+            throw "DISM failed with exit code $LASTEXITCODE"
+        }}
+        """
+        
+        result = await self._execute(script_dism, timeout=600)
+        if not result.success or "DISM_SUCCESS" not in (result.stdout or ""):
+            # Nettoyer en cas d'erreur
+            await self._execute(f"Dismount-DiskImage -ImagePath '{iso_path}' -ErrorAction SilentlyContinue")
+            await self._execute(f"Dismount-VHD -Path '{vhd_path}' -ErrorAction SilentlyContinue")
+            raise VMOperationError(vm_id, "deploy_dism_apply", result.stderr or result.stdout)
+        
+        logger.debug("hyperv_dism_image_applied", vm_id=vm_id)
+        
+        # Étape 3: Ajouter unattend.xml si fourni (pour automatiser OOBE)
+        if unattend_content:
+            import base64
+            content_b64 = base64.b64encode(unattend_content.encode('utf-8')).decode('ascii')
+            chunks = [content_b64[i:i+2000] for i in range(0, len(content_b64), 2000)]
+            
+            panther_path = f"{win_drive}:\\Windows\\Panther"
+            temp_b64 = f"{win_drive}:\\temp_unattend.b64"
+            
+            # Créer le dossier Panther s'il n'existe pas
+            await self._execute(f"New-Item -ItemType Directory -Path '{panther_path}' -Force | Out-Null")
+            
+            # Écrire le fichier en chunks
+            for i, chunk in enumerate(chunks):
+                if i == 0:
+                    await self._execute(f"[System.IO.File]::WriteAllText('{temp_b64}', '{chunk}')")
+                else:
+                    await self._execute(f"[System.IO.File]::AppendAllText('{temp_b64}', '{chunk}')")
+            
+            # Décoder et créer unattend.xml
+            script_unattend = f"""
+            $b64 = [System.IO.File]::ReadAllText('{temp_b64}')
+            $bytes = [System.Convert]::FromBase64String($b64)
+            $content = [System.Text.Encoding]::UTF8.GetString($bytes)
+            [System.IO.File]::WriteAllText('{panther_path}\\unattend.xml', $content, [System.Text.Encoding]::UTF8)
+            Remove-Item '{temp_b64}' -Force
+            Write-Output "Unattend written"
+            """
+            await self._execute(script_unattend, timeout=30)
+            logger.debug("hyperv_dism_unattend_written", vm_id=vm_id)
+        
+        # Étape 4: Configurer le bootloader
+        script_boot = f"""
+        bcdboot {win_drive}:\\Windows /s {efi_drive}: /f UEFI
+        if ($LASTEXITCODE -eq 0) {{
+            Write-Output "BOOT_SUCCESS"
+        }} else {{
+            throw "BCDBoot failed with exit code $LASTEXITCODE"
+        }}
+        """
+        
+        result = await self._execute(script_boot, timeout=60)
+        if not result.success or "BOOT_SUCCESS" not in (result.stdout or ""):
+            raise VMOperationError(vm_id, "deploy_dism_boot", result.stderr or result.stdout)
+        
+        logger.debug("hyperv_dism_bootloader_configured", vm_id=vm_id)
+        
+        # Étape 5: Nettoyer et configurer la VM
+        script_finalize = f"""
+        # Démonter ISO et VHD
+        Dismount-DiskImage -ImagePath '{iso_path}'
+        Dismount-VHD -Path '{vhd_path}'
+        
+        # Configurer la VM pour booter sur le disque dur
+        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        if (-not $vm) {{
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+        }}
+        
+        if ($vm) {{
+            # Éjecter le DVD s'il est monté
+            Get-VMDvdDrive -VM $vm | Remove-VMDvdDrive -ErrorAction SilentlyContinue
+            
+            # Configurer le boot sur le disque dur
+            $hdd = Get-VMHardDiskDrive -VM $vm | Where-Object {{ $_.ControllerLocation -eq 0 }}
+            if ($hdd) {{
+                Set-VMFirmware -VM $vm -FirstBootDevice $hdd
+            }}
+            
+            Write-Output "FINALIZE_SUCCESS"
+        }} else {{
+            throw "VM not found"
+        }}
+        """
+        
+        result = await self._execute(script_finalize, timeout=60)
+        if not result.success:
+            raise VMOperationError(vm_id, "deploy_dism_finalize", result.stderr)
+        
+        logger.info("hyperv_deploy_dism_complete", vm_id=vm_id)
+        return True
+
     def close(self) -> None:
         """Ferme les connexions."""
         if self._executor:
