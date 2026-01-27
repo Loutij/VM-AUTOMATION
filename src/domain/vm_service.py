@@ -260,6 +260,8 @@ class VMService:
             cpu_count=cpu_count,
             ram_gb=ram_gb,
             disk_gb=disk_gb,
+            disk_path=vhdx_path,
+            network_switch=network_switch or settings.hyperv_default_switch,
             state=VMState.STOPPED,
             os_template_id=template_id,
             **kwargs,

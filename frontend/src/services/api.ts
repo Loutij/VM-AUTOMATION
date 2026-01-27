@@ -3,6 +3,7 @@ import type { AxiosError, AxiosInstance } from 'axios';
 import type {
   Hypervisor,
   VirtualMachine,
+  VMDetails,
   OSTemplate,
   Deployment,
   DeploymentConfig,
@@ -250,6 +251,16 @@ export const vmsApi = {
 
   delete: async (id: string, deleteDisks = false): Promise<void> => {
     await apiClient.delete(`/vms/${id}`, { params: { delete_disks: deleteDisks } });
+  },
+
+  getDetails: async (id: string): Promise<VMDetails> => {
+    const response = await apiClient.get<VMDetails>(`/vms/${id}/details`);
+    return response.data;
+  },
+
+  getRdpUrl: (id: string, username?: string): string => {
+    const params = username ? `?username=${encodeURIComponent(username)}` : '';
+    return `${API_BASE_URL}/vms/${id}/rdp${params}`;
   },
 };
 

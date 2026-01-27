@@ -394,11 +394,12 @@ class DeploymentService:
     async def _generate_unattend(self, deployment: Deployment, vm: VirtualMachine) -> None:
         """Génère et injecte le fichier d'installation automatique."""
         config = deployment.config
-        template_config = config.get("template", {})
+        template_config = config.get("template") or {}
         os_family = template_config.get("os_family", "windows")
         
         # Préparer les variables
-        ip_config = config.get("ip_config", {})
+        ip_config = config.get("ip_config") or {}
+        domain_join = config.get("domain_join") or {}
         
         if os_family == "windows":
             unattend_content = self.template_engine.render_windows_unattend(
@@ -409,13 +410,13 @@ class DeploymentService:
                 gateway=ip_config.get("gateway"),
                 dns_server_1=ip_config.get("dns_server_1", "8.8.8.8"),
                 dns_server_2=ip_config.get("dns_server_2"),
-                join_domain=bool(config.get("domain_join")),
-                domain_name=config.get("domain_join", {}).get("domain"),
-                domain_user=config.get("domain_join", {}).get("user"),
-                domain_password=config.get("domain_join", {}).get("password"),
+                join_domain=bool(domain_join),
+                domain_name=domain_join.get("domain"),
+                domain_user=domain_join.get("user"),
+                domain_password=domain_join.get("password"),
                 post_install_commands=[
                     {"command": cmd, "description": f"Custom command {i+1}"}
-                    for i, cmd in enumerate(config.get("post_install_commands", []))
+                    for i, cmd in enumerate(config.get("post_install_commands") or [])
                 ],
             )
             

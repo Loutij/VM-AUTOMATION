@@ -2148,3 +2148,178 @@ class HyperVClient(BaseHypervisor):
             summary["adapters"].append(adapter_info)
 
         return summary
+
+    # =========================================================================
+    # Détails complets VM
+    # =========================================================================
+
+    async def get_vm_full_details(self, vm_id: str) -> dict[str, Any]:
+        """
+        Récupère les détails complets d'une VM incluant:
+        - Infos générales (CPU, RAM, état)
+        - Utilisation des ressources en temps réel
+        - Disques et utilisation
+        - Configuration réseau
+        - Services d'intégration
+        
+        Args:
+            vm_id: ID ou nom de la VM
+            
+        Returns:
+            Dictionnaire avec tous les détails
+        """
+        script = f"""
+        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        if (-not $vm) {{
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+        }}
+        if (-not $vm) {{
+            throw "VM not found: {vm_id}"
+        }}
+        
+        # Infos générales
+        $result = @{{
+            general = @{{
+                id = $vm.VMId.ToString()
+                name = $vm.Name
+                state = $vm.State.ToString()
+                status = $vm.Status
+                generation = $vm.Generation
+                version = $vm.Version
+                path = $vm.Path
+                notes = $vm.Notes
+                uptime = if ($vm.Uptime) {{ $vm.Uptime.ToString() }} else {{ $null }}
+                created = $null  # Pas disponible directement
+            }}
+            
+            # Configuration
+            configuration = @{{
+                cpu_count = $vm.ProcessorCount
+                ram_startup_gb = [math]::Round($vm.MemoryStartupBytes/1GB, 2)
+                ram_minimum_gb = if ($vm.DynamicMemoryEnabled) {{ [math]::Round($vm.MemoryMinimum/1GB, 2) }} else {{ $null }}
+                ram_maximum_gb = if ($vm.DynamicMemoryEnabled) {{ [math]::Round($vm.MemoryMaximum/1GB, 2) }} else {{ $null }}
+                dynamic_memory = $vm.DynamicMemoryEnabled
+                secure_boot = $null
+                tpm_enabled = $null
+                checkpoint_type = $vm.CheckpointType.ToString()
+                automatic_start_action = $vm.AutomaticStartAction.ToString()
+                automatic_stop_action = $vm.AutomaticStopAction.ToString()
+            }}
+            
+            # Utilisation en temps réel
+            resources = @{{
+                cpu_usage_percent = $vm.CPUUsage
+                ram_assigned_gb = [math]::Round($vm.MemoryAssigned/1GB, 2)
+                ram_demand_gb = [math]::Round($vm.MemoryDemand/1GB, 2)
+            }}
+            
+            # Disques
+            disks = @()
+            
+            # Adaptateurs réseau
+            network_adapters = @()
+            
+            # Services d'intégration
+            integration_services = @()
+            
+            # Checkpoints
+            checkpoints = @()
+        }}
+        
+        # Gen2 specific
+        if ($vm.Generation -eq 2) {{
+            $firmware = Get-VMFirmware -VM $vm -ErrorAction SilentlyContinue
+            if ($firmware) {{
+                $result.configuration.secure_boot = $firmware.SecureBoot -eq 'On'
+            }}
+            $tpm = Get-VMTpm -VM $vm -ErrorAction SilentlyContinue
+            if ($tpm) {{
+                $result.configuration.tpm_enabled = $true
+            }}
+        }}
+        
+        # Disques
+        Get-VMHardDiskDrive -VM $vm | ForEach-Object {{
+            $vhd = Get-VHD -Path $_.Path -ErrorAction SilentlyContinue
+            $diskInfo = @{{
+                path = $_.Path
+                controller_type = $_.ControllerType.ToString()
+                controller_number = $_.ControllerNumber
+                controller_location = $_.ControllerLocation
+            }}
+            if ($vhd) {{
+                $diskInfo.size_gb = [math]::Round($vhd.Size/1GB, 2)
+                $diskInfo.size_used_gb = [math]::Round($vhd.FileSize/1GB, 2)
+                $diskInfo.format = $vhd.VhdFormat.ToString()
+                $diskInfo.type = $vhd.VhdType.ToString()
+                $diskInfo.fragmentation_percent = $vhd.FragmentationPercentage
+            }}
+            $result.disks += $diskInfo
+        }}
+        
+        # Lecteurs DVD
+        Get-VMDvdDrive -VM $vm | ForEach-Object {{
+            $result.disks += @{{
+                path = $_.Path
+                controller_type = 'DVD'
+                controller_number = $_.ControllerNumber
+                controller_location = $_.ControllerLocation
+                type = 'DVD'
+            }}
+        }}
+        
+        # Adaptateurs réseau
+        Get-VMNetworkAdapter -VM $vm | ForEach-Object {{
+            $vlan = Get-VMNetworkAdapterVlan -VMNetworkAdapter $_ -ErrorAction SilentlyContinue
+            $result.network_adapters += @{{
+                name = $_.Name
+                switch_name = $_.SwitchName
+                mac_address = $_.MacAddress
+                mac_type = $_.MacAddressSpoofing.ToString()
+                vlan_id = if ($vlan -and $vlan.AccessVlanId -gt 0) {{ $vlan.AccessVlanId }} else {{ $null }}
+                ip_addresses = @($_.IPAddresses)
+                status = $_.Status.ToString()
+                bandwidth_weight = $_.BandwidthPercentage
+            }}
+        }}
+        
+        # Services d'intégration
+        Get-VMIntegrationService -VM $vm | ForEach-Object {{
+            $result.integration_services += @{{
+                name = $_.Name
+                enabled = $_.Enabled
+                status = $_.PrimaryOperationalStatus.ToString()
+            }}
+        }}
+        
+        # Checkpoints
+        Get-VMCheckpoint -VM $vm -ErrorAction SilentlyContinue | ForEach-Object {{
+            $result.checkpoints += @{{
+                id = $_.Id.ToString()
+                name = $_.Name
+                creation_time = $_.CreationTime.ToString('o')
+                parent_id = if ($_.ParentCheckpointId) {{ $_.ParentCheckpointId.ToString() }} else {{ $null }}
+            }}
+        }}
+        
+        $result | ConvertTo-Json -Depth 4
+        """
+        
+        result = await self._execute(script, timeout=60)
+        
+        if not result.success:
+            raise HypervisorError(
+                f"Failed to get VM details: {result.stderr}",
+                {"vm_id": vm_id},
+            )
+        
+        data = self._parse_json_output(result.stdout)
+        
+        if data is None:
+            raise HypervisorError(
+                f"Failed to parse VM details: empty response",
+                {"vm_id": vm_id},
+            )
+        
+        logger.info("hyperv_vm_details_retrieved", vm_id=vm_id)
+        return data

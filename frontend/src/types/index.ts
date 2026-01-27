@@ -29,6 +29,79 @@ export interface VirtualMachine {
   updated_at: string;
 }
 
+// Détails complets d'une VM depuis Hyper-V
+export interface VMDetails {
+  db_id?: string;
+  general: {
+    id: string;
+    name: string;
+    state: string;
+    status: string;
+    generation: number;
+    version: string;
+    path: string;
+    notes?: string;
+    uptime?: string;
+  };
+  configuration: {
+    cpu_count: number;
+    ram_startup_gb: number;
+    ram_minimum_gb?: number;
+    ram_maximum_gb?: number;
+    dynamic_memory: boolean;
+    secure_boot?: boolean;
+    tpm_enabled?: boolean;
+    checkpoint_type: string;
+    automatic_start_action: string;
+    automatic_stop_action: string;
+  };
+  resources: {
+    cpu_usage_percent: number;
+    ram_assigned_gb: number;
+    ram_demand_gb: number;
+  };
+  disks: VMDiskInfo[];
+  network_adapters: VMNetworkAdapterInfo[];
+  integration_services: VMIntegrationService[];
+  checkpoints: VMCheckpoint[];
+}
+
+export interface VMDiskInfo {
+  path: string;
+  controller_type: string;
+  controller_number: number;
+  controller_location: number;
+  size_gb?: number;
+  size_used_gb?: number;
+  format?: string;
+  type?: string;
+  fragmentation_percent?: number;
+}
+
+export interface VMNetworkAdapterInfo {
+  name: string;
+  switch_name?: string;
+  mac_address?: string;
+  mac_type?: string;
+  vlan_id?: number;
+  ip_addresses: string[];
+  status: string;
+  bandwidth_weight?: number;
+}
+
+export interface VMIntegrationService {
+  name: string;
+  enabled: boolean;
+  status: string;
+}
+
+export interface VMCheckpoint {
+  id: string;
+  name: string;
+  creation_time: string;
+  parent_id?: string;
+}
+
 // Types pour les templates OS
 export type OSFamily = 'windows' | 'linux';
 

@@ -12,6 +12,12 @@ import {
   MemoryStick,
   HardDrive,
   Network,
+  Info,
+  ExternalLink,
+  Activity,
+  CheckCircle,
+  XCircle,
+  Clock,
 } from 'lucide-react';
 import { Header } from '../components/layout';
 import {
@@ -22,10 +28,11 @@ import {
   EmptyState,
   useToast,
   Dropdown,
+  Modal,
   type Column,
 } from '../components/ui';
 import { vmsApi, hypervisorsApi } from '../services/api';
-import type { VirtualMachine } from '../types';
+import type { VirtualMachine, VMDetails } from '../types';
 
 export function VirtualMachines() {
   const queryClient = useQueryClient();
@@ -36,6 +43,12 @@ export function VirtualMachines() {
     vm: VirtualMachine | null;
   }>({ type: null, vm: null });
   const [selectedHypervisor, setSelectedHypervisor] = useState<string>('all');
+  const [detailsModal, setDetailsModal] = useState<{ isOpen: boolean; vm: VirtualMachine | null }>({
+    isOpen: false,
+    vm: null,
+  });
+  const [vmDetails, setVmDetails] = useState<VMDetails | null>(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
 
   // Fetch VMs
   const { data: vms = [], isLoading: vmsLoading, refetch } = useQuery({
@@ -111,6 +124,26 @@ export function VirtualMachines() {
 
   const handleStart = (vm: VirtualMachine) => {
     startMutation.mutate(vm.id);
+  };
+
+  const handleOpenDetails = async (vm: VirtualMachine) => {
+    setDetailsModal({ isOpen: true, vm });
+    setVmDetails(null);
+    setDetailsLoading(true);
+    try {
+      const details = await vmsApi.getDetails(vm.id);
+      setVmDetails(details);
+    } catch (error) {
+      addToast({ type: 'error', title: 'Impossible de charger les détails' });
+    } finally {
+      setDetailsLoading(false);
+    }
+  };
+
+  const handleDownloadRdp = (vm: VirtualMachine) => {
+    const rdpUrl = vmsApi.getRdpUrl(vm.id, 'Administrator');
+    window.open(rdpUrl, '_blank');
+    addToast({ type: 'success', title: `Fichier RDP pour "${vm.name}" téléchargé` });
   };
 
   const handleConfirmAction = () => {
@@ -210,6 +243,22 @@ export function VirtualMachines() {
 
   const renderActions = (vm: VirtualMachine) => {
     const items = [];
+    
+    // Détails (toujours disponible)
+    items.push({
+      label: 'Détails',
+      icon: <Info size={16} className="text-primary-500" />,
+      onClick: () => handleOpenDetails(vm),
+    });
+    
+    // Connexion RDP (si running et Windows)
+    if (vm.state === 'running') {
+      items.push({
+        label: 'Connexion RDP',
+        icon: <ExternalLink size={16} className="text-cyan-500" />,
+        onClick: () => handleDownloadRdp(vm),
+      });
+    }
     
     if (vm.state !== 'running') {
       items.push({
@@ -380,6 +429,209 @@ export function VirtualMachines() {
             isLoading={modalConfig.isLoading}
           />
         )}
+
+        {/* VM Details Modal */}
+        <Modal
+          isOpen={detailsModal.isOpen}
+          onClose={() => setDetailsModal({ isOpen: false, vm: null })}
+          title={`Détails de ${detailsModal.vm?.name || 'VM'}`}
+          size="xl"
+        >
+          {detailsLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <RefreshCw size={32} className="animate-spin text-primary-500" />
+              <span className="ml-3 text-dark-300">Chargement des détails...</span>
+            </div>
+          ) : vmDetails ? (
+            <div className="space-y-6 max-h-[70vh] overflow-y-auto">
+              {/* État et ressources en temps réel */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-dark-700 rounded-lg p-4">
+                  <div className="flex items-center gap-2 text-dark-400 mb-1">
+                    <Activity size={16} />
+                    <span className="text-sm">État</span>
+                  </div>
+                  <StatusBadge status={vmDetails.general.state.toLowerCase() as VirtualMachine['state']} />
+                </div>
+                <div className="bg-dark-700 rounded-lg p-4">
+                  <div className="flex items-center gap-2 text-dark-400 mb-1">
+                    <Cpu size={16} />
+                    <span className="text-sm">CPU</span>
+                  </div>
+                  <p className="text-xl font-bold text-white">{vmDetails.resources.cpu_usage_percent}%</p>
+                  <p className="text-xs text-dark-400">{vmDetails.configuration.cpu_count} vCPU</p>
+                </div>
+                <div className="bg-dark-700 rounded-lg p-4">
+                  <div className="flex items-center gap-2 text-dark-400 mb-1">
+                    <MemoryStick size={16} />
+                    <span className="text-sm">RAM</span>
+                  </div>
+                  <p className="text-xl font-bold text-white">{vmDetails.resources.ram_assigned_gb} GB</p>
+                  <p className="text-xs text-dark-400">
+                    {vmDetails.configuration.dynamic_memory 
+                      ? `Dynamique (${vmDetails.configuration.ram_minimum_gb}-${vmDetails.configuration.ram_maximum_gb} GB)`
+                      : 'Statique'
+                    }
+                  </p>
+                </div>
+                <div className="bg-dark-700 rounded-lg p-4">
+                  <div className="flex items-center gap-2 text-dark-400 mb-1">
+                    <Clock size={16} />
+                    <span className="text-sm">Uptime</span>
+                  </div>
+                  <p className="text-lg font-medium text-white">{vmDetails.general.uptime || '-'}</p>
+                </div>
+              </div>
+
+              {/* Configuration */}
+              <div>
+                <h4 className="text-sm font-medium text-dark-300 mb-3 flex items-center gap-2">
+                  <Server size={16} />
+                  Configuration
+                </h4>
+                <div className="bg-dark-700 rounded-lg p-4 grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <span className="text-dark-400">Génération:</span>
+                    <span className="ml-2 text-white">Gen {vmDetails.general.generation}</span>
+                  </div>
+                  <div>
+                    <span className="text-dark-400">Version:</span>
+                    <span className="ml-2 text-white">{vmDetails.general.version}</span>
+                  </div>
+                  <div>
+                    <span className="text-dark-400">Secure Boot:</span>
+                    <span className="ml-2 text-white">{vmDetails.configuration.secure_boot ? 'Activé' : 'Désactivé'}</span>
+                  </div>
+                  <div>
+                    <span className="text-dark-400">TPM:</span>
+                    <span className="ml-2 text-white">{vmDetails.configuration.tpm_enabled ? 'Activé' : 'Non'}</span>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-dark-400">Chemin:</span>
+                    <span className="ml-2 text-white font-mono text-xs">{vmDetails.general.path}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Disques */}
+              <div>
+                <h4 className="text-sm font-medium text-dark-300 mb-3 flex items-center gap-2">
+                  <HardDrive size={16} />
+                  Disques ({vmDetails.disks.length})
+                </h4>
+                <div className="space-y-2">
+                  {vmDetails.disks.map((disk, idx) => (
+                    <div key={idx} className="bg-dark-700 rounded-lg p-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="text-white font-medium">{disk.type || 'Disque'}</span>
+                          {disk.size_gb && (
+                            <span className="ml-2 text-dark-400">
+                              {disk.size_used_gb ? `${disk.size_used_gb}/${disk.size_gb} GB` : `${disk.size_gb} GB`}
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-xs text-dark-400">{disk.format}</span>
+                      </div>
+                      <p className="text-xs text-dark-500 font-mono mt-1 truncate">{disk.path}</p>
+                      {disk.size_gb && disk.size_used_gb && (
+                        <div className="mt-2 h-1.5 bg-dark-600 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-primary-500 rounded-full"
+                            style={{ width: `${(disk.size_used_gb / disk.size_gb) * 100}%` }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Réseau */}
+              <div>
+                <h4 className="text-sm font-medium text-dark-300 mb-3 flex items-center gap-2">
+                  <Network size={16} />
+                  Adaptateurs réseau ({vmDetails.network_adapters.length})
+                </h4>
+                <div className="space-y-2">
+                  {vmDetails.network_adapters.map((nic, idx) => (
+                    <div key={idx} className="bg-dark-700 rounded-lg p-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-white font-medium">{nic.name}</span>
+                        <StatusBadge status={nic.status.toLowerCase() === 'ok' ? 'running' : 'stopped'} />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 mt-2 text-sm">
+                        <div>
+                          <span className="text-dark-400">Switch:</span>
+                          <span className="ml-2 text-white">{nic.switch_name || '-'}</span>
+                        </div>
+                        <div>
+                          <span className="text-dark-400">VLAN:</span>
+                          <span className="ml-2 text-white">{nic.vlan_id || 'Aucun'}</span>
+                        </div>
+                        <div>
+                          <span className="text-dark-400">MAC:</span>
+                          <span className="ml-2 text-white font-mono text-xs">{nic.mac_address || '-'}</span>
+                        </div>
+                        <div>
+                          <span className="text-dark-400">IP:</span>
+                          <span className="ml-2 text-white font-mono">
+                            {nic.ip_addresses?.length > 0 ? nic.ip_addresses.join(', ') : '-'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Services d'intégration */}
+              <div>
+                <h4 className="text-sm font-medium text-dark-300 mb-3 flex items-center gap-2">
+                  <CheckCircle size={16} />
+                  Services d'intégration
+                </h4>
+                <div className="bg-dark-700 rounded-lg p-3">
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                    {vmDetails.integration_services.map((svc, idx) => (
+                      <div key={idx} className="flex items-center gap-2 text-sm">
+                        {svc.enabled && svc.status === 'Ok' ? (
+                          <CheckCircle size={14} className="text-green-500" />
+                        ) : svc.enabled ? (
+                          <XCircle size={14} className="text-yellow-500" />
+                        ) : (
+                          <XCircle size={14} className="text-dark-500" />
+                        )}
+                        <span className={svc.enabled ? 'text-white' : 'text-dark-400'}>{svc.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Checkpoints */}
+              {vmDetails.checkpoints.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-medium text-dark-300 mb-3">
+                    Checkpoints ({vmDetails.checkpoints.length})
+                  </h4>
+                  <div className="bg-dark-700 rounded-lg p-3 space-y-2">
+                    {vmDetails.checkpoints.map((cp) => (
+                      <div key={cp.id} className="flex items-center justify-between text-sm">
+                        <span className="text-white">{cp.name}</span>
+                        <span className="text-dark-400">{new Date(cp.creation_time).toLocaleString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-center py-8 text-dark-400">
+              Impossible de charger les détails
+            </div>
+          )}
+        </Modal>
       </div>
     </div>
   );

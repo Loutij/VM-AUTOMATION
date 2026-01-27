@@ -6,16 +6,18 @@ Endpoints CRUD pour la gestion des machines virtuelles.
 """
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from src.api.dependencies import DbSession, Pagination
 from src.common.logging import get_logger
 from src.domain.models import VMState
 from src.domain.vm_service import VMService
+from src.integrations.hypervisors import HyperVClient
 
 logger = get_logger(__name__)
 
@@ -409,3 +411,116 @@ async def sync_vm_state(
         created_at=vm.created_at,
         updated_at=vm.updated_at,
     )
+
+
+@router.get(
+    "/{vm_id}/rdp",
+    summary="Télécharger fichier RDP",
+    description="Génère et télécharge un fichier .rdp pour se connecter à la VM.",
+    responses={
+        200: {
+            "content": {"application/x-rdp": {}},
+            "description": "Fichier RDP téléchargeable",
+        }
+    },
+)
+async def download_rdp(
+    db: DbSession,
+    vm_id: UUID,
+    username: Annotated[str | None, Query(description="Nom d'utilisateur par défaut")] = None,
+) -> Response:
+    """Génère un fichier RDP pour la VM."""
+    logger.info("generating_rdp", vm_id=str(vm_id))
+    
+    service = VMService(db)
+    vm = await service.get_vm(vm_id)
+    
+    # Utiliser l'IP si disponible, sinon le nom de la VM
+    address = vm.ip_address or vm.name
+    
+    # Contenu du fichier RDP
+    rdp_content = f"""full address:s:{address}
+prompt for credentials:i:1
+administrative session:i:1
+screen mode id:i:2
+use multimon:i:0
+desktopwidth:i:1920
+desktopheight:i:1080
+session bpp:i:32
+compression:i:1
+keyboardhook:i:2
+audiocapturemode:i:0
+videoplaybackmode:i:1
+connection type:i:7
+networkautodetect:i:1
+bandwidthautodetect:i:1
+displayconnectionbar:i:1
+enableworkspacereconnect:i:0
+disable wallpaper:i:0
+allow font smoothing:i:1
+allow desktop composition:i:1
+disable full window drag:i:0
+disable menu anims:i:0
+disable themes:i:0
+disable cursor setting:i:0
+bitmapcachepersistenable:i:1
+autoreconnection enabled:i:1
+authentication level:i:2
+"""
+    
+    # Ajouter le nom d'utilisateur si fourni
+    if username:
+        rdp_content += f"username:s:{username}\n"
+    
+    return Response(
+        content=rdp_content,
+        media_type="application/x-rdp",
+        headers={
+            "Content-Disposition": f'attachment; filename="{vm.name}.rdp"',
+        },
+    )
+
+
+@router.get(
+    "/{vm_id}/details",
+    summary="Détails complets de la VM",
+    description="Récupère les détails complets d'une VM incluant ressources, disques, réseau, services d'intégration.",
+)
+async def get_vm_details(
+    db: DbSession,
+    vm_id: UUID,
+) -> dict[str, Any]:
+    """Récupère les détails complets d'une VM depuis Hyper-V."""
+    logger.info("getting_vm_details", vm_id=str(vm_id))
+    
+    service = VMService(db)
+    vm = await service.get_vm(vm_id)
+    
+    # Récupérer l'hyperviseur
+    hypervisor = await service.get_hypervisor(vm.hypervisor_id)
+    
+    # Créer le client Hyper-V
+    client = HyperVClient(
+        host=hypervisor.host,
+        username=hypervisor.username,
+        password=hypervisor.password,
+        use_ssl=hypervisor.use_ssl,
+    )
+    
+    try:
+        # Récupérer les détails via le nom ou l'ID Hyper-V
+        vm_identifier = vm.hypervisor_vm_id or vm.name
+        details = await client.get_vm_full_details(vm_identifier)
+        
+        # Ajouter l'ID de notre base de données
+        details["db_id"] = str(vm.id)
+        
+        return details
+    except Exception as e:
+        logger.error("vm_details_failed", vm_id=str(vm_id), error=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=f"Impossible de récupérer les détails de la VM: {str(e)}"
+        )
+    finally:
+        client.close()
