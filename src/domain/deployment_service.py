@@ -122,7 +122,7 @@ class DeploymentService:
         current_step: str | None = None,
         error_message: str | None = None,
     ) -> None:
-        """Met à jour le statut du déploiement."""
+        """Met à jour le statut du déploiement et commit immédiatement."""
         deployment.status = status
         if current_step:
             deployment.current_step = current_step
@@ -131,7 +131,8 @@ class DeploymentService:
         if status in (DeploymentStatus.COMPLETED, DeploymentStatus.FAILED):
             deployment.completed_at = datetime.now(timezone.utc)
         
-        await self.db.flush()
+        # Commit immédiat pour que les mises à jour soient visibles dans l'interface
+        await self.db.commit()
 
     async def create_deployment(
         self,
@@ -339,6 +340,8 @@ class DeploymentService:
         await self._log_step(deployment, DeploymentStep.CREATING_VM, f"Creating VM: {config['vm_name']}")
         vm = await self._create_vm_for_dism(deployment)
         deployment.vm_id = vm.id
+        # Commit immédiat pour persister le vm_id
+        await self.db.commit()
         
         # 3. Déploiement DISM (applique l'image Windows directement)
         await self._update_deployment_status(
