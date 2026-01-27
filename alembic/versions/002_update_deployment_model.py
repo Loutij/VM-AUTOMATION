@@ -40,8 +40,8 @@ def upgrade() -> None:
         ['os_template_id'], ['id']
     )
     
-    # Update deployment_status enum
-    # PostgreSQL requires special handling for enum types
+    # Note: deployment_status enum values are now defined in migration 001
+    # These ADD VALUE statements are kept for backwards compatibility with existing databases
     op.execute("ALTER TYPE deploymentstatus ADD VALUE IF NOT EXISTS 'in_progress'")
     op.execute("ALTER TYPE deploymentstatus ADD VALUE IF NOT EXISTS 'creating_vm'")
     op.execute("ALTER TYPE deploymentstatus ADD VALUE IF NOT EXISTS 'installing_os'")

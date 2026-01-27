@@ -21,8 +21,8 @@ export interface VirtualMachine {
   hypervisor_id: string;
   state: VMState;
   cpu_count: number;
-  memory_mb: number;
-  disk_size_gb: number;
+  ram_gb: number;  // Aligned with backend (was memory_mb)
+  disk_gb: number; // Aligned with backend (was disk_size_gb)
   os_type?: string;
   ip_address?: string;
   created_at: string;
@@ -117,19 +117,20 @@ export interface OSTemplate {
   id: string;
   name: string;
   os_family: OSFamily;
-  os_version: string;
+  os_type: string;  // Aligned with backend (was os_version)
   description?: string;
   iso_path?: string;
   unattend_template?: string;
-  default_cpu: number;
-  default_memory_mb: number;
-  default_disk_gb: number;
+  min_cpu: number;     // Aligned with backend (was default_cpu)
+  min_ram_gb: number;  // Aligned with backend (was default_memory_mb)
+  min_disk_gb: number; // Aligned with backend (was default_disk_gb)
   created_at: string;
 }
 
 // Types pour les déploiements
 export type DeploymentStatus = 
   | 'pending'
+  | 'in_progress'
   | 'creating_vm'
   | 'installing_os'
   | 'post_install'
@@ -142,16 +143,16 @@ export interface DeploymentLog {
   id: string;
   deployment_id: string;
   step: string;
-  status: 'info' | 'success' | 'warning' | 'error';
+  level: 'debug' | 'info' | 'warning' | 'error';
   message: string;
   created_at: string;
 }
 
 export interface Deployment {
   id: string;
-  name: string;
+  vm_name: string;  // Aligned with backend (was name)
   hypervisor_id: string;
-  template_id: string;
+  os_template_id: string;  // Aligned with backend (was template_id)
   vm_id?: string;
   status: DeploymentStatus;
   progress: number;
@@ -165,8 +166,8 @@ export interface Deployment {
 export interface DeploymentConfig {
   vm_name: string;
   cpu_count: number;
-  memory_mb: number;
-  disk_size_gb: number;
+  ram_gb: number;  // Aligned with backend (was memory_mb)
+  disk_gb: number; // Aligned with backend (was disk_size_gb)
   vhdx_path?: string; // Emplacement personnalisé du disque virtuel
   network_switch?: string;
   hostname?: string;

@@ -114,8 +114,8 @@ export function VirtualMachines() {
 
   // Delete VM mutation
   const deleteMutation = useMutation({
-    mutationFn: ({ id, deleteDisks }: { id: string; deleteDisks: boolean }) =>
-      vmsApi.delete(id, deleteDisks),
+    mutationFn: ({ id, deleteDisks, force }: { id: string; deleteDisks: boolean; force?: boolean }) =>
+      vmsApi.delete(id, { deleteDisks, force }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['vms'] });
       addToast({ type: 'success', title: 'VM supprimée' });
@@ -229,7 +229,9 @@ export function VirtualMachines() {
         restartMutation.mutate(actionModal.vm.id);
         break;
       case 'delete':
-        deleteMutation.mutate({ id: actionModal.vm.id, deleteDisks: true });
+        // Forcer la suppression si l'état est unknown (ex: après annulation de déploiement)
+        const forceDelete = actionModal.vm.state === 'unknown';
+        deleteMutation.mutate({ id: actionModal.vm.id, deleteDisks: true, force: forceDelete });
         break;
     }
   };

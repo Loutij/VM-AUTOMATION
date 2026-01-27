@@ -19,8 +19,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema - add state, hypervisor_vm_id, ip_address to virtual_machines."""
-    # Create vmstate enum
-    vmstate_enum = sa.Enum('RUNNING', 'STOPPED', 'PAUSED', 'SUSPENDED', 'UNKNOWN', name='vmstate')
+    # Create vmstate enum with lowercase values matching Python model
+    vmstate_enum = sa.Enum('running', 'stopped', 'paused', 'saved', 'unknown', name='vmstate')
     vmstate_enum.create(op.get_bind(), checkfirst=True)
     
     # Add new columns
@@ -29,12 +29,14 @@ def upgrade() -> None:
     op.add_column('virtual_machines', sa.Column('ip_address', sa.String(length=45), nullable=True, comment='Adresse IP de la VM'))
     
     # Set default value for state on existing rows
-    op.execute("UPDATE virtual_machines SET state = 'UNKNOWN' WHERE state IS NULL")
+    op.execute("UPDATE virtual_machines SET state = 'unknown' WHERE state IS NULL")
     
     # Make state NOT NULL after setting defaults
     op.alter_column('virtual_machines', 'state', nullable=False)
     
-    # Rename hyperv_id to hypervisor_vm_id if it exists
+    # Note: hypervisor_vm_id is now created in migration 001
+    # This block is kept for backwards compatibility with databases
+    # that have the old 'hyperv_id' column
     try:
         op.execute("ALTER TABLE virtual_machines RENAME COLUMN hyperv_id TO hypervisor_vm_id_old")
         op.execute("UPDATE virtual_machines SET hypervisor_vm_id = hypervisor_vm_id_old WHERE hypervisor_vm_id IS NULL")
@@ -51,5 +53,5 @@ def downgrade() -> None:
     op.drop_column('virtual_machines', 'state')
     
     # Drop vmstate enum
-    vmstate_enum = sa.Enum('RUNNING', 'STOPPED', 'PAUSED', 'SUSPENDED', 'UNKNOWN', name='vmstate')
+    vmstate_enum = sa.Enum('running', 'stopped', 'paused', 'saved', 'unknown', name='vmstate')
     vmstate_enum.drop(op.get_bind(), checkfirst=True)

@@ -289,12 +289,18 @@ async def delete_vm(
     db: DbSession,
     vm_id: UUID,
     delete_disks: Annotated[bool, Query(description="Supprimer aussi les disques")] = False,
+    force: Annotated[bool, Query(description="Forcer la suppression même si l'hyperviseur échoue")] = False,
 ) -> None:
-    """Supprime une VM."""
-    logger.info("deleting_vm", vm_id=str(vm_id), delete_disks=delete_disks)
+    """
+    Supprime une VM.
+    
+    Si la VM est en état 'unknown' ou si force=True, la suppression en base
+    sera effectuée même si la suppression sur l'hyperviseur échoue.
+    """
+    logger.info("deleting_vm", vm_id=str(vm_id), delete_disks=delete_disks, force=force)
     
     service = VMService(db)
-    await service.delete_vm(vm_id, delete_disks=delete_disks)
+    await service.delete_vm(vm_id, delete_disks=delete_disks, force=force)
     await db.commit()
 
 

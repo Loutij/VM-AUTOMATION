@@ -270,8 +270,8 @@ function mapVM(vm: VMBackend): VirtualMachine {
     hypervisor_id: vm.hypervisor_id,
     state: vm.state as VirtualMachine['state'],
     cpu_count: vm.cpu_count,
-    memory_mb: vm.ram_gb * 1024,
-    disk_size_gb: vm.disk_gb,
+    ram_gb: vm.ram_gb,
+    disk_gb: vm.disk_gb,
     ip_address: vm.ip_address || undefined,
     created_at: vm.created_at,
     updated_at: vm.updated_at || vm.created_at,
@@ -315,8 +315,13 @@ export const vmsApi = {
     return vmsApi.get(response.data.vm_id);
   },
 
-  delete: async (id: string, deleteDisks = false): Promise<void> => {
-    await apiClient.delete(`/vms/${id}`, { params: { delete_disks: deleteDisks } });
+  delete: async (id: string, options?: { deleteDisks?: boolean; force?: boolean }): Promise<void> => {
+    await apiClient.delete(`/vms/${id}`, {
+      params: {
+        delete_disks: options?.deleteDisks ?? false,
+        force: options?.force ?? false,
+      },
+    });
   },
 
   getDetails: async (id: string): Promise<VMDetails> => {
@@ -364,12 +369,12 @@ function mapTemplate(t: TemplateBackend): OSTemplate {
     id: t.id,
     name: t.name,
     os_family: t.os_family as 'windows' | 'linux',
-    os_version: t.os_type,
+    os_type: t.os_type,
     description: undefined,
     iso_path: t.iso_path,
-    default_cpu: t.min_cpu,
-    default_memory_mb: t.min_ram_gb * 1024,
-    default_disk_gb: t.min_disk_gb,
+    min_cpu: t.min_cpu,
+    min_ram_gb: t.min_ram_gb,
+    min_disk_gb: t.min_disk_gb,
     created_at: t.created_at,
   };
 }
@@ -389,12 +394,12 @@ export const templatesApi = {
     const payload = {
       name: data.name,
       os_family: data.os_family,
-      os_type: data.os_version,
+      os_type: data.os_type,
       architecture: 'x64',
       iso_path: data.iso_path || '/path/to/iso',
-      min_cpu: data.default_cpu || 2,
-      min_ram_gb: Math.ceil((data.default_memory_mb || 4096) / 1024),
-      min_disk_gb: data.default_disk_gb || 60,
+      min_cpu: data.min_cpu || 2,
+      min_ram_gb: data.min_ram_gb || 4,
+      min_disk_gb: data.min_disk_gb || 60,
     };
     const response = await apiClient.post<TemplateBackend>('/templates', payload);
     return mapTemplate(response.data);
@@ -404,9 +409,9 @@ export const templatesApi = {
     const payload: Record<string, unknown> = {};
     if (data.name) payload.name = data.name;
     if (data.iso_path) payload.iso_path = data.iso_path;
-    if (data.default_cpu) payload.min_cpu = data.default_cpu;
-    if (data.default_memory_mb) payload.min_ram_gb = Math.ceil(data.default_memory_mb / 1024);
-    if (data.default_disk_gb) payload.min_disk_gb = data.default_disk_gb;
+    if (data.min_cpu) payload.min_cpu = data.min_cpu;
+    if (data.min_ram_gb) payload.min_ram_gb = data.min_ram_gb;
+    if (data.min_disk_gb) payload.min_disk_gb = data.min_disk_gb;
     
     const response = await apiClient.patch<TemplateBackend>(`/templates/${id}`, payload);
     return mapTemplate(response.data);
@@ -453,9 +458,9 @@ function mapDeployment(d: DeploymentBackend): Deployment {
   
   return {
     id: d.id,
-    name: d.vm_name,
+    vm_name: d.vm_name,
     hypervisor_id: d.hypervisor_id,
-    template_id: d.os_template_id,
+    os_template_id: d.os_template_id,
     vm_id: d.vm_id || undefined,
     status: d.status as Deployment['status'],
     progress: progressMap[d.status] || 0,
@@ -463,8 +468,8 @@ function mapDeployment(d: DeploymentBackend): Deployment {
     config: {
       vm_name: d.vm_name,
       cpu_count: (d.config.cpu_count as number) || 2,
-      memory_mb: ((d.config.ram_gb as number) || 4) * 1024,
-      disk_size_gb: (d.config.disk_gb as number) || 60,
+      ram_gb: (d.config.ram_gb as number) || 4,
+      disk_gb: (d.config.disk_gb as number) || 60,
     },
     created_at: d.created_at,
     updated_at: d.completed_at || d.started_at || d.created_at,
@@ -493,10 +498,10 @@ export const deploymentsApi = {
     const payload: Record<string, unknown> = {
       vm_name: data.name,
       hypervisor_id: data.hypervisor_id,
-      template_id: data.template_id,
+      os_template_id: data.os_template_id,
       cpu_count: data.config.cpu_count,
-      ram_gb: Math.ceil(data.config.memory_mb / 1024),
-      disk_gb: data.config.disk_size_gb,
+      ram_gb: data.config.ram_gb,
+      disk_gb: data.config.disk_gb,
       hostname: data.config.hostname,
       admin_password: data.config.admin_password,
       network_switch: data.config.network_switch,
@@ -543,7 +548,7 @@ export const deploymentsApi = {
       id: log.id,
       deployment_id: id,
       step: log.step,
-      status: log.level as 'info' | 'success' | 'warning' | 'error',
+      level: log.level as 'debug' | 'info' | 'warning' | 'error',
       message: log.message,
       created_at: log.created_at,
     }));

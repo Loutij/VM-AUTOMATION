@@ -458,22 +458,41 @@ class HyperVClient(BaseHypervisor):
         }}
         
         if (-not $vm) {{
-            throw "VM not found: {vm_id}"
+            # VM n'existe pas sur l'hyperviseur - considéré comme un succès
+            Write-Output "VM not found on hypervisor (already deleted or never created): {vm_id}"
+            exit 0
         }}
         
-        # Arrêter la VM si elle tourne
-        if ($vm.State -eq 'Running') {{
-            Stop-VM -VM $vm -Force -TurnOff
+        # Arrêter la VM si elle tourne ou dans un état intermédiaire
+        if ($vm.State -ne 'Off') {{
+            try {{
+                Stop-VM -VM $vm -Force -TurnOff -ErrorAction SilentlyContinue
+                Start-Sleep -Seconds 2
+            }} catch {{
+                Write-Warning "Could not stop VM: $_"
+            }}
         }}
         
         {"# Récupérer les chemins des disques avant suppression" if delete_disks else ""}
-        {'''$disks = Get-VMHardDiskDrive -VM $vm | Select-Object -ExpandProperty Path''' if delete_disks else ""}
+        {'''$disks = @()
+        try {
+            $disks = Get-VMHardDiskDrive -VM $vm -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Path
+        } catch { }''' if delete_disks else ""}
         
         # Supprimer la VM
-        Remove-VM -VM $vm -Force
+        try {{
+            Remove-VM -VM $vm -Force
+        }} catch {{
+            Write-Warning "Error removing VM: $_"
+            throw
+        }}
         
         {"# Supprimer les disques" if delete_disks else ""}
-        {'''foreach ($disk in $disks) { Remove-Item -Path $disk -Force -ErrorAction SilentlyContinue }''' if delete_disks else ""}
+        {'''foreach ($disk in $disks) {
+            if ($disk -and (Test-Path $disk)) {
+                try { Remove-Item -Path $disk -Force -ErrorAction SilentlyContinue } catch { }
+            }
+        }''' if delete_disks else ""}
         
         Write-Output "VM deleted successfully"
         """

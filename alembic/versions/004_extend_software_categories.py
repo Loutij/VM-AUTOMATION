@@ -17,7 +17,8 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-# Nouvelles valeurs à ajouter à l'enum
+# Note: Les catégories sont maintenant définies directement dans migration 003
+# Cette migration est gardée pour la compatibilité avec les bases existantes
 NEW_CATEGORIES = [
     'windows_role',
     'remote_access',
@@ -30,8 +31,8 @@ NEW_CATEGORIES = [
 
 
 def upgrade() -> None:
-    # Ajouter les nouvelles valeurs à l'enum
-    # PostgreSQL permet d'ajouter des valeurs à un enum existant
+    # Ajouter les nouvelles valeurs à l'enum si elles n'existent pas
+    # (pour les bases de données créées avant cette correction)
     for category in NEW_CATEGORIES:
         op.execute(f"ALTER TYPE softwarecategory ADD VALUE IF NOT EXISTS '{category}'")
 

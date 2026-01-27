@@ -278,20 +278,52 @@ class VMService:
         self,
         vm_id: UUID,
         delete_disks: bool = False,
+        force: bool = False,
     ) -> bool:
-        """Supprime une VM."""
-        vm = await self.get_vm(vm_id)
+        """
+        Supprime une VM.
         
-        # Supprimer sur l'hyperviseur
+        Args:
+            vm_id: ID de la VM
+            delete_disks: Supprimer aussi les disques virtuels
+            force: Forcer la suppression en base même si l'hyperviseur échoue
+        """
+        vm = await self.get_vm(vm_id)
+        hypervisor_error = None
+        
+        # Tenter de supprimer sur l'hyperviseur
         if vm.hypervisor_vm_id:
-            client = await self._get_hypervisor_client(vm.hypervisor_id)
-            await client.delete_vm(vm.hypervisor_vm_id, delete_disks=delete_disks)
+            try:
+                client = await self._get_hypervisor_client(vm.hypervisor_id)
+                await client.delete_vm(vm.hypervisor_vm_id, delete_disks=delete_disks)
+            except Exception as e:
+                hypervisor_error = str(e)
+                logger.warning(
+                    "vm_delete_hypervisor_failed",
+                    vm_id=str(vm_id),
+                    name=vm.name,
+                    error=hypervisor_error,
+                )
+                # Si l'état est unknown ou si force=True, on continue quand même
+                if vm.state != VMState.UNKNOWN and not force:
+                    raise
+                logger.info(
+                    "vm_delete_continuing_despite_error",
+                    vm_id=str(vm_id),
+                    state=vm.state.value if vm.state else "none",
+                    force=force,
+                )
         
         # Supprimer en base
         await self.db.delete(vm)
         await self.db.flush()
         
-        logger.info("vm_deleted", vm_id=str(vm_id), name=vm.name)
+        logger.info(
+            "vm_deleted",
+            vm_id=str(vm_id),
+            name=vm.name,
+            hypervisor_error=hypervisor_error,
+        )
         return True
 
     async def start_vm(self, vm_id: UUID) -> VirtualMachine:

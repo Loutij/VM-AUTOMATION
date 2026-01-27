@@ -13,17 +13,18 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = '003_software_marketplace'
-down_revision: Union[str, None] = '002_update_deployment_model'
+down_revision: Union[str, None] = '002_update_deployment'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Créer l'enum pour les catégories
+    # Créer l'enum pour les catégories (aligned with Python SoftwareCategory enum)
     software_category = postgresql.ENUM(
-        'utilities', 'development', 'database', 'webserver', 
-        'monitoring', 'security', 'networking', 'office', 
-        'media', 'runtime', 'other',
+        'windows_role', 'remote_access', 'database', 'webserver',
+        'development', 'runtime', 'monitoring', 'security',
+        'utilities', 'browser', 'containers', 'file_transfer',
+        'network', 'backup', 'other',
         name='softwarecategory'
     )
     software_category.create(op.get_bind(), checkfirst=True)
@@ -63,8 +64,9 @@ def upgrade() -> None:
         UPDATE software_packages SET category_new = 
         CASE 
             WHEN category IN ('utilities', 'development', 'database', 'webserver', 
-                            'monitoring', 'security', 'networking', 'office', 
-                            'media', 'runtime') THEN category::softwarecategory
+                            'monitoring', 'security', 'runtime', 'browser',
+                            'containers', 'file_transfer', 'network', 'backup',
+                            'windows_role', 'remote_access') THEN category::softwarecategory
             ELSE 'other'::softwarecategory
         END
     """)
