@@ -92,17 +92,51 @@ class HyperVClient(BaseHypervisor):
 
     def _parse_json_output(self, output: str) -> Any:
         """Parse la sortie JSON d'une commande PowerShell."""
-        if not output.strip():
+        if not output or not output.strip():
             return None
+        
+        text = output.strip()
+        
+        # Essayer de parser directement
         try:
-            return json.loads(output)
-        except json.JSONDecodeError as e:
-            logger.warning(
-                "json_parse_error",
-                output=output[:200],
-                error=str(e),
-            )
-            return None
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+        
+        # Essayer d'extraire le JSON d'un bloc { ... } ou [ ... ]
+        import re
+        
+        # Chercher un objet JSON {...}
+        obj_match = re.search(r'\{[^{}]*\}', text, re.DOTALL)
+        if obj_match:
+            try:
+                return json.loads(obj_match.group(0))
+            except json.JSONDecodeError:
+                pass
+        
+        # Chercher un tableau JSON [...]
+        arr_match = re.search(r'\[[^\[\]]*\]', text, re.DOTALL)
+        if arr_match:
+            try:
+                return json.loads(arr_match.group(0))
+            except json.JSONDecodeError:
+                pass
+        
+        # Dernière tentative: chercher la dernière ligne qui ressemble à du JSON
+        for line in reversed(text.split('\n')):
+            line = line.strip()
+            if line.startswith('{') or line.startswith('['):
+                try:
+                    return json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+        
+        logger.warning(
+            "json_parse_error",
+            output=text[:200],
+            error="No valid JSON found",
+        )
+        return None
 
     async def test_connection(self) -> bool:
         """Teste la connexion à l'hôte Hyper-V."""
@@ -1445,6 +1479,9 @@ class HyperVClient(BaseHypervisor):
         
         # Étape 1: Préparer et partitionner le VHD
         script_prepare = f"""
+        $ErrorActionPreference = 'Stop'
+        $ProgressPreference = 'SilentlyContinue'
+        
         $vhdPath = '{vhd_path}'
         $isoPath = '{iso_path}'
         

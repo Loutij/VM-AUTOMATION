@@ -220,12 +220,18 @@ async def create_deployment(
         post_install_commands=deployment.post_install_commands,
     )
     
-    await db.commit()
-    
     # Lancer le déploiement DISM automatiquement
     if deployment.auto_start:
         import asyncio
         from src.common.database import db_session
+        from src.domain.models import DeploymentStatus
+        from datetime import datetime, timezone
+        
+        # Marquer comme IN_PROGRESS immédiatement pour éviter double traitement par Celery
+        created.status = DeploymentStatus.IN_PROGRESS
+        created.started_at = datetime.now(timezone.utc)
+        
+        await db.commit()
         
         async def run_deployment_background(deployment_id):
             """Exécute le déploiement DISM en arrière-plan."""
@@ -240,6 +246,8 @@ async def create_deployment(
         
         # Lancer en arrière-plan
         asyncio.create_task(run_deployment_background(created.id))
+    else:
+        await db.commit()
     
     return DeploymentResponse(
         id=created.id,
