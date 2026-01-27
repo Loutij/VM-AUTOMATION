@@ -320,6 +320,7 @@ async def create_deployment(
         
         async def run_deployment_background(deployment_id):
             """Exécute le déploiement DISM en arrière-plan."""
+            import traceback
             try:
                 async with db_session() as session:
                     bg_service = DeploymentService(session)
@@ -327,7 +328,31 @@ async def create_deployment(
                     await session.commit()
                     logger.info("background_deployment_completed", deployment_id=str(deployment_id))
             except Exception as e:
-                logger.error("background_deployment_failed", deployment_id=str(deployment_id), error=str(e))
+                error_msg = f"{type(e).__name__}: {str(e)}"
+                logger.error(
+                    "background_deployment_failed", 
+                    deployment_id=str(deployment_id), 
+                    error=error_msg,
+                    traceback=traceback.format_exc()
+                )
+                # Mettre à jour le statut en FAILED dans une nouvelle session
+                try:
+                    async with db_session() as error_session:
+                        from sqlalchemy import select, update
+                        from src.domain.models import Deployment
+                        await error_session.execute(
+                            update(Deployment)
+                            .where(Deployment.id == deployment_id)
+                            .values(
+                                status=DeploymentStatus.FAILED,
+                                current_step="failed",
+                                error_message=error_msg[:500]
+                            )
+                        )
+                        await error_session.commit()
+                        logger.info("deployment_marked_failed", deployment_id=str(deployment_id))
+                except Exception as db_error:
+                    logger.error("failed_to_mark_deployment_failed", error=str(db_error))
         
         # Lancer en arrière-plan
         asyncio.create_task(run_deployment_background(created.id))
