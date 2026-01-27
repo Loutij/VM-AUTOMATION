@@ -4,6 +4,7 @@ import type {
   Hypervisor,
   VirtualMachine,
   VMDetails,
+  VMScreenshot,
   OSTemplate,
   Deployment,
   DeploymentConfig,
@@ -255,6 +256,14 @@ export const vmsApi = {
 
   getDetails: async (id: string): Promise<VMDetails> => {
     const response = await apiClient.get<VMDetails>(`/vms/${id}/details`);
+    return response.data;
+  },
+
+  getScreenshot: async (id: string, width = 800, height = 600): Promise<VMScreenshot> => {
+    const response = await apiClient.get<VMScreenshot>(`/vms/${id}/screenshot`, {
+      params: { width, height },
+      timeout: 15000, // Screenshot peut prendre du temps
+    });
     return response.data;
   },
 

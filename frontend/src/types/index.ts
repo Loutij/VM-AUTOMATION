@@ -102,6 +102,14 @@ export interface VMCheckpoint {
   parent_id?: string;
 }
 
+export interface VMScreenshot {
+  vm_id: string;
+  vm_name: string;
+  width: number;
+  height: number;
+  image: string; // data:image/png;base64,...
+}
+
 // Types pour les templates OS
 export type OSFamily = 'windows' | 'linux';
 

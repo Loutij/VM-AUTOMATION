@@ -524,3 +524,67 @@ async def get_vm_details(
         )
     finally:
         client.close()
+
+
+@router.get(
+    "/{vm_id}/screenshot",
+    summary="Capture d'écran de la VM",
+    description="Capture et retourne un screenshot de l'écran actuel de la VM.",
+)
+async def get_vm_screenshot(
+    db: DbSession,
+    vm_id: UUID,
+    width: Annotated[int, Query(ge=320, le=1920, description="Largeur de l'image")] = 800,
+    height: Annotated[int, Query(ge=240, le=1080, description="Hauteur de l'image")] = 600,
+) -> dict[str, Any]:
+    """Capture un screenshot de la VM depuis Hyper-V."""
+    logger.info("capturing_vm_screenshot", vm_id=str(vm_id), width=width, height=height)
+    
+    service = VMService(db)
+    vm = await service.get_vm(vm_id)
+    
+    # Vérifier que la VM est running
+    if vm.state.value != "running":
+        raise HTTPException(
+            status_code=400,
+            detail="La VM doit être en cours d'exécution pour capturer un screenshot"
+        )
+    
+    # Récupérer l'hyperviseur
+    hypervisor = await service.get_hypervisor(vm.hypervisor_id)
+    
+    # Créer le client Hyper-V
+    client = HyperVClient(
+        host=hypervisor.host,
+        username=hypervisor.username,
+        password=hypervisor.password,
+        use_ssl=hypervisor.use_ssl,
+    )
+    
+    try:
+        vm_identifier = vm.hypervisor_vm_id or vm.name
+        screenshot_b64 = await client.get_vm_screenshot(vm_identifier, width, height)
+        
+        if not screenshot_b64:
+            raise HTTPException(
+                status_code=500,
+                detail="Impossible de capturer le screenshot"
+            )
+        
+        return {
+            "vm_id": str(vm.id),
+            "vm_name": vm.name,
+            "width": width,
+            "height": height,
+            "image": f"data:image/png;base64,{screenshot_b64}",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("vm_screenshot_failed", vm_id=str(vm_id), error=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erreur lors de la capture: {str(e)}"
+        )
+    finally:
+        client.close()

@@ -18,6 +18,8 @@ import {
   CheckCircle,
   XCircle,
   Clock,
+  Camera,
+  Maximize2,
 } from 'lucide-react';
 import { Header } from '../components/layout';
 import {
@@ -49,6 +51,15 @@ export function VirtualMachines() {
   });
   const [vmDetails, setVmDetails] = useState<VMDetails | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
+  
+  // Screenshot modal
+  const [screenshotModal, setScreenshotModal] = useState<{ isOpen: boolean; vm: VirtualMachine | null }>({
+    isOpen: false,
+    vm: null,
+  });
+  const [screenshotData, setScreenshotData] = useState<string | null>(null);
+  const [screenshotLoading, setScreenshotLoading] = useState(false);
+  const [screenshotError, setScreenshotError] = useState<string | null>(null);
 
   // Fetch VMs
   const { data: vms = [], isLoading: vmsLoading, refetch } = useQuery({
@@ -144,6 +155,37 @@ export function VirtualMachines() {
     const rdpUrl = vmsApi.getRdpUrl(vm.id, 'Administrator');
     window.open(rdpUrl, '_blank');
     addToast({ type: 'success', title: `Fichier RDP pour "${vm.name}" téléchargé` });
+  };
+
+  const handleCaptureScreenshot = async (vm: VirtualMachine) => {
+    setScreenshotModal({ isOpen: true, vm });
+    setScreenshotData(null);
+    setScreenshotError(null);
+    setScreenshotLoading(true);
+    try {
+      const result = await vmsApi.getScreenshot(vm.id, 1024, 768);
+      setScreenshotData(result.image);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erreur lors de la capture';
+      setScreenshotError(message);
+    } finally {
+      setScreenshotLoading(false);
+    }
+  };
+
+  const handleRefreshScreenshot = async () => {
+    if (!screenshotModal.vm) return;
+    setScreenshotLoading(true);
+    setScreenshotError(null);
+    try {
+      const result = await vmsApi.getScreenshot(screenshotModal.vm.id, 1024, 768);
+      setScreenshotData(result.image);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erreur lors de la capture';
+      setScreenshotError(message);
+    } finally {
+      setScreenshotLoading(false);
+    }
   };
 
   const handleConfirmAction = () => {
@@ -251,7 +293,16 @@ export function VirtualMachines() {
       onClick: () => handleOpenDetails(vm),
     });
     
-    // Connexion RDP (si running et Windows)
+    // Aperçu écran (si running)
+    if (vm.state === 'running') {
+      items.push({
+        label: 'Aperçu écran',
+        icon: <Camera size={16} className="text-purple-500" />,
+        onClick: () => handleCaptureScreenshot(vm),
+      });
+    }
+    
+    // Connexion RDP (si running)
     if (vm.state === 'running') {
       items.push({
         label: 'Connexion RDP',
@@ -429,6 +480,75 @@ export function VirtualMachines() {
             isLoading={modalConfig.isLoading}
           />
         )}
+
+        {/* Screenshot Modal */}
+        <Modal
+          isOpen={screenshotModal.isOpen}
+          onClose={() => setScreenshotModal({ isOpen: false, vm: null })}
+          title={`Aperçu - ${screenshotModal.vm?.name || 'VM'}`}
+          size="xl"
+        >
+          <div className="space-y-4">
+            {/* Toolbar */}
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-dark-400">
+                Capture d'écran en temps réel de la VM
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={handleRefreshScreenshot}
+                  disabled={screenshotLoading}
+                >
+                  <RefreshCw size={16} className={screenshotLoading ? 'animate-spin' : ''} />
+                  Actualiser
+                </Button>
+                {screenshotData && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => window.open(screenshotData, '_blank')}
+                  >
+                    <Maximize2 size={16} />
+                    Plein écran
+                  </Button>
+                )}
+              </div>
+            </div>
+            
+            {/* Screenshot display */}
+            <div className="bg-black rounded-lg overflow-hidden min-h-[400px] flex items-center justify-center">
+              {screenshotLoading ? (
+                <div className="flex flex-col items-center gap-3 text-dark-400">
+                  <RefreshCw size={32} className="animate-spin" />
+                  <span>Capture en cours...</span>
+                </div>
+              ) : screenshotError ? (
+                <div className="flex flex-col items-center gap-3 text-red-400 p-8 text-center">
+                  <XCircle size={32} />
+                  <span>{screenshotError}</span>
+                  <Button size="sm" variant="secondary" onClick={handleRefreshScreenshot}>
+                    Réessayer
+                  </Button>
+                </div>
+              ) : screenshotData ? (
+                <img 
+                  src={screenshotData} 
+                  alt={`Screenshot de ${screenshotModal.vm?.name}`}
+                  className="max-w-full max-h-[600px] object-contain"
+                />
+              ) : (
+                <span className="text-dark-400">Aucune image</span>
+              )}
+            </div>
+            
+            {/* Info */}
+            <p className="text-xs text-dark-500 text-center">
+              Cliquez sur "Actualiser" pour mettre à jour l'image
+            </p>
+          </div>
+        </Modal>
 
         {/* VM Details Modal */}
         <Modal

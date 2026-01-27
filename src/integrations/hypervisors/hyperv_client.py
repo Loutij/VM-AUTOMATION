@@ -2323,3 +2323,92 @@ class HyperVClient(BaseHypervisor):
         
         logger.info("hyperv_vm_details_retrieved", vm_id=vm_id)
         return data
+
+    async def get_vm_screenshot(
+        self,
+        vm_id: str,
+        width: int = 640,
+        height: int = 480,
+    ) -> str | None:
+        """
+        Capture un screenshot de l'écran de la VM.
+        
+        Utilise WMI pour obtenir une image thumbnail de la VM.
+        
+        Args:
+            vm_id: ID ou nom de la VM
+            width: Largeur de l'image (défaut 640)
+            height: Hauteur de l'image (défaut 480)
+            
+        Returns:
+            Image en base64 (format PNG) ou None si échec
+        """
+        script = f"""
+        $ErrorActionPreference = 'Stop'
+        
+        # Trouver la VM
+        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        if (-not $vm) {{
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+        }}
+        if (-not $vm) {{
+            throw "VM not found: {vm_id}"
+        }}
+        
+        # Vérifier que la VM est en cours d'exécution
+        if ($vm.State -ne 'Running') {{
+            throw "VM must be running to capture screenshot"
+        }}
+        
+        # Obtenir le service de management via WMI
+        $vmName = $vm.Name
+        $ns = "root\\virtualization\\v2"
+        
+        # Récupérer les settings de la VM
+        $vmWmi = Get-WmiObject -Namespace $ns -Query "SELECT * FROM Msvm_ComputerSystem WHERE ElementName='$vmName'" | Select-Object -First 1
+        
+        if (-not $vmWmi) {{
+            throw "Cannot find VM in WMI"
+        }}
+        
+        # Récupérer les settings data
+        $vmSettingsQuery = "ASSOCIATORS OF {{$($vmWmi.__PATH)}} WHERE AssocClass=Msvm_SettingsDefineState ResultClass=Msvm_VirtualSystemSettingData"
+        $vmSettings = Get-WmiObject -Namespace $ns -Query $vmSettingsQuery | Select-Object -First 1
+        
+        if (-not $vmSettings) {{
+            throw "Cannot find VM settings"
+        }}
+        
+        # Obtenir le service de management
+        $vsms = Get-WmiObject -Namespace $ns -Class Msvm_VirtualSystemManagementService
+        
+        # Capturer le thumbnail
+        $result = $vsms.GetVirtualSystemThumbnailImage($vmSettings.__PATH, {width}, {height})
+        
+        if ($result.ReturnValue -ne 0) {{
+            throw "Failed to capture screenshot. Return code: $($result.ReturnValue)"
+        }}
+        
+        # Convertir en base64
+        $base64 = [Convert]::ToBase64String($result.ImageData)
+        Write-Output $base64
+        """
+        
+        result = await self._execute(script, timeout=30)
+        
+        if not result.success:
+            logger.warning(
+                "hyperv_screenshot_failed",
+                vm_id=vm_id,
+                error=result.stderr,
+            )
+            return None
+        
+        base64_data = result.stdout.strip()
+        
+        if not base64_data:
+            logger.warning("hyperv_screenshot_empty", vm_id=vm_id)
+            return None
+        
+        logger.info("hyperv_screenshot_captured", vm_id=vm_id, size=len(base64_data))
+        return base64_data
