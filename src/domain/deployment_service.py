@@ -139,6 +139,7 @@ class DeploymentService:
         cpu_count: int = 2,
         ram_gb: int = 4,
         disk_gb: int = 60,
+        vhdx_path: str | None = None,
         network_switch: str | None = None,
         ip_config: dict[str, Any] | None = None,
         admin_password: str | None = None,
@@ -180,6 +181,7 @@ class DeploymentService:
             "cpu_count": cpu_count,
             "ram_gb": ram_gb,
             "disk_gb": disk_gb,
+            "vhdx_path": vhdx_path,  # Emplacement personnalisé du VHDX
             "network_switch": network_switch or settings.hyperv_default_switch,
             "admin_password": admin_password or settings.default_admin_password.get_secret_value(),
             "ip_config": ip_config or {},
@@ -434,6 +436,9 @@ class DeploymentService:
         if not vhdx_path:
             # Utiliser le chemin par défaut
             vhdx_path = f"{client.vhdx_path}\\{config['vm_name']}.vhdx"
+        elif not vhdx_path.lower().endswith(".vhdx"):
+            # C'est un dossier, construire le chemin complet
+            vhdx_path = f"{vhdx_path.rstrip(chr(92))}\\{config['vm_name']}.vhdx"
         
         # Générer le contenu unattend.xml
         ip_config = config.get("ip_config") or {}

@@ -177,6 +177,15 @@ export interface DeploymentConfig {
     password?: string;
     ou_path?: string;
   };
+  ip_config?: {
+    static_ip?: boolean;
+    ip_address?: string;
+    subnet_prefix?: number;
+    gateway?: string;
+    dns_server_1?: string;
+    dns_server_2?: string;
+  };
+  post_install_commands?: string[];
   network?: {
     dhcp: boolean;
     ip_address?: string;

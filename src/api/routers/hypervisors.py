@@ -488,6 +488,93 @@ async def list_hypervisor_isos(
 
 
 # =============================================================================
+# Storage Locations
+# =============================================================================
+
+
+class StorageLocation(BaseModel):
+    """Informations sur un emplacement de stockage."""
+    
+    drive_letter: str = Field(..., description="Lettre du lecteur (ex: C, D, E)")
+    path: str = Field(..., description="Chemin suggéré pour les VHDx")
+    total_gb: float = Field(..., description="Espace total en Go")
+    free_gb: float = Field(..., description="Espace libre en Go")
+    used_gb: float = Field(..., description="Espace utilisé en Go")
+    percent_free: float = Field(..., description="Pourcentage d'espace libre")
+    is_default: bool = Field(default=False, description="Emplacement par défaut")
+    is_recommended: bool = Field(default=False, description="Recommandé (plus d'espace)")
+
+
+@router.get(
+    "/{hypervisor_id}/storage-locations",
+    response_model=list[StorageLocation],
+    summary="Lister les emplacements de stockage",
+    description="Liste les disques disponibles pour stocker les VHDx des VMs.",
+)
+async def list_storage_locations(
+    db: DbSession,
+    hypervisor_id: UUID,
+    min_free_gb: Annotated[int, Query(description="Espace libre minimum en Go")] = 50,
+) -> list[StorageLocation]:
+    """Liste les emplacements de stockage disponibles sur l'hyperviseur."""
+    logger.info("listing_storage_locations", hypervisor_id=str(hypervisor_id))
+    
+    service = VMService(db)
+    client = await service._get_hypervisor_client(hypervisor_id)
+    
+    # Récupérer les disques avec espace libre
+    script = f'''
+        $minFree = {min_free_gb}
+        Get-PSDrive -PSProvider FileSystem | 
+        Where-Object {{ $_.Free -ne $null -and ($_.Free / 1GB) -ge $minFree }} |
+        ForEach-Object {{
+            $total = $_.Used + $_.Free
+            [PSCustomObject]@{{
+                DriveLetter = $_.Name
+                TotalGB = [math]::Round($total / 1GB, 2)
+                FreeGB = [math]::Round($_.Free / 1GB, 2)
+                UsedGB = [math]::Round($_.Used / 1GB, 2)
+                PercentFree = if ($total -gt 0) {{ [math]::Round(($_.Free / $total) * 100, 1) }} else {{ 0 }}
+            }}
+        }} | Sort-Object FreeGB -Descending | ConvertTo-Json -Compress
+    '''
+    
+    result = await client._execute(script)
+    
+    if not result.success or not result.output:
+        return []
+    
+    import json
+    try:
+        data = json.loads(result.output)
+        # Si un seul résultat, le mettre dans une liste
+        if isinstance(data, dict):
+            data = [data]
+    except json.JSONDecodeError:
+        return []
+    
+    locations = []
+    max_free = max(d.get("FreeGB", 0) for d in data) if data else 0
+    
+    for disk in data:
+        drive = disk.get("DriveLetter", "")
+        free_gb = disk.get("FreeGB", 0)
+        
+        locations.append(StorageLocation(
+            drive_letter=drive,
+            path=f"{drive}:\\HyperV\\VirtualHardDisks",
+            total_gb=disk.get("TotalGB", 0),
+            free_gb=free_gb,
+            used_gb=disk.get("UsedGB", 0),
+            percent_free=disk.get("PercentFree", 0),
+            is_default=(drive == "C"),
+            is_recommended=(free_gb == max_free and free_gb >= min_free_gb),
+        ))
+    
+    return locations
+
+
+# =============================================================================
 # Synchronisation
 # =============================================================================
 

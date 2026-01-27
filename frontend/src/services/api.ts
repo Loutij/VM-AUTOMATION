@@ -485,7 +485,7 @@ export const deploymentsApi = {
     template_id: string;
     config: DeploymentConfig;
   }): Promise<Deployment> => {
-    const payload = {
+    const payload: Record<string, unknown> = {
       vm_name: data.name,
       hypervisor_id: data.hypervisor_id,
       template_id: data.template_id,
@@ -495,6 +495,10 @@ export const deploymentsApi = {
       hostname: data.config.hostname,
       admin_password: data.config.admin_password,
       network_switch: data.config.network_switch,
+      vhdx_path: data.config.vhdx_path, // Emplacement personnalisé du VHDX
+      ip_config: data.config.ip_config,
+      domain_join: data.config.domain_join,
+      post_install_commands: data.config.post_install_commands,
     };
     const response = await apiClient.post<DeploymentBackend>('/deployments', payload);
     return mapDeployment(response.data);

@@ -295,6 +295,19 @@ docker-compose -f docker-compose.prod.yml up -d
 - **Déploiement Windows** :
   - Amélioration DISM avec bypass OOBE
   - Configuration réseau automatique (Network Discovery, File Sharing)
+- **Fix transmission paramètres frontend → backend** :
+  - Correction `api.ts` : le payload envoyait uniquement les champs de base, omettant `vhdx_path`, `ip_config`, `domain_join`, `post_install_commands`
+  - Ajout types TypeScript pour `ip_config` et `post_install_commands` dans `DeploymentConfig`
+  - L'emplacement VHDX personnalisé fonctionne maintenant (permet de créer les VMs sur D:, G:, etc.)
+- **Endpoint stockage disponible** :
+  - `GET /hypervisors/{id}/storage-locations` : liste les disques disponibles avec espace libre
+  - Permet à l'utilisateur de choisir un disque alternatif quand C: est plein
+- **Fix double déploiement** :
+  - Statut `IN_PROGRESS` défini immédiatement dans l'API (avant commit DB)
+  - Évite que Celery Beat relance un déploiement déjà en cours
+- **Robustesse parsing JSON PowerShell** :
+  - `_parse_json_output()` utilise regex pour extraire le JSON même avec messages parasites
+  - Ajout `$ProgressPreference = 'SilentlyContinue'` dans les scripts DISM
 
 ### v0.5.0 (2026-01-26)
 - **Avancement global** : ~70% (132/189 tâches)

@@ -339,7 +339,18 @@ class HyperVClient(BaseHypervisor):
     async def create_vm(self, specs: VMSpecs) -> VMInfo:
         """Crée une nouvelle VM avec les spécifications données."""
         vm_path = specs.vm_path or self.vm_path
-        vhdx_path = specs.vhdx_path or f"{self.vhdx_path}\\{specs.name}.vhdx"
+        
+        # Construire le chemin VHDX complet
+        if specs.vhdx_path:
+            if specs.vhdx_path.lower().endswith(".vhdx"):
+                # Chemin complet fourni
+                vhdx_path = specs.vhdx_path
+            else:
+                # C'est un dossier, ajouter le nom du fichier
+                vhdx_path = f"{specs.vhdx_path.rstrip(chr(92))}\\{specs.name}.vhdx"
+        else:
+            # Chemin par défaut
+            vhdx_path = f"{self.vhdx_path}\\{specs.name}.vhdx"
         
         logger.info(
             "hyperv_creating_vm",
