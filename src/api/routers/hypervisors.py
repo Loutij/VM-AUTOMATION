@@ -454,6 +454,39 @@ async def list_physical_adapters(
     return adapters
 
 
+class ISOInfo(BaseModel):
+    """Informations sur un fichier ISO."""
+    
+    name: str = Field(..., description="Nom du fichier ISO")
+    full_path: str = Field(..., description="Chemin complet sur l'hyperviseur")
+    size_bytes: int = Field(..., description="Taille en octets")
+    size_gb: float = Field(..., description="Taille en Go")
+    last_modified: str = Field(..., description="Date de dernière modification")
+    directory: str = Field(..., description="Dossier parent")
+
+
+@router.get(
+    "/{hypervisor_id}/isos",
+    response_model=list[ISOInfo],
+    summary="Lister les ISOs disponibles",
+    description="Liste les fichiers ISO disponibles sur l'hyperviseur pour l'installation des VMs.",
+)
+async def list_hypervisor_isos(
+    db: DbSession,
+    hypervisor_id: UUID,
+    path: Annotated[str | None, Query(description="Chemin personnalisé (optionnel)")] = None,
+) -> list[ISOInfo]:
+    """Liste les fichiers ISO disponibles sur l'hyperviseur."""
+    logger.info("listing_hypervisor_isos", hypervisor_id=str(hypervisor_id), custom_path=path)
+    
+    service = VMService(db)
+    client = await service._get_hypervisor_client(hypervisor_id)
+    
+    isos = await client.list_isos(path=path)
+    
+    return [ISOInfo(**iso) for iso in isos]
+
+
 # =============================================================================
 # Synchronisation
 # =============================================================================

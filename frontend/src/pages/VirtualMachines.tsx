@@ -140,13 +140,13 @@ export function VirtualMachines() {
         addToast({
           type: 'success',
           title: 'Synchronisation terminée',
-          description: messages.length > 0 ? messages.join(', ') : 'Aucun changement',
+          message: messages.length > 0 ? messages.join(', ') : 'Aucun changement',
         });
       } else {
         addToast({
           type: 'warning',
           title: 'Synchronisation avec erreurs',
-          description: result.errors.join(', '),
+          message: result.errors.join(', '),
         });
       }
     },

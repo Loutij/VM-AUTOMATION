@@ -586,6 +586,52 @@ class HyperVClient(BaseHypervisor):
         logger.info("hyperv_physical_adapters_listed", count=len(adapters))
         return adapters
 
+    async def list_isos(self, path: str | None = None) -> list[dict[str, Any]]:
+        """
+        Liste les fichiers ISO disponibles sur l'hyperviseur.
+        
+        Args:
+            path: Chemin du dossier à scanner (par défaut: iso_path configuré)
+            
+        Returns:
+            Liste de dictionnaires avec les infos des ISOs
+        """
+        iso_folder = path or self.iso_path
+        
+        script = f"""
+        $isoPath = '{iso_folder}'
+        if (Test-Path $isoPath) {{
+            Get-ChildItem -Path $isoPath -Filter '*.iso' -Recurse | 
+            Select-Object @{{N='name';E={{$_.Name}}}},
+                          @{{N='full_path';E={{$_.FullName}}}},
+                          @{{N='size_bytes';E={{$_.Length}}}},
+                          @{{N='size_gb';E={{[math]::Round($_.Length/1GB, 2)}}}},
+                          @{{N='last_modified';E={{$_.LastWriteTime.ToString('yyyy-MM-ddTHH:mm:ss')}}}},
+                          @{{N='directory';E={{$_.DirectoryName}}}} |
+            ConvertTo-Json -Depth 2
+        }} else {{
+            Write-Output '[]'
+        }}
+        """
+        
+        result = await self._execute(script)
+        
+        if not result.success:
+            logger.warning("Failed to list ISOs", error=result.stderr, path=iso_folder)
+            return []
+        
+        data = self._parse_json_output(result.stdout)
+        
+        if data is None:
+            return []
+        
+        # Normaliser en liste
+        if isinstance(data, dict):
+            data = [data]
+        
+        logger.info("hyperv_isos_listed", count=len(data), path=iso_folder)
+        return data
+
     async def create_switch(
         self,
         name: str,

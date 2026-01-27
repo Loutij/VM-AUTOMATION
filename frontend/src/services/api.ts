@@ -77,6 +77,16 @@ interface PaginatedResponse<T> {
   page_size: number;
 }
 
+// Type pour les fichiers ISO
+export interface ISOInfo {
+  name: string;
+  full_path: string;
+  size_bytes: number;
+  size_gb: number;
+  last_modified: string;
+  directory: string;
+}
+
 // ============================================
 // Hypervisors API
 // ============================================
@@ -173,6 +183,13 @@ export const hypervisorsApi = {
 
   listPhysicalAdapters: async (id: string): Promise<PhysicalAdapter[]> => {
     const response = await apiClient.get<PhysicalAdapter[]>(`/hypervisors/${id}/physical-adapters`);
+    return response.data;
+  },
+
+  // Lister les fichiers ISO disponibles sur l'hyperviseur
+  listIsos: async (id: string, path?: string): Promise<ISOInfo[]> => {
+    const params = path ? { path } : {};
+    const response = await apiClient.get<ISOInfo[]>(`/hypervisors/${id}/isos`, { params });
     return response.data;
   },
 

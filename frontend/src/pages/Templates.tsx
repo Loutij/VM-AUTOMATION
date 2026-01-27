@@ -9,6 +9,9 @@ import {
   RefreshCw,
   Monitor,
   Server,
+  FolderOpen,
+  Loader2,
+  HardDrive,
 } from 'lucide-react';
 import { Header } from '../components/layout';
 import {
@@ -22,8 +25,8 @@ import {
   useToast,
   Dropdown,
 } from '../components/ui';
-import { templatesApi } from '../services/api';
-import type { OSTemplate, OSFamily } from '../types';
+import { templatesApi, hypervisorsApi, type ISOInfo } from '../services/api';
+import type { OSTemplate, OSFamily, Hypervisor } from '../types';
 
 interface TemplateFormData {
   name: string;
@@ -53,14 +56,29 @@ export function Templates() {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isIsoPickerOpen, setIsIsoPickerOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<OSTemplate | null>(null);
   const [formData, setFormData] = useState<TemplateFormData>(defaultFormData);
   const [filterFamily, setFilterFamily] = useState<'all' | OSFamily>('all');
+  const [selectedHypervisorForIso, setSelectedHypervisorForIso] = useState<string>('');
 
   // Fetch templates
   const { data: templates = [], isLoading, refetch } = useQuery({
     queryKey: ['templates'],
     queryFn: templatesApi.list,
+  });
+
+  // Fetch hypervisors (pour le sélecteur d'ISO)
+  const { data: hypervisors = [] } = useQuery({
+    queryKey: ['hypervisors'],
+    queryFn: hypervisorsApi.list,
+  });
+
+  // Fetch ISOs depuis l'hyperviseur sélectionné
+  const { data: isos = [], isLoading: isosLoading } = useQuery({
+    queryKey: ['isos', selectedHypervisorForIso],
+    queryFn: () => hypervisorsApi.listIsos(selectedHypervisorForIso),
+    enabled: !!selectedHypervisorForIso && isIsoPickerOpen,
   });
 
   // Create mutation
@@ -389,13 +407,35 @@ export function Templates() {
               rows={3}
             />
 
-            <Input
-              label="Chemin ISO"
-              value={formData.iso_path}
-              onChange={(e) => setFormData({ ...formData, iso_path: e.target.value })}
-              placeholder="C:\HyperV\ISOs\windows_server_2022.iso"
-              helperText="Chemin vers le fichier ISO sur l'hyperviseur"
-            />
+            <div>
+              <label className="block text-sm font-medium text-dark-200 mb-2">
+                Chemin ISO
+              </label>
+              <div className="flex gap-2">
+                <Input
+                  value={formData.iso_path}
+                  onChange={(e) => setFormData({ ...formData, iso_path: e.target.value })}
+                  placeholder="C:\HyperV\ISOs\windows_server_2022.iso"
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  leftIcon={<FolderOpen size={16} />}
+                  onClick={() => {
+                    if (hypervisors.length > 0 && !selectedHypervisorForIso) {
+                      setSelectedHypervisorForIso(hypervisors[0].id);
+                    }
+                    setIsIsoPickerOpen(true);
+                  }}
+                >
+                  Parcourir
+                </Button>
+              </div>
+              <p className="mt-1 text-xs text-dark-400">
+                Chemin vers le fichier ISO sur l'hyperviseur
+              </p>
+            </div>
 
             <div className="grid grid-cols-3 gap-4">
               <Input
@@ -446,6 +486,74 @@ export function Templates() {
           variant="danger"
           isLoading={deleteMutation.isPending}
         />
+
+        {/* ISO Picker Modal */}
+        <Modal
+          isOpen={isIsoPickerOpen}
+          onClose={() => setIsIsoPickerOpen(false)}
+          title="Sélectionner un fichier ISO"
+          size="lg"
+        >
+          <div className="space-y-4">
+            {/* Sélecteur d'hyperviseur */}
+            <Select
+              label="Hyperviseur"
+              value={selectedHypervisorForIso}
+              onChange={(e) => setSelectedHypervisorForIso(e.target.value)}
+              options={[
+                { value: '', label: 'Sélectionner un hyperviseur...', disabled: true },
+                ...hypervisors.map((h: Hypervisor) => ({
+                  value: h.id,
+                  label: `${h.name} (${h.host})`,
+                })),
+              ]}
+            />
+
+            {/* Liste des ISOs */}
+            {selectedHypervisorForIso && (
+              <div className="border border-dark-600 rounded-lg overflow-hidden">
+                <div className="bg-dark-700 px-4 py-2 text-sm font-medium text-dark-300 flex items-center gap-2">
+                  <HardDrive size={16} />
+                  Fichiers ISO disponibles
+                </div>
+                
+                {isosLoading ? (
+                  <div className="p-8 text-center text-dark-400">
+                    <Loader2 size={24} className="animate-spin mx-auto mb-2" />
+                    Chargement des ISOs...
+                  </div>
+                ) : isos.length === 0 ? (
+                  <div className="p-8 text-center text-dark-400">
+                    Aucun fichier ISO trouvé sur cet hyperviseur
+                  </div>
+                ) : (
+                  <div className="max-h-80 overflow-y-auto divide-y divide-dark-700">
+                    {isos.map((iso: ISOInfo) => (
+                      <button
+                        key={iso.full_path}
+                        type="button"
+                        onClick={() => {
+                          setFormData({ ...formData, iso_path: iso.full_path });
+                          setIsIsoPickerOpen(false);
+                        }}
+                        className="w-full px-4 py-3 text-left hover:bg-dark-700/50 transition-colors flex items-center justify-between gap-4"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium text-white truncate">{iso.name}</p>
+                          <p className="text-xs text-dark-400 truncate">{iso.full_path}</p>
+                        </div>
+                        <div className="text-right text-sm text-dark-400 flex-shrink-0">
+                          <p>{iso.size_gb} Go</p>
+                          <p className="text-xs">{iso.last_modified}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </Modal>
       </div>
     </div>
   );
