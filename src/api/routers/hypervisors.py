@@ -67,6 +67,7 @@ class HypervisorResponse(BaseModel):
     use_ssl: bool
     username: str
     is_active: bool
+    vm_count: int = Field(default=0, description="Nombre de VMs sur cet hyperviseur")
     created_at: datetime
     updated_at: datetime | None = None
 
@@ -74,7 +75,7 @@ class HypervisorResponse(BaseModel):
         from_attributes = True
 
     @classmethod
-    def model_validate(cls, obj, **kwargs):
+    def model_validate(cls, obj, vm_count: int = 0, **kwargs):
         """Convertit le modèle ORM en réponse avec mapping type -> hypervisor_type."""
         return cls(
             id=obj.id,
@@ -85,6 +86,7 @@ class HypervisorResponse(BaseModel):
             use_ssl=obj.use_ssl,
             username=obj.username,
             is_active=obj.is_active,
+            vm_count=vm_count,
             created_at=obj.created_at,
             updated_at=obj.updated_at,
         )
@@ -136,6 +138,16 @@ async def list_hypervisors(
     service = VMService(db)
     hypervisors = await service.list_hypervisors()
     
+    # Récupérer le nombre de VMs par hyperviseur
+    vm_counts: dict[str, int] = {}
+    try:
+        all_vms = await service.list_vms()
+        for vm in all_vms:
+            hv_id = str(vm.hypervisor_id)
+            vm_counts[hv_id] = vm_counts.get(hv_id, 0) + 1
+    except Exception as e:
+        logger.warning("failed_to_count_vms", error=str(e))
+    
     # Filtrage simple (à améliorer avec requêtes DB)
     if is_active is not None:
         hypervisors = [h for h in hypervisors if h.is_active == is_active]
@@ -149,7 +161,10 @@ async def list_hypervisors(
     items = hypervisors[start:end]
     
     return HypervisorList(
-        items=[HypervisorResponse.model_validate(h) for h in items],
+        items=[
+            HypervisorResponse.model_validate(h, vm_count=vm_counts.get(str(h.id), 0)) 
+            for h in items
+        ],
         total=total,
         page=pagination.page,
         page_size=pagination.page_size,

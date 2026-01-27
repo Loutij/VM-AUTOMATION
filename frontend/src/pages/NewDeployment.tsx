@@ -24,6 +24,7 @@ import {
   Loader2,
   Wifi,
   FolderOpen,
+  AlertTriangle,
 } from 'lucide-react';
 import { Header } from '../components/layout';
 import { Button, Input, Select, Switch, Modal, useToast } from '../components/ui';
@@ -130,6 +131,9 @@ export function NewDeployment() {
   const [formData, setFormData] = useState<DeploymentFormData>(defaultFormData);
 
   const queryClient = useQueryClient();
+
+  // State pour afficher les erreurs de validation
+  const [showErrors, setShowErrors] = useState(false);
 
   // State pour le modal de création de switch
   const [isCreateSwitchModalOpen, setIsCreateSwitchModalOpen] = useState(false);
@@ -245,35 +249,69 @@ export function NewDeployment() {
   const selectedTemplate = templates.find((t) => t.id === formData.os_template_id);
   const selectedProfile = softwareProfiles.find((p) => p.name === formData.software_profile);
 
-  // Validation par étape
-  const validateStep = (step: number): boolean => {
+  // Validation par étape avec messages d'erreur
+  const getValidationErrors = (step: number): string[] => {
+    const errors: string[] = [];
     switch (step) {
       case 1:
-        return !!formData.hypervisor_id && !!formData.os_template_id;
+        if (!formData.hypervisor_id) errors.push('Sélectionnez un hyperviseur');
+        if (!formData.os_template_id) errors.push('Sélectionnez un template OS');
+        break;
       case 2:
-        return (
-          !!formData.vm_name &&
-          formData.cpu_count >= 1 &&
-          formData.ram_gb >= 1 &&
-          formData.disk_gb >= 20
-        );
+        if (!formData.vm_name) errors.push('Le nom de la VM est obligatoire');
+        if (formData.vm_name && !/^[a-zA-Z0-9_-]+$/.test(formData.vm_name)) {
+          errors.push('Le nom de la VM ne doit contenir que des lettres, chiffres, tirets et underscores');
+        }
+        if (formData.cpu_count < 1) errors.push('Le nombre de CPUs doit être au moins 1');
+        if (formData.ram_gb < 1) errors.push('La RAM doit être d\'au moins 1 Go');
+        if (formData.disk_gb < 20) errors.push('Le disque doit être d\'au moins 20 GB');
+        break;
       case 3:
-        if (formData.use_static_ip && !formData.ip_address) return false;
-        return true;
+        if (formData.use_static_ip && !formData.ip_address) {
+          errors.push('L\'adresse IP est obligatoire pour la configuration statique');
+        }
+        if (formData.use_static_ip && formData.ip_address && 
+            !/^(\d{1,3}\.){3}\d{1,3}$/.test(formData.ip_address)) {
+          errors.push('Adresse IP invalide');
+        }
+        break;
       case 4:
-        if (formData.admin_password !== formData.admin_password_confirm) return false;
-        if (formData.join_domain && (!formData.domain_name || !formData.domain_user)) return false;
-        return true;
-      default:
-        return true;
+        if (formData.admin_password !== formData.admin_password_confirm) {
+          errors.push('Les mots de passe ne correspondent pas');
+        }
+        if (formData.join_domain && !formData.domain_name) {
+          errors.push('Le nom du domaine est obligatoire');
+        }
+        if (formData.join_domain && !formData.domain_user) {
+          errors.push('L\'utilisateur du domaine est obligatoire');
+        }
+        break;
     }
+    return errors;
+  };
+
+  const validateStep = (step: number): boolean => {
+    return getValidationErrors(step).length === 0;
   };
 
   const canProceed = validateStep(currentStep);
+  const currentErrors = getValidationErrors(currentStep);
 
   const handleNext = () => {
     if (canProceed && currentStep < 5) {
+      setShowErrors(false);
       setCurrentStep(currentStep + 1);
+    } else {
+      setShowErrors(true);
+      // Afficher un toast avec les erreurs
+      const errors = getValidationErrors(currentStep);
+      if (errors.length > 0) {
+        addToast({
+          type: 'error',
+          title: 'Formulaire incomplet',
+          message: errors[0],
+        });
+      }
     }
   };
 
@@ -398,7 +436,7 @@ export function NewDeployment() {
 
         {/* Progress steps */}
         <div className="card p-6 mb-6">
-          <div className="flex items-center justify-between overflow-x-auto">
+          <div className="flex items-center justify-between overflow-x-auto pb-2">
             {steps.map((step, index) => (
               <div key={step.id} className="flex items-center flex-shrink-0">
                 <div
@@ -410,9 +448,10 @@ export function NewDeployment() {
                       : 'text-dark-400'
                   }`}
                   onClick={() => step.id < currentStep && setCurrentStep(step.id)}
+                  title={step.name}
                 >
                   <div
-                    className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                    className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
                       currentStep === step.id
                         ? 'bg-primary-600'
                         : currentStep > step.id
@@ -426,10 +465,10 @@ export function NewDeployment() {
                       <step.icon size={20} />
                     )}
                   </div>
-                  <span className="font-medium hidden md:inline">{step.name}</span>
+                  <span className="font-medium hidden lg:inline whitespace-nowrap">{step.name}</span>
                 </div>
                 {index < steps.length - 1 && (
-                  <ChevronRight size={20} className="mx-2 md:mx-4 text-dark-600" />
+                  <ChevronRight size={20} className="mx-1 md:mx-3 text-dark-600 flex-shrink-0" />
                 )}
               </div>
             ))}
@@ -1313,6 +1352,23 @@ export function NewDeployment() {
             </div>
           )}
 
+          {/* Messages d'erreur de validation */}
+          {showErrors && currentErrors.length > 0 && (
+            <div className="mt-6 p-4 bg-red-500/10 border border-red-500/20 rounded-lg">
+              <div className="flex items-start gap-3">
+                <AlertTriangle size={20} className="text-red-500 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium text-red-500">Veuillez corriger les erreurs suivantes :</p>
+                  <ul className="mt-2 space-y-1">
+                    {currentErrors.map((error, index) => (
+                      <li key={index} className="text-sm text-red-400">• {error}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Navigation */}
           <div className="flex items-center justify-between mt-8 pt-6 border-t border-dark-700">
             <Button
@@ -1328,7 +1384,6 @@ export function NewDeployment() {
               <Button
                 rightIcon={<ChevronRight size={18} />}
                 onClick={handleNext}
-                disabled={!canProceed}
               >
                 Suivant
               </Button>
@@ -1337,7 +1392,6 @@ export function NewDeployment() {
                 leftIcon={<Rocket size={18} />}
                 onClick={handleSubmit}
                 isLoading={createMutation.isPending}
-                disabled={!canProceed}
               >
                 Lancer le déploiement
               </Button>

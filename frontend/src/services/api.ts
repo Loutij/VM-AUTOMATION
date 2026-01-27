@@ -106,6 +106,7 @@ interface HypervisorBackend {
   use_ssl: boolean;
   username: string;
   is_active: boolean;
+  vm_count: number;
   created_at: string;
   updated_at: string | null;
 }
@@ -120,6 +121,7 @@ function mapHypervisor(h: HypervisorBackend): Hypervisor {
     port: h.port,
     username: h.username,
     is_connected: h.is_active,
+    vm_count: h.vm_count ?? 0,
     created_at: h.created_at,
     updated_at: h.updated_at || h.created_at,
   };
@@ -459,6 +461,7 @@ function mapDeployment(d: DeploymentBackend): Deployment {
   return {
     id: d.id,
     vm_name: d.vm_name,
+    name: d.vm_name,  // Alias pour l'affichage
     hypervisor_id: d.hypervisor_id,
     os_template_id: d.os_template_id,
     vm_id: d.vm_id || undefined,
@@ -490,13 +493,13 @@ export const deploymentsApi = {
   },
 
   create: async (data: {
-    name: string;
+    vm_name: string;
     hypervisor_id: string;
-    template_id: string;
+    os_template_id: string;
     config: DeploymentConfig;
   }): Promise<Deployment> => {
     const payload: Record<string, unknown> = {
-      vm_name: data.name,
+      vm_name: data.vm_name,
       hypervisor_id: data.hypervisor_id,
       os_template_id: data.os_template_id,
       cpu_count: data.config.cpu_count,

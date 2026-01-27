@@ -319,14 +319,16 @@ export function Templates() {
                 {/* Template content */}
                 <div className="flex items-start gap-4">
                   <div
-                    className={`w-12 h-12 rounded-xl flex items-center justify-center ${
+                    className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${
                       template.os_family === 'windows' ? 'bg-blue-500/20' : 'bg-orange-500/20'
                     }`}
                   >
                     {getOSIcon(template.os_family)}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h3 className="font-semibold text-white truncate pr-8">{template.name}</h3>
+                    <h3 className="font-semibold text-white pr-8 break-words" title={template.name}>
+                      {template.name}
+                    </h3>
                     <p className="text-sm text-dark-400">{template.os_type}</p>
                   </div>
                 </div>

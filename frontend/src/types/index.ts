@@ -150,7 +150,8 @@ export interface DeploymentLog {
 
 export interface Deployment {
   id: string;
-  vm_name: string;  // Aligned with backend (was name)
+  vm_name: string;  // Aligned with backend
+  name: string;     // Alias for vm_name (for display)
   hypervisor_id: string;
   os_template_id: string;  // Aligned with backend (was template_id)
   vm_id?: string;

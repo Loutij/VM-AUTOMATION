@@ -9,7 +9,7 @@ interface StatusBadgeProps {
 
 const statusConfig: Record<string, { variant: BadgeVariant; label: string }> = {
   // VM States
-  running: { variant: 'success', label: 'En cours' },
+  running: { variant: 'success', label: 'En cours d\'exécution' },
   stopped: { variant: 'default', label: 'Arrêtée' },
   paused: { variant: 'warning', label: 'En pause' },
   saved: { variant: 'info', label: 'Sauvegardée' },
