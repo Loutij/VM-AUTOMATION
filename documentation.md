@@ -365,8 +365,16 @@ docker-compose -f docker-compose.prod.yml up -d
   - `OSTemplateResponse` : `created_at`/`updated_at` en `datetime`
   - Suppression import `Depends` inutilisé dans `vms.py`
   - React useEffect : ajout commentaire eslint-disable pour dépendance intentionnellement exclue
-- **Nouveau Script de Validation** :
+- **Nettoyage Système Hyper-V** :
+  - Suppression de 25 dossiers VM orphelins
+  - Suppression VM "A" fantôme de la base de données
+  - Correction des statuts VM incohérents (creating → running/stopped)
+- **Données Initialisées** :
+  - Catalogue software seedé : 100 packages disponibles
+  - 6 templates OS ajoutés : Windows Server 2019, Windows 10/11, Ubuntu 24.04, Debian 12, Rocky Linux 9
+- **Nouveaux Scripts** :
   - `scripts/validate_enums.py` : vérifie la cohérence des enums entre migrations, modèles et frontend
+  - `scripts/cleanup_hyperv.py` : nettoyage des ressources Hyper-V orphelines (VHD, dossiers VM)
 
 ### v0.8.0 (2026-01-27) - Marketplace Logiciels
 - **Catalogue de logiciels complet** :
