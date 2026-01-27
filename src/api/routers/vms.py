@@ -526,6 +526,221 @@ async def get_vm_details(
         client.close()
 
 
+class PostInstallRequest(BaseModel):
+    """Configuration pour le post-install manuel."""
+    
+    admin_password: str = Field(..., description="Mot de passe administrateur de la VM")
+    # Services
+    enable_rdp: bool = Field(default=False, description="Activer Remote Desktop")
+    enable_winrm: bool = Field(default=False, description="Configurer WinRM")
+    enable_ssh: bool = Field(default=False, description="Installer OpenSSH Server")
+    # Logiciels
+    software_profile: str | None = Field(None, description="Profil logiciel (minimal, tools, development, webserver, database, monitoring)")
+    packages: list[str] | None = Field(None, description="Packages Chocolatey à installer")
+    # Windows Update
+    install_updates: bool = Field(default=False, description="Installer les mises à jour Windows")
+
+
+class PostInstallResponse(BaseModel):
+    """Résultat du post-install."""
+    
+    success: bool
+    vm_id: str
+    steps_completed: list[str]
+    errors: list[str]
+    software_installed: list[str]
+    reboot_required: bool
+
+
+@router.post(
+    "/{vm_id}/post-install",
+    response_model=PostInstallResponse,
+    summary="Exécuter le post-install",
+    description="Exécute les configurations post-installation sur une VM existante (services, logiciels, mises à jour).",
+)
+async def execute_post_install(
+    db: DbSession,
+    vm_id: UUID,
+    config: PostInstallRequest,
+) -> PostInstallResponse:
+    """
+    Exécute le post-install sur une VM existante.
+    
+    Permet de :
+    - Configurer les services (RDP, WinRM, SSH)
+    - Installer des logiciels via Chocolatey
+    - Installer les mises à jour Windows
+    """
+    logger.info(
+        "executing_post_install",
+        vm_id=str(vm_id),
+        services={"rdp": config.enable_rdp, "winrm": config.enable_winrm, "ssh": config.enable_ssh},
+        software_profile=config.software_profile,
+    )
+    
+    service = VMService(db)
+    vm = await service.get_vm(vm_id)
+    
+    # Vérifier que la VM est running
+    if vm.state.value != "running":
+        raise HTTPException(
+            status_code=400,
+            detail="La VM doit être en cours d'exécution pour exécuter le post-install"
+        )
+    
+    # Récupérer l'hyperviseur
+    hypervisor = await service.get_hypervisor(vm.hypervisor_id)
+    
+    # Créer le client Hyper-V
+    client = HyperVClient(
+        host=hypervisor.host,
+        username=hypervisor.username,
+        password=hypervisor.password,
+        use_ssl=hypervisor.use_ssl,
+    )
+    
+    steps_completed: list[str] = []
+    errors: list[str] = []
+    software_installed: list[str] = []
+    reboot_required = False
+    
+    credentials = ("Administrator", config.admin_password)
+    vm_name = vm.hypervisor_vm_id or vm.name
+    
+    try:
+        # Vérifier que la VM est accessible via PowerShell Direct
+        logger.info("post_install_checking_vm_ready", vm_name=vm_name)
+        is_ready = await client.wait_for_vm_ready(vm_name, credentials, timeout=60, check_interval=10)
+        
+        if not is_ready:
+            raise HTTPException(
+                status_code=400,
+                detail="La VM n'est pas accessible via PowerShell Direct. Vérifiez le mot de passe."
+            )
+        
+        steps_completed.append("VM accessible")
+        
+        # Importer les services
+        from src.domain.post_install_service import PostInstallService
+        from src.domain.software_install_service import (
+            SoftwareInstallService,
+            SoftwarePackage,
+            PackageManager,
+            SOFTWARE_PROFILES,
+        )
+        
+        post_install_service = PostInstallService(client)
+        software_service = SoftwareInstallService(client)
+        
+        # 1. Configurer SSH si demandé
+        if config.enable_ssh:
+            try:
+                result = await post_install_service.install_ssh_server(vm_name, credentials)
+                if result.success:
+                    steps_completed.append("SSH Server installed")
+                else:
+                    errors.append(f"SSH: {result.error}")
+            except Exception as e:
+                errors.append(f"SSH: {str(e)}")
+        
+        # 2. Configurer WinRM si demandé
+        if config.enable_winrm:
+            try:
+                result = await post_install_service.configure_service(
+                    vm_name, credentials, "WinRM", "Automatic", True
+                )
+                if result.success:
+                    steps_completed.append("WinRM configured")
+                else:
+                    errors.append(f"WinRM: {result.error}")
+            except Exception as e:
+                errors.append(f"WinRM: {str(e)}")
+        
+        # 3. Configurer RDP si demandé
+        if config.enable_rdp:
+            try:
+                rdp_script = """
+                Set-ItemProperty -Path 'HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server' -Name "fDenyTSConnections" -Value 0
+                Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+                """
+                await client.execute_in_vm(vm_name, rdp_script, credentials)
+                steps_completed.append("RDP enabled")
+            except Exception as e:
+                errors.append(f"RDP: {str(e)}")
+        
+        # 4. Installer les logiciels
+        packages_to_install: list[SoftwarePackage] = []
+        
+        # Packages du profil
+        if config.software_profile and config.software_profile in SOFTWARE_PROFILES:
+            packages_to_install.extend(SOFTWARE_PROFILES[config.software_profile])
+        
+        # Packages personnalisés
+        if config.packages:
+            for pkg_name in config.packages:
+                if not any(p.name == pkg_name for p in packages_to_install):
+                    packages_to_install.append(
+                        SoftwarePackage(name=pkg_name, package_manager=PackageManager.CHOCOLATEY)
+                    )
+        
+        if packages_to_install:
+            try:
+                result = await software_service.install_packages(
+                    vm_name, credentials, packages_to_install, continue_on_error=True
+                )
+                
+                for pkg_result in result.results:
+                    if pkg_result.status.value == "installed":
+                        software_installed.append(f"{pkg_result.package_name} v{pkg_result.version_installed or 'latest'}")
+                    elif pkg_result.status.value == "skipped":
+                        software_installed.append(f"{pkg_result.package_name} (already installed)")
+                    elif pkg_result.status.value == "failed":
+                        errors.append(f"{pkg_result.package_name}: {pkg_result.error}")
+                
+                if result.installed > 0:
+                    steps_completed.append(f"Installed {result.installed} packages")
+                
+                reboot_required = result.reboot_required
+                
+            except Exception as e:
+                errors.append(f"Software installation: {str(e)}")
+        
+        # 5. Windows Update
+        if config.install_updates:
+            try:
+                result = await post_install_service.install_windows_updates(
+                    vm_name, credentials, auto_reboot=False
+                )
+                if result.success:
+                    steps_completed.append(f"Windows Update: {result.updates_installed} installed")
+                    if result.reboot_required:
+                        reboot_required = True
+                else:
+                    errors.append(f"Windows Update: {result.error}")
+            except Exception as e:
+                errors.append(f"Windows Update: {str(e)}")
+        
+        return PostInstallResponse(
+            success=len(errors) == 0,
+            vm_id=str(vm.id),
+            steps_completed=steps_completed,
+            errors=errors,
+            software_installed=software_installed,
+            reboot_required=reboot_required,
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("post_install_failed", vm_id=str(vm_id), error=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erreur lors du post-install: {str(e)}"
+        )
+    finally:
+        client.close()
+
+
 @router.get(
     "/{vm_id}/screenshot",
     summary="Capture d'écran de la VM",

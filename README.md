@@ -13,6 +13,19 @@ Supprimer **100% de l'intervention humaine** lors de la création, de l'installa
 
 ---
 
+## ⚠️ Identifiants par Défaut des VMs
+
+> **IMPORTANT** : Pour se connecter aux VMs Windows déployées automatiquement.
+
+| Champ | Valeur |
+|-------|--------|
+| **Utilisateur** | `.\Administrateur` |
+| **Mot de passe** | `TempP@ss123!` |
+
+*Le préfixe `.\` indique un compte local. Personnalisable via le champ "Mot de passe admin" lors du déploiement.*
+
+---
+
 ## Avancement Global : **~79%**
 
 | Phase | Description | Avancement |

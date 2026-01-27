@@ -723,3 +723,394 @@ class PostInstallService:
             return {"success": False, "error": result.error}
         
         return {"success": True, "data": result.output}
+
+    # =========================================================================
+    # Configuration des logiciels spécifiques
+    # =========================================================================
+
+    async def configure_zabbix_agent(
+        self,
+        vm_name: str,
+        credentials: tuple[str, str],
+        server_address: str,
+        hostname: str | None = None,
+        server_active: str | None = None,
+        listen_port: int = 10050,
+        enable_remote_commands: bool = False,
+    ) -> dict[str, Any]:
+        """
+        Configure Zabbix Agent après installation.
+        
+        Args:
+            vm_name: Nom de la VM
+            credentials: (username, password)
+            server_address: Adresse du serveur Zabbix (ex: 10.0.0.1)
+            hostname: Hostname pour Zabbix (défaut: nom de l'ordinateur)
+            server_active: Adresse pour les checks actifs (défaut: server_address)
+            listen_port: Port d'écoute (défaut: 10050)
+            enable_remote_commands: Autoriser les commandes distantes
+        """
+        remote_cmds = "1" if enable_remote_commands else "0"
+        server_active_addr = server_active or server_address
+        
+        script = f"""
+        $ErrorActionPreference = 'Stop'
+        
+        try {{
+            # Chemins possibles pour le fichier de config
+            $configPaths = @(
+                "C:\\Program Files\\Zabbix Agent\\zabbix_agentd.conf",
+                "C:\\Program Files\\Zabbix Agent 2\\zabbix_agent2.conf",
+                "C:\\zabbix_agent\\zabbix_agentd.conf",
+                "$env:ProgramData\\zabbix\\zabbix_agentd.conf"
+            )
+            
+            $configFile = $null
+            foreach ($path in $configPaths) {{
+                if (Test-Path $path) {{
+                    $configFile = $path
+                    break
+                }}
+            }}
+            
+            if (-not $configFile) {{
+                @{{
+                    Success = $false
+                    Error = "Zabbix agent config file not found"
+                }} | ConvertTo-Json
+                return
+            }}
+            
+            # Lire le fichier de config
+            $content = Get-Content $configFile -Raw
+            
+            # Hostname (utiliser le nom de l'ordinateur si non spécifié)
+            $zabbixHostname = "{hostname or ''}"
+            if (-not $zabbixHostname) {{
+                $zabbixHostname = $env:COMPUTERNAME
+            }}
+            
+            # Mettre à jour les paramètres
+            $content = $content -replace '^Server=.*$', 'Server={server_address}' -split "`n" -join "`n"
+            $content = $content -replace '^ServerActive=.*$', 'ServerActive={server_active_addr}' -split "`n" -join "`n"
+            $content = $content -replace '^Hostname=.*$', "Hostname=$zabbixHostname" -split "`n" -join "`n"
+            $content = $content -replace '^ListenPort=.*$', 'ListenPort={listen_port}' -split "`n" -join "`n"
+            $content = $content -replace '^EnableRemoteCommands=.*$', 'EnableRemoteCommands={remote_cmds}' -split "`n" -join "`n"
+            
+            # Sauvegarder
+            Set-Content -Path $configFile -Value $content -Force
+            
+            # Redémarrer le service
+            $serviceName = if (Get-Service "Zabbix Agent 2" -ErrorAction SilentlyContinue) {{ "Zabbix Agent 2" }} else {{ "Zabbix Agent" }}
+            Restart-Service -Name $serviceName -Force
+            
+            Start-Sleep -Seconds 2
+            
+            $svc = Get-Service -Name $serviceName
+            
+            @{{
+                Success = $true
+                ConfigFile = $configFile
+                Hostname = $zabbixHostname
+                Server = "{server_address}"
+                ServiceStatus = $svc.Status.ToString()
+            }} | ConvertTo-Json
+            
+        }} catch {{
+            @{{
+                Success = $false
+                Error = $_.Exception.Message
+            }} | ConvertTo-Json
+        }}
+        """
+        
+        logger.info(
+            "post_install_configure_zabbix",
+            vm_name=vm_name,
+            server=server_address,
+        )
+        
+        result = await self.client.execute_in_vm(
+            vm_name, script, credentials, timeout=120
+        )
+        
+        if not result.success:
+            return {"success": False, "error": result.error}
+        
+        return {"success": True, "data": result.output}
+
+    async def configure_sql_server(
+        self,
+        vm_name: str,
+        credentials: tuple[str, str],
+        sa_password: str | None = None,
+        mixed_mode: bool = True,
+        enable_tcp: bool = True,
+        tcp_port: int = 1433,
+    ) -> dict[str, Any]:
+        """
+        Configure SQL Server Express après installation.
+        
+        Args:
+            vm_name: Nom de la VM
+            credentials: (username, password)
+            sa_password: Mot de passe SA (si mixed mode)
+            mixed_mode: Activer l'authentification mixte
+            enable_tcp: Activer TCP/IP
+            tcp_port: Port TCP (défaut: 1433)
+        """
+        sa_pwd_param = f'"{sa_password}"' if sa_password else '$null'
+        
+        script = f"""
+        $ErrorActionPreference = 'Stop'
+        
+        try {{
+            Import-Module SqlServer -ErrorAction SilentlyContinue
+            
+            # Configurer le mode d'authentification
+            $instanceName = "SQLEXPRESS"
+            $regPath = "HKLM:\\SOFTWARE\\Microsoft\\Microsoft SQL Server\\MSSQL*.$instanceName\\MSSQLServer"
+            
+            # Trouver le bon chemin de registre
+            $regPath = Get-ChildItem "HKLM:\\SOFTWARE\\Microsoft\\Microsoft SQL Server" | 
+                Where-Object {{ $_.Name -like "*MSSQL*.$instanceName" }} |
+                Select-Object -First 1 |
+                ForEach-Object {{ "$($_.PSPath)\\MSSQLServer" }}
+            
+            if ($regPath -and {str(mixed_mode).lower()}) {{
+                # Mode mixte (1 = Windows, 2 = Mixed)
+                Set-ItemProperty -Path $regPath -Name "LoginMode" -Value 2
+            }}
+            
+            # Configurer le mot de passe SA
+            $saPwd = {sa_pwd_param}
+            if ($saPwd) {{
+                $query = "ALTER LOGIN sa ENABLE; ALTER LOGIN sa WITH PASSWORD = '$saPwd'"
+                Invoke-Sqlcmd -ServerInstance "localhost\\$instanceName" -Query $query -TrustServerCertificate
+            }}
+            
+            # Activer TCP/IP si demandé
+            if ({str(enable_tcp).lower()}) {{
+                $wmi = [Microsoft.SqlServer.Management.Smo.Wmi.ManagedComputer]::new()
+                $tcp = $wmi.ServerInstances["$instanceName"].ServerProtocols["Tcp"]
+                $tcp.IsEnabled = $true
+                $tcp.Alter()
+                
+                # Configurer le port
+                foreach ($ipAddress in $tcp.IPAddresses) {{
+                    $ipAddress.IPAddressProperties["TcpPort"].Value = "{tcp_port}"
+                    $ipAddress.IPAddressProperties["TcpDynamicPorts"].Value = ""
+                }}
+                $tcp.Alter()
+            }}
+            
+            # Redémarrer SQL Server
+            Restart-Service -Name "MSSQL`$$instanceName" -Force
+            Start-Sleep -Seconds 5
+            
+            # Configurer le firewall
+            New-NetFirewallRule -DisplayName "SQL Server" -Direction Inbound -Protocol TCP -LocalPort {tcp_port} -Action Allow -ErrorAction SilentlyContinue
+            
+            $svc = Get-Service -Name "MSSQL`$$instanceName"
+            
+            @{{
+                Success = $true
+                InstanceName = $instanceName
+                MixedMode = {str(mixed_mode).lower()}
+                TCPEnabled = {str(enable_tcp).lower()}
+                TCPPort = {tcp_port}
+                ServiceStatus = $svc.Status.ToString()
+            }} | ConvertTo-Json
+            
+        }} catch {{
+            @{{
+                Success = $false
+                Error = $_.Exception.Message
+            }} | ConvertTo-Json
+        }}
+        """
+        
+        logger.info(
+            "post_install_configure_sql_server",
+            vm_name=vm_name,
+            mixed_mode=mixed_mode,
+        )
+        
+        result = await self.client.execute_in_vm(
+            vm_name, script, credentials, timeout=180
+        )
+        
+        if not result.success:
+            return {"success": False, "error": result.error}
+        
+        return {"success": True, "data": result.output}
+
+    async def configure_iis(
+        self,
+        vm_name: str,
+        credentials: tuple[str, str],
+        site_name: str = "Default Web Site",
+        physical_path: str = "C:\\inetpub\\wwwroot",
+        binding_port: int = 80,
+        binding_hostname: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Configure IIS après installation.
+        
+        Args:
+            vm_name: Nom de la VM
+            credentials: (username, password)
+            site_name: Nom du site (défaut: Default Web Site)
+            physical_path: Chemin physique du site
+            binding_port: Port de binding
+            binding_hostname: Hostname de binding (optionnel)
+        """
+        hostname_param = f'"{binding_hostname}"' if binding_hostname else '$null'
+        
+        script = f"""
+        $ErrorActionPreference = 'Stop'
+        
+        try {{
+            Import-Module WebAdministration
+            
+            # Vérifier si le site existe
+            $site = Get-Website -Name "{site_name}" -ErrorAction SilentlyContinue
+            
+            if (-not $site) {{
+                # Créer le site
+                New-Website -Name "{site_name}" -PhysicalPath "{physical_path}" -Port {binding_port}
+            }} else {{
+                # Mettre à jour le site existant
+                Set-ItemProperty "IIS:\\Sites\\{site_name}" -Name physicalPath -Value "{physical_path}"
+            }}
+            
+            # Configurer le binding
+            $bindInfo = "*:{binding_port}:"
+            $hostname = {hostname_param}
+            if ($hostname) {{
+                $bindInfo = "*:{binding_port}:$hostname"
+            }}
+            
+            # Supprimer les bindings existants et en créer un nouveau
+            $existingBindings = Get-WebBinding -Name "{site_name}" -Port {binding_port} -Protocol http
+            if (-not $existingBindings) {{
+                New-WebBinding -Name "{site_name}" -Protocol http -Port {binding_port} -HostHeader $hostname
+            }}
+            
+            # Démarrer le site
+            Start-Website -Name "{site_name}"
+            
+            # Configurer le firewall
+            New-NetFirewallRule -DisplayName "IIS HTTP" -Direction Inbound -Protocol TCP -LocalPort {binding_port} -Action Allow -ErrorAction SilentlyContinue
+            
+            $site = Get-Website -Name "{site_name}"
+            
+            @{{
+                Success = $true
+                SiteName = "{site_name}"
+                PhysicalPath = "{physical_path}"
+                Port = {binding_port}
+                State = $site.State
+            }} | ConvertTo-Json
+            
+        }} catch {{
+            @{{
+                Success = $false
+                Error = $_.Exception.Message
+            }} | ConvertTo-Json
+        }}
+        """
+        
+        logger.info(
+            "post_install_configure_iis",
+            vm_name=vm_name,
+            site_name=site_name,
+        )
+        
+        result = await self.client.execute_in_vm(
+            vm_name, script, credentials, timeout=120
+        )
+        
+        if not result.success:
+            return {"success": False, "error": result.error}
+        
+        return {"success": True, "data": result.output}
+
+    async def join_domain(
+        self,
+        vm_name: str,
+        credentials: tuple[str, str],
+        domain_name: str,
+        domain_user: str,
+        domain_password: str,
+        ou_path: str | None = None,
+        reboot: bool = True,
+    ) -> dict[str, Any]:
+        """
+        Joint la VM à un domaine Active Directory.
+        
+        Args:
+            vm_name: Nom de la VM
+            credentials: (username, password) - compte local admin
+            domain_name: Nom du domaine (ex: example.local)
+            domain_user: Utilisateur pour joindre le domaine
+            domain_password: Mot de passe du compte domaine
+            ou_path: OU cible (optionnel)
+            reboot: Redémarrer après jonction
+        """
+        ou_param = f'-OUPath "{ou_path}"' if ou_path else ""
+        reboot_param = "-Restart" if reboot else ""
+        
+        script = f"""
+        $ErrorActionPreference = 'Stop'
+        
+        try {{
+            # Vérifier si déjà dans le domaine
+            $cs = Get-WmiObject Win32_ComputerSystem
+            if ($cs.PartOfDomain -and $cs.Domain -eq "{domain_name}") {{
+                @{{
+                    Success = $true
+                    AlreadyJoined = $true
+                    Domain = "{domain_name}"
+                    Message = "Already joined to domain"
+                }} | ConvertTo-Json
+                return
+            }}
+            
+            # Créer les credentials pour le domaine
+            $secPwd = ConvertTo-SecureString "{domain_password}" -AsPlainText -Force
+            $domainCred = New-Object System.Management.Automation.PSCredential("{domain_user}", $secPwd)
+            
+            # Joindre le domaine
+            Add-Computer -DomainName "{domain_name}" -Credential $domainCred {ou_param} {reboot_param} -Force
+            
+            @{{
+                Success = $true
+                AlreadyJoined = $false
+                Domain = "{domain_name}"
+                RebootInitiated = {str(reboot).lower()}
+                Message = "Domain join initiated"
+            }} | ConvertTo-Json
+            
+        }} catch {{
+            @{{
+                Success = $false
+                Error = $_.Exception.Message
+            }} | ConvertTo-Json
+        }}
+        """
+        
+        logger.info(
+            "post_install_join_domain",
+            vm_name=vm_name,
+            domain=domain_name,
+        )
+        
+        result = await self.client.execute_in_vm(
+            vm_name, script, credentials, timeout=120
+        )
+        
+        if not result.success:
+            return {"success": False, "error": result.error}
+        
+        return {"success": True, "data": result.output}

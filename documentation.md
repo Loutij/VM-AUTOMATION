@@ -49,11 +49,15 @@ Outil interne d'automatisation complète du déploiement de machines virtuelles.
 | Fonctionnalité | Statut | Description |
 |----------------|--------|-------------|
 | Configuration réseau | TERMINÉ | DHCP/statique, DNS, gateway |
-| Jointure domaine AD | TERMINÉ | Windows (unattend.xml) |
+| Jointure domaine AD | TERMINÉ | Windows (unattend.xml) + join_domain() |
 | Activation services | TERMINÉ | SSH, WinRM, RDP + configure_service() |
 | Windows Update | TERMINÉ | install_windows_updates() via PowerShell Direct |
 | Configuration sécurité | TERMINÉ | configure_firewall_rule(), password policies |
 | PostInstallService | TERMINÉ | Service complet pour config Windows |
+| Configuration Zabbix | TERMINÉ | configure_zabbix_agent() - server, hostname, port |
+| Configuration SQL Server | TERMINÉ | configure_sql_server() - mixed mode, TCP/IP |
+| Configuration IIS | TERMINÉ | configure_iis() - site, binding, port |
+| **Workflow intégré** | **TERMINÉ** | Post-install automatique dans DeploymentService |
 
 ### Module 5 : Installation Logiciels
 | Fonctionnalité | Statut | Description |
@@ -235,6 +239,23 @@ vm-automation/
 | `AD_PASSWORD` | Mot de passe AD | Non |
 | `ISO_BASE_PATH` | Chemin vers les ISOs | Oui |
 | `VHDX_BASE_PATH` | Chemin stockage disques | Oui |
+
+---
+
+## ⚠️ Identifiants par Défaut des VMs
+
+> **IMPORTANT** : Ces identifiants sont utilisés pour se connecter aux VMs Windows déployées.
+
+| Champ | Valeur |
+|-------|--------|
+| **Utilisateur** | `.\Administrateur` |
+| **Mot de passe** | `TempP@ss123!` |
+
+### Notes
+- Le préfixe `.\` indique un compte local (pas un compte domaine)
+- Sur un Windows en français, le compte s'appelle `Administrateur` (pas `Administrator`)
+- Le mot de passe peut être personnalisé lors du déploiement via le champ "Mot de passe admin"
+- Pour changer le mot de passe par défaut globalement, modifier la variable `DEFAULT_ADMIN_PASSWORD` dans `.env`
 
 ---
 

@@ -50,7 +50,9 @@ class DeploymentStep(str, Enum):
     GENERATING_UNATTEND = "generating_unattend"
     STARTING_INSTALLATION = "starting_installation"
     WAITING_INSTALLATION = "waiting_installation"
+    WAITING_VM_READY = "waiting_vm_ready"
     POST_CONFIGURATION = "post_configuration"
+    INSTALLING_SOFTWARE = "installing_software"
     FINALIZING = "finalizing"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -145,6 +147,11 @@ class DeploymentService:
         admin_password: str | None = None,
         hostname: str | None = None,
         domain_join: dict[str, Any] | None = None,
+        services: dict[str, Any] | None = None,
+        security: dict[str, Any] | None = None,
+        software_profile: str | None = None,
+        packages: list[str] | None = None,
+        enable_windows_update: bool = False,
         post_install_commands: list[str] | None = None,
         **kwargs: Any,
     ) -> Deployment:
@@ -163,7 +170,12 @@ class DeploymentService:
             admin_password: Mot de passe administrateur
             hostname: Nom d'hôte (défaut: vm_name)
             domain_join: Configuration de jonction AD
-            post_install_commands: Commandes post-installation
+            services: Configuration des services (RDP, WinRM, SSH)
+            security: Configuration de sécurité (politiques de mot de passe)
+            software_profile: Profil logiciel (minimal, tools, development, etc.)
+            packages: Packages Chocolatey supplémentaires
+            enable_windows_update: Installer les mises à jour Windows
+            post_install_commands: Commandes post-installation personnalisées
             
         Returns:
             Déploiement créé
@@ -173,6 +185,13 @@ class DeploymentService:
         
         # Vérifier que le template existe
         template = await self.vm_service.get_template(template_id)
+        
+        # Configuration par défaut des services si non spécifiée
+        default_services = {
+            "enable_rdp": True,
+            "enable_winrm": True,
+            "enable_ssh": False,
+        }
         
         # Préparer la configuration
         config = {
@@ -186,6 +205,11 @@ class DeploymentService:
             "admin_password": admin_password or settings.default_admin_password.get_secret_value(),
             "ip_config": ip_config or {},
             "domain_join": domain_join,
+            "services": services or default_services,
+            "security": security or {},
+            "software_profile": software_profile,
+            "packages": packages or [],
+            "enable_windows_update": enable_windows_update,
             "post_install_commands": post_install_commands or [],
             "template": {
                 "id": str(template.id),
@@ -288,7 +312,16 @@ class DeploymentService:
         sur le disque, évitant l'installation interactive et le prompt
         "Press any key to boot from CD or DVD".
         
-        Temps de déploiement: ~2-3 minutes au lieu de 15-30 minutes.
+        Workflow complet:
+        1. Validation
+        2. Création VM (VHDX vide)
+        3. Déploiement DISM
+        4. Configuration réseau (via unattend)
+        5. Démarrage VM
+        6. Attente VM prête (heartbeat + PowerShell Direct)
+        7. Post-configuration (services, sécurité)
+        8. Installation logiciels
+        9. Finalisation
         """
         config = deployment.config
         
@@ -328,7 +361,73 @@ class DeploymentService:
         await self._log_step(deployment, DeploymentStep.STARTING_INSTALLATION, "Starting VM")
         await self.vm_service.start_vm(vm.id)
         
-        # 6. Marquer comme terminé (DISM = installation déjà faite)
+        # 6. Attendre que la VM soit prête (heartbeat + PowerShell Direct)
+        await self._update_deployment_status(
+            deployment, DeploymentStatus.IN_PROGRESS, DeploymentStep.WAITING_VM_READY
+        )
+        await self._log_step(
+            deployment, DeploymentStep.WAITING_VM_READY, 
+            "Waiting for Windows to complete OOBE and become accessible..."
+        )
+        
+        vm_ready = await self._wait_for_vm_ready(deployment, vm)
+        
+        if not vm_ready:
+            await self._log_step(
+                deployment, DeploymentStep.WAITING_VM_READY,
+                "VM not accessible via PowerShell Direct. Skipping post-install configuration.",
+                "warning"
+            )
+            # Terminer quand même le déploiement
+            await self._update_deployment_status(
+                deployment,
+                DeploymentStatus.COMPLETED,
+                DeploymentStep.COMPLETED,
+            )
+            await self._log_step(
+                deployment,
+                DeploymentStep.COMPLETED,
+                "Deployment completed (VM running but post-install skipped).",
+            )
+            return
+        
+        await self._log_step(
+            deployment, DeploymentStep.WAITING_VM_READY, 
+            "VM is ready and accessible via PowerShell Direct"
+        )
+        
+        # 7. Post-configuration (services, sécurité, etc.)
+        await self._update_deployment_status(
+            deployment, DeploymentStatus.IN_PROGRESS, DeploymentStep.POST_CONFIGURATION
+        )
+        await self._log_step(
+            deployment, DeploymentStep.POST_CONFIGURATION, 
+            "Configuring services and security settings..."
+        )
+        await self._execute_post_configuration(deployment, vm)
+        
+        # 8. Installation des logiciels
+        software_profile = config.get("software_profile")
+        packages = config.get("packages", [])
+        
+        if software_profile or packages:
+            await self._update_deployment_status(
+                deployment, DeploymentStatus.IN_PROGRESS, DeploymentStep.INSTALLING_SOFTWARE
+            )
+            await self._log_step(
+                deployment, DeploymentStep.INSTALLING_SOFTWARE, 
+                f"Installing software (profile: {software_profile or 'custom'})..."
+            )
+            await self._install_software(deployment, vm)
+        
+        # 9. Finalisation
+        await self._update_deployment_status(
+            deployment, DeploymentStatus.IN_PROGRESS, DeploymentStep.FINALIZING
+        )
+        await self._log_step(deployment, DeploymentStep.FINALIZING, "Finalizing deployment...")
+        await self._finalize_deployment(deployment, vm)
+        
+        # Terminé !
         await self._update_deployment_status(
             deployment,
             DeploymentStatus.COMPLETED,
@@ -337,13 +436,14 @@ class DeploymentService:
         await self._log_step(
             deployment,
             DeploymentStep.COMPLETED,
-            "Deployment completed. VM is booting to Windows desktop.",
+            "Deployment completed successfully. VM is ready for use.",
         )
         
         logger.info(
-            "deployment_completed_dism",
+            "deployment_completed_full",
             deployment_id=str(deployment.id),
             vm_id=str(vm.id),
+            software_installed=bool(software_profile or packages),
         )
 
     async def _validate_deployment(self, deployment: Deployment) -> None:
@@ -590,6 +690,384 @@ class DeploymentService:
                 )
         finally:
             client.close()
+
+    async def _wait_for_vm_ready(
+        self,
+        deployment: Deployment,
+        vm: VirtualMachine,
+        timeout: int = 600,
+    ) -> bool:
+        """
+        Attend que la VM soit prête et accessible via PowerShell Direct.
+        
+        Args:
+            deployment: Le déploiement en cours
+            vm: La VM créée
+            timeout: Timeout en secondes (défaut: 10 minutes)
+            
+        Returns:
+            True si la VM est accessible, False sinon
+        """
+        config = deployment.config
+        admin_password = config.get("admin_password", "")
+        
+        try:
+            client = await self.vm_service._get_hypervisor_client(deployment.hypervisor_id)
+            
+            vm_identifier = vm.hypervisor_vm_id or vm.name
+            credentials = ("Administrator", admin_password)
+            
+            # Attendre que la VM soit prête
+            is_ready = await client.wait_for_vm_ready(
+                vm_id=vm_identifier,
+                vm_credentials=credentials,
+                timeout=timeout,
+                check_interval=15,
+            )
+            
+            return is_ready
+            
+        except Exception as e:
+            logger.warning(
+                "deployment_wait_vm_ready_failed",
+                deployment_id=str(deployment.id),
+                error=str(e),
+            )
+            return False
+
+    async def _execute_post_configuration(
+        self,
+        deployment: Deployment,
+        vm: VirtualMachine,
+    ) -> None:
+        """
+        Exécute les configurations post-installation.
+        
+        - Active/configure les services (SSH, RDP, WinRM)
+        - Configure les politiques de sécurité
+        - Configure le firewall
+        """
+        from src.domain.post_install_service import PostInstallService
+        
+        config = deployment.config
+        admin_password = config.get("admin_password", "")
+        credentials = ("Administrator", admin_password)
+        
+        try:
+            client = await self.vm_service._get_hypervisor_client(deployment.hypervisor_id)
+            post_install = PostInstallService(client)
+            
+            vm_name = vm.hypervisor_vm_id or vm.name
+            services_config = config.get("services", {})
+            
+            # 1. Installer SSH si demandé
+            if services_config.get("enable_ssh", False):
+                await self._log_step(
+                    deployment, DeploymentStep.POST_CONFIGURATION,
+                    "Installing OpenSSH Server...", "info"
+                )
+                result = await post_install.install_ssh_server(vm_name, credentials)
+                if result.success:
+                    await self._log_step(
+                        deployment, DeploymentStep.POST_CONFIGURATION,
+                        f"SSH Server installed: {result.status}", "info"
+                    )
+                else:
+                    await self._log_step(
+                        deployment, DeploymentStep.POST_CONFIGURATION,
+                        f"SSH installation failed: {result.error}", "warning"
+                    )
+            
+            # 2. Configurer WinRM si demandé
+            if services_config.get("enable_winrm", True):
+                await self._log_step(
+                    deployment, DeploymentStep.POST_CONFIGURATION,
+                    "Configuring WinRM service...", "info"
+                )
+                result = await post_install.configure_service(
+                    vm_name, credentials, "WinRM", "Automatic", True
+                )
+                if result.success:
+                    await self._log_step(
+                        deployment, DeploymentStep.POST_CONFIGURATION,
+                        "WinRM configured successfully", "info"
+                    )
+            
+            # 3. Configurer RDP si demandé
+            if services_config.get("enable_rdp", True):
+                await self._log_step(
+                    deployment, DeploymentStep.POST_CONFIGURATION,
+                    "Configuring Remote Desktop...", "info"
+                )
+                # Activer RDP via registre
+                rdp_script = """
+                Set-ItemProperty -Path 'HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server' -Name "fDenyTSConnections" -Value 0
+                Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+                """
+                await client.execute_in_vm(vm_name, rdp_script, credentials)
+                await self._log_step(
+                    deployment, DeploymentStep.POST_CONFIGURATION,
+                    "Remote Desktop enabled", "info"
+                )
+            
+            # 4. Configurer les politiques de mot de passe
+            security_config = config.get("security", {})
+            if security_config.get("configure_password_policy", False):
+                await self._log_step(
+                    deployment, DeploymentStep.POST_CONFIGURATION,
+                    "Configuring password policy...", "info"
+                )
+                result = await post_install.configure_password_policy(
+                    vm_name, credentials,
+                    min_length=security_config.get("password_min_length", 8),
+                    complexity_enabled=security_config.get("password_complexity", True),
+                    max_age_days=security_config.get("password_max_age", 90),
+                )
+                if result.success:
+                    await self._log_step(
+                        deployment, DeploymentStep.POST_CONFIGURATION,
+                        "Password policy configured", "info"
+                    )
+            
+            # 5. Installer les mises à jour Windows si demandé
+            if config.get("enable_windows_update", False):
+                await self._log_step(
+                    deployment, DeploymentStep.POST_CONFIGURATION,
+                    "Checking for Windows updates...", "info"
+                )
+                result = await post_install.install_windows_updates(
+                    vm_name, credentials,
+                    auto_reboot=False,  # Pas de reboot automatique pendant le déploiement
+                )
+                await self._log_step(
+                    deployment, DeploymentStep.POST_CONFIGURATION,
+                    f"Windows Update: {result.updates_installed} updates installed, reboot required: {result.reboot_required}",
+                    "info"
+                )
+            
+            logger.info(
+                "deployment_post_config_complete",
+                deployment_id=str(deployment.id),
+                services_configured=list(services_config.keys()),
+            )
+            
+        except Exception as e:
+            logger.error(
+                "deployment_post_config_error",
+                deployment_id=str(deployment.id),
+                error=str(e),
+            )
+            await self._log_step(
+                deployment, DeploymentStep.POST_CONFIGURATION,
+                f"Post-configuration error: {e}", "warning"
+            )
+
+    async def _install_software(
+        self,
+        deployment: Deployment,
+        vm: VirtualMachine,
+    ) -> None:
+        """
+        Installe les logiciels demandés via Chocolatey.
+        
+        Supporte les profils prédéfinis et les packages personnalisés.
+        """
+        from src.domain.software_install_service import (
+            SoftwareInstallService,
+            SoftwarePackage,
+            PackageManager,
+            SOFTWARE_PROFILES,
+        )
+        
+        config = deployment.config
+        admin_password = config.get("admin_password", "")
+        credentials = ("Administrator", admin_password)
+        
+        try:
+            client = await self.vm_service._get_hypervisor_client(deployment.hypervisor_id)
+            software_service = SoftwareInstallService(client)
+            
+            vm_name = vm.hypervisor_vm_id or vm.name
+            
+            # 1. S'assurer que Chocolatey est installé
+            await self._log_step(
+                deployment, DeploymentStep.INSTALLING_SOFTWARE,
+                "Ensuring Chocolatey is installed...", "info"
+            )
+            choco_ready = await software_service.ensure_chocolatey_installed(vm_name, credentials)
+            
+            if not choco_ready:
+                await self._log_step(
+                    deployment, DeploymentStep.INSTALLING_SOFTWARE,
+                    "Failed to install Chocolatey. Skipping software installation.", "error"
+                )
+                return
+            
+            await self._log_step(
+                deployment, DeploymentStep.INSTALLING_SOFTWARE,
+                "Chocolatey is ready", "info"
+            )
+            
+            # 2. Construire la liste des packages à installer
+            packages_to_install: list[SoftwarePackage] = []
+            
+            # Packages du profil
+            software_profile = config.get("software_profile")
+            if software_profile and software_profile in SOFTWARE_PROFILES:
+                profile_packages = SOFTWARE_PROFILES[software_profile]
+                packages_to_install.extend(profile_packages)
+                await self._log_step(
+                    deployment, DeploymentStep.INSTALLING_SOFTWARE,
+                    f"Profile '{software_profile}': {len(profile_packages)} packages", "info"
+                )
+            
+            # Packages personnalisés
+            custom_packages = config.get("packages", [])
+            for pkg_name in custom_packages:
+                if not any(p.name == pkg_name for p in packages_to_install):
+                    packages_to_install.append(
+                        SoftwarePackage(name=pkg_name, package_manager=PackageManager.CHOCOLATEY)
+                    )
+            
+            if not packages_to_install:
+                await self._log_step(
+                    deployment, DeploymentStep.INSTALLING_SOFTWARE,
+                    "No software packages to install", "info"
+                )
+                return
+            
+            # 3. Installer les packages
+            await self._log_step(
+                deployment, DeploymentStep.INSTALLING_SOFTWARE,
+                f"Installing {len(packages_to_install)} packages...", "info"
+            )
+            
+            result = await software_service.install_packages(
+                vm_name, credentials, packages_to_install,
+                continue_on_error=True,
+            )
+            
+            # 4. Logger les résultats
+            for pkg_result in result.results:
+                status_emoji = "✅" if pkg_result.status.value == "installed" else "⏭️" if pkg_result.status.value == "skipped" else "❌"
+                version_info = f" v{pkg_result.version_installed}" if pkg_result.version_installed else ""
+                error_info = f" - {pkg_result.error}" if pkg_result.error else ""
+                await self._log_step(
+                    deployment, DeploymentStep.INSTALLING_SOFTWARE,
+                    f"{status_emoji} {pkg_result.package_name}{version_info}{error_info}",
+                    "info" if pkg_result.status.value != "failed" else "warning"
+                )
+            
+            summary = f"Software installation: {result.installed} installed, {result.skipped} skipped, {result.failed} failed"
+            if result.reboot_required:
+                summary += " (reboot required)"
+            
+            await self._log_step(
+                deployment, DeploymentStep.INSTALLING_SOFTWARE,
+                summary, "info"
+            )
+            
+            logger.info(
+                "deployment_software_install_complete",
+                deployment_id=str(deployment.id),
+                installed=result.installed,
+                failed=result.failed,
+                reboot_required=result.reboot_required,
+            )
+            
+        except Exception as e:
+            logger.error(
+                "deployment_software_install_error",
+                deployment_id=str(deployment.id),
+                error=str(e),
+            )
+            await self._log_step(
+                deployment, DeploymentStep.INSTALLING_SOFTWARE,
+                f"Software installation error: {e}", "warning"
+            )
+
+    async def _finalize_deployment(
+        self,
+        deployment: Deployment,
+        vm: VirtualMachine,
+    ) -> None:
+        """
+        Finalise le déploiement.
+        
+        - Nettoie les fichiers temporaires
+        - Met à jour les informations réseau de la VM
+        - Génère un rapport final
+        """
+        config = deployment.config
+        
+        try:
+            client = await self.vm_service._get_hypervisor_client(deployment.hypervisor_id)
+            vm_name = vm.hypervisor_vm_id or vm.name
+            
+            # 1. Récupérer les infos réseau de la VM
+            await self._log_step(
+                deployment, DeploymentStep.FINALIZING,
+                "Retrieving network information...", "info"
+            )
+            
+            try:
+                network_info = await client.get_vm_network_summary(vm_name)
+                if network_info.get("ip_addresses"):
+                    ip = network_info["ip_addresses"][0]
+                    await self._log_step(
+                        deployment, DeploymentStep.FINALIZING,
+                        f"VM IP address: {ip}", "info"
+                    )
+                    # Mettre à jour la VM en base
+                    vm.ip_address = ip
+                    await self.db.flush()
+            except Exception as e:
+                logger.warning("deployment_network_info_error", error=str(e))
+            
+            # 2. Nettoyer les fichiers temporaires (ISO OEMDRV, etc.)
+            await self._log_step(
+                deployment, DeploymentStep.FINALIZING,
+                "Cleaning up temporary files...", "info"
+            )
+            
+            try:
+                cleanup_result = await client.cleanup_post_install(vm_name)
+                if cleanup_result.get("iso_unmounted"):
+                    await self._log_step(
+                        deployment, DeploymentStep.FINALIZING,
+                        "Installation media unmounted", "info"
+                    )
+            except Exception as e:
+                logger.warning("deployment_cleanup_error", error=str(e))
+            
+            # 3. Résumé du déploiement
+            services = config.get("services", {})
+            software_profile = config.get("software_profile", "")
+            
+            summary_lines = [
+                f"VM Name: {config['vm_name']}",
+                f"Hostname: {config.get('hostname', config['vm_name'])}",
+            ]
+            
+            if services:
+                enabled_services = [k.replace("enable_", "") for k, v in services.items() if v]
+                if enabled_services:
+                    summary_lines.append(f"Services: {', '.join(enabled_services)}")
+            
+            if software_profile:
+                summary_lines.append(f"Software profile: {software_profile}")
+            
+            await self._log_step(
+                deployment, DeploymentStep.FINALIZING,
+                "Deployment summary:\n" + "\n".join(summary_lines), "info"
+            )
+            
+        except Exception as e:
+            logger.warning(
+                "deployment_finalize_error",
+                deployment_id=str(deployment.id),
+                error=str(e),
+            )
 
     async def get_deployment(self, deployment_id: UUID) -> Deployment:
         """Récupère un déploiement par son ID."""

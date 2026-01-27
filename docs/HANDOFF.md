@@ -5,6 +5,17 @@
 
 ---
 
+## ⚠️ Identifiants par Défaut des VMs
+
+| Champ | Valeur |
+|-------|--------|
+| **Utilisateur** | `.\Administrateur` |
+| **Mot de passe** | `TempP@ss123!` |
+
+> Le préfixe `.\` indique un compte local. Sur Windows FR, le compte admin s'appelle "Administrateur".
+
+---
+
 ## État Actuel du Projet
 
 ### Ce qui fonctionne ✅

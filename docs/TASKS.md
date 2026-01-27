@@ -220,6 +220,9 @@
 | 4.3.2 | Activer WinRM (Windows) | ✅ | Agent | Enable-PSRemoting dans unattend |
 | 4.3.3 | Activer RDP (Windows) | ✅ | Agent | Firewall rule dans unattend |
 | 4.3.4 | Services personnalisés | ✅ | Agent | configure_service(), install_ssh_server() |
+| 4.3.5 | Configuration Zabbix Agent | ✅ | Agent | configure_zabbix_agent() - server, hostname, port |
+| 4.3.6 | Configuration SQL Server | ✅ | Agent | configure_sql_server() - mixed mode, TCP/IP |
+| 4.3.7 | Configuration IIS | ✅ | Agent | configure_iis() - site, binding, port |
 
 ### 4.4 Mises à Jour Système
 | ID | Tâche | Statut | Assigné | Notes |
@@ -294,9 +297,11 @@
 | ID | Tâche | Statut | Assigné | Notes |
 |----|-------|--------|---------|-------|
 | 6.1.1 | State machine déploiement | ✅ | Agent | DeploymentService avec statuts |
-| 6.1.2 | Chaînage tâches Celery | ⬜ | - | - |
-| 6.1.3 | Parallélisation possible | ⬜ | - | - |
-| 6.1.4 | Points de checkpoint | ✅ | Agent | DeploymentLog par étape |
+| 6.1.2 | Intégration post-install workflow | ✅ | Agent | WAITING_VM_READY → POST_CONFIG → SOFTWARE_INSTALL |
+| 6.1.3 | Chaînage tâches Celery | ⬜ | - | - |
+| 6.1.4 | Parallélisation possible | ⬜ | - | - |
+| 6.1.5 | Points de checkpoint | ✅ | Agent | DeploymentLog par étape |
+| 6.1.6 | Endpoint post-install manuel | ✅ | Agent | POST /vms/{id}/post-install |
 
 ### 6.2 Monitoring Temps Réel (Backend)
 | ID | Tâche | Statut | Assigné | Notes |
@@ -427,13 +432,13 @@
 | Phase 1 : Fondations | 31 | 0 | 0 | 31 | **100%** |
 | Phase 2 : Création VMs | 32 | 0 | 0 | 32 | **100%** |
 | Phase 3 : Installation OS | 26 | 4 | 0 | 22 | **85%** |
-| Phase 4 : Post-Installation | 23 | 3 | 0 | 20 | **87%** |
-| Phase 5 : Logiciels | 20 | 7 | 0 | 13 | **65%** |
-| Phase 6 : Orchestration | 8 | 2 | 0 | 6 | **75%** |
+| Phase 4 : Post-Installation | 26 | 0 | 0 | 26 | **100%** |
+| Phase 5 : Logiciels | 20 | 4 | 0 | 16 | **80%** |
+| Phase 6 : Orchestration | 10 | 2 | 0 | 8 | **80%** |
 | Phase 7 : Interface Web | 38 | 9 | 0 | 29 | **76%** |
 | Phase 8 : Industrialisation | 13 | 12 | 0 | 1 | **8%** |
 | Phase 9 : VMware (futur) | 4 | 4 | 0 | 0 | **0%** |
-| **TOTAL** | **195** | **41** | **0** | **154** | **~79%** |
+| **TOTAL** | **200** | **35** | **0** | **165** | **~83%** |
 
 ---
 
@@ -444,7 +449,7 @@
 - OS: Windows Server 2022 Standard Evaluation (Desktop Experience)
 - Config: 2 vCPU, 4 GB RAM, 60 GB Disk (49 GB free)
 - IP: 10.250.0.83
-- Credentials: Administrateur / Admin123!
+- Credentials: .\Administrateur / TempP@ss123!
 - Heartbeat: OkApplicationsUnknown ✅
 - PowerShell Direct: Fonctionnel ✅
 - Guest Services: Enabled ✅ (Copy-VMFile fonctionnel)

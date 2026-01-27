@@ -185,6 +185,25 @@ export interface DeploymentConfig {
     dns_server_1?: string;
     dns_server_2?: string;
   };
+  // Services à activer
+  services?: {
+    enable_rdp?: boolean;
+    enable_winrm?: boolean;
+    enable_ssh?: boolean;
+  };
+  // Configuration sécurité
+  security?: {
+    configure_password_policy?: boolean;
+    password_min_length?: number;
+    password_complexity?: boolean;
+    password_max_age?: number;
+  };
+  // Logiciels
+  software_profile?: string; // minimal, tools, development, webserver, database, monitoring
+  packages?: string[]; // Packages Chocolatey supplémentaires
+  // Windows Update
+  enable_windows_update?: boolean;
+  // Commandes post-install personnalisées
   post_install_commands?: string[];
   network?: {
     dhcp: boolean;

@@ -498,6 +498,16 @@ export const deploymentsApi = {
       vhdx_path: data.config.vhdx_path, // Emplacement personnalisé du VHDX
       ip_config: data.config.ip_config,
       domain_join: data.config.domain_join,
+      // Services (RDP, WinRM, SSH)
+      services: data.config.services,
+      // Sécurité
+      security: data.config.security,
+      // Logiciels
+      software_profile: data.config.software_profile,
+      packages: data.config.packages,
+      // Windows Update
+      enable_windows_update: data.config.enable_windows_update,
+      // Commandes post-install personnalisées
       post_install_commands: data.config.post_install_commands,
     };
     const response = await apiClient.post<DeploymentBackend>('/deployments', payload);

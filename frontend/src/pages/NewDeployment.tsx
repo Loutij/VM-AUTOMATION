@@ -292,7 +292,7 @@ export function NewDeployment() {
     }
 
     // Construire la config complète
-    const config: DeploymentConfig & Record<string, unknown> = {
+    const config: DeploymentConfig = {
       vm_name: formData.vm_name,
       cpu_count: formData.cpu_count,
       memory_mb: formData.memory_mb,
@@ -302,11 +302,6 @@ export function NewDeployment() {
       admin_password: formData.admin_password || undefined,
       network_switch: formData.network_switch || undefined,
     };
-
-    // Ajouter VLAN si défini
-    if (formData.vlan_id) {
-      config.vlan_id = formData.vlan_id;
-    }
 
     // Configuration IP
     if (formData.use_static_ip) {
@@ -320,7 +315,7 @@ export function NewDeployment() {
       };
     }
 
-    // Services
+    // Services à activer (RDP, WinRM, SSH)
     config.services = {
       enable_rdp: formData.enable_rdp,
       enable_winrm: formData.enable_winrm,
@@ -330,13 +325,15 @@ export function NewDeployment() {
     // Windows Update
     config.enable_windows_update = formData.enable_windows_update;
 
-    // Logiciels
+    // Profil logiciels et packages
     if (formData.software_profile) {
       config.software_profile = formData.software_profile;
-      const profile = SOFTWARE_PROFILES.find((p) => p.id === formData.software_profile);
-      if (profile) {
-        config.packages = profile.packages;
-      }
+      // Les packages du profil seront résolus côté backend
+    }
+    
+    // Packages personnalisés supplémentaires
+    if (formData.custom_packages && formData.custom_packages.length > 0) {
+      config.packages = formData.custom_packages;
     }
 
     // Domaine AD
@@ -349,7 +346,7 @@ export function NewDeployment() {
       };
     }
 
-    // Commandes post-install
+    // Commandes post-install personnalisées
     if (formData.post_install_commands.length > 0) {
       config.post_install_commands = formData.post_install_commands;
     }
@@ -358,7 +355,7 @@ export function NewDeployment() {
       name: formData.vm_name,
       hypervisor_id: formData.hypervisor_id,
       template_id: formData.template_id,
-      config: config as DeploymentConfig,
+      config: config,
     });
   };
 

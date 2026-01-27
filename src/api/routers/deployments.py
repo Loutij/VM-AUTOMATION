@@ -47,6 +47,23 @@ class DomainJoinConfig(BaseModel):
     ou: str | None = Field(None, description="OU cible")
 
 
+class ServicesConfig(BaseModel):
+    """Configuration des services à activer."""
+
+    enable_rdp: bool = Field(default=True, description="Activer Remote Desktop")
+    enable_winrm: bool = Field(default=True, description="Activer WinRM")
+    enable_ssh: bool = Field(default=False, description="Installer OpenSSH Server")
+
+
+class SecurityConfig(BaseModel):
+    """Configuration de sécurité."""
+
+    configure_password_policy: bool = Field(default=False, description="Configurer les politiques de mot de passe")
+    password_min_length: int = Field(default=8, ge=4, le=20, description="Longueur minimale du mot de passe")
+    password_complexity: bool = Field(default=True, description="Exiger la complexité")
+    password_max_age: int = Field(default=90, ge=0, le=365, description="Âge maximum (jours, 0=jamais)")
+
+
 class DeploymentCreate(BaseModel):
     """Schéma pour créer un déploiement."""
 
@@ -62,7 +79,17 @@ class DeploymentCreate(BaseModel):
     admin_password: str | None = Field(None, description="Mot de passe admin")
     ip_config: IPConfig | None = Field(None, description="Configuration IP")
     domain_join: DomainJoinConfig | None = Field(None, description="Jonction AD")
-    post_install_commands: list[str] | None = Field(None, description="Commandes post-install")
+    # Services
+    services: ServicesConfig | None = Field(None, description="Services à activer (RDP, WinRM, SSH)")
+    # Sécurité
+    security: SecurityConfig | None = Field(None, description="Configuration de sécurité")
+    # Logiciels
+    software_profile: str | None = Field(None, description="Profil logiciel (minimal, tools, development, webserver, database, monitoring)")
+    packages: list[str] | None = Field(None, description="Packages Chocolatey supplémentaires")
+    # Windows Update
+    enable_windows_update: bool = Field(default=False, description="Installer les mises à jour Windows")
+    # Post-install
+    post_install_commands: list[str] | None = Field(None, description="Commandes post-install personnalisées")
     auto_start: bool = Field(default=True, description="Démarrer automatiquement")
 
 
@@ -203,6 +230,16 @@ async def create_deployment(
     if deployment.domain_join:
         domain_join = deployment.domain_join.model_dump()
     
+    # Préparer la config services
+    services = None
+    if deployment.services:
+        services = deployment.services.model_dump()
+    
+    # Préparer la config sécurité
+    security = None
+    if deployment.security:
+        security = deployment.security.model_dump()
+    
     # Créer le déploiement
     created = await service.create_deployment(
         vm_name=deployment.vm_name,
@@ -217,6 +254,11 @@ async def create_deployment(
         admin_password=deployment.admin_password,
         ip_config=ip_config,
         domain_join=domain_join,
+        services=services,
+        security=security,
+        software_profile=deployment.software_profile,
+        packages=deployment.packages,
+        enable_windows_update=deployment.enable_windows_update,
         post_install_commands=deployment.post_install_commands,
     )
     
