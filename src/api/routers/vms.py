@@ -544,6 +544,7 @@ class PostInstallRequest(BaseModel):
     # Logiciels
     software_profile: str | None = Field(None, description="Profil logiciel (minimal, tools, development, webserver, database, monitoring)")
     packages: list[str] | None = Field(None, description="Packages Chocolatey à installer")
+    package_configs: dict[str, dict[str, Any]] | None = Field(None, description="Configurations des packages (ex: {'zabbix-agent2': {'server': '172.16.0.126', 'hostname': 'SRV-01'}})")
     # Windows Update
     install_updates: bool = Field(default=False, description="Installer les mises à jour Windows")
 
@@ -714,6 +715,28 @@ async def execute_post_install(
                 
             except Exception as e:
                 errors.append(f"Software installation: {str(e)}")
+        
+        # 4b. Configurer les packages avec leurs paramètres
+        if config.package_configs:
+            from src.domain.software_catalog import get_software_by_name
+            
+            for pkg_name, pkg_config in config.package_configs.items():
+                software_def = get_software_by_name(pkg_name)
+                if software_def and software_def.get("post_install_script"):
+                    script = software_def["post_install_script"]
+                    # Remplacer les placeholders par les valeurs configurées
+                    for key, value in pkg_config.items():
+                        script = script.replace(f"{{{key}}}", str(value) if value else "")
+                    
+                    try:
+                        logger.info("post_install_configuring_package", vm_name=vm_name, package=pkg_name)
+                        result_script = await client.execute_in_vm(vm_name, script, credentials, timeout=120)
+                        if result_script.success:
+                            steps_completed.append(f"Configured {pkg_name}")
+                        else:
+                            errors.append(f"{pkg_name} config: {result_script.error}")
+                    except Exception as cfg_e:
+                        errors.append(f"{pkg_name} config: {str(cfg_e)}")
         
         # 5. Windows Update
         if config.install_updates:

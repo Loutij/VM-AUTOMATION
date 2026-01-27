@@ -314,7 +314,8 @@ class SoftwareInstallService:
         extra_args = package.install_args or ""
         
         # Script minifié pour éviter la limite de ligne de commande
-        script = f"""$n='{package.name}';$i=choco list --exact $n --limit-output;if($i){{@{{Status='skipped';VersionInstalled=($i-split'\\|')[1];Error=$null;Duration=0}}|ConvertTo-Json;return}};$r=choco install $n -y --no-progress {version_param} {extra_args} 2>&1;$c=$LASTEXITCODE;if($c-eq0){{$v=(choco list --exact $n --limit-output)-split'\\|';@{{Status='installed';VersionInstalled=$v[1];Error=$null;Duration=0}}|ConvertTo-Json}}else{{@{{Status='failed';VersionInstalled=$null;Error="Exit:$c"}}|ConvertTo-Json}}"""
+        # IMPORTANT: Utiliser le chemin complet vers choco.exe car le PATH n'est pas toujours à jour après installation
+        script = f"""$c="$env:ProgramData\\chocolatey\\bin\\choco.exe";$n='{package.name}';$i=&$c list --exact $n --limit-output;if($i){{@{{Status='skipped';VersionInstalled=($i-split'\\|')[1];Error=$null;Duration=0}}|ConvertTo-Json;return}};$r=&$c install $n -y --no-progress {version_param} {extra_args} 2>&1;$x=$LASTEXITCODE;if($x-eq0){{$v=(&$c list --exact $n --limit-output)-split'\\|';@{{Status='installed';VersionInstalled=$v[1];Error=$null;Duration=0}}|ConvertTo-Json}}else{{@{{Status='failed';VersionInstalled=$null;Error="Exit:$x"}}|ConvertTo-Json}}"""
         
         logger.info(
             "software_installing_package",
