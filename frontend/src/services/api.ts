@@ -436,6 +436,7 @@ interface DeploymentBackend {
   os_template_id: string;
   vm_id: string | null;
   status: string;
+  progress: number;
   current_step: string | null;
   error_message: string | null;
   config: Record<string, unknown>;
@@ -446,18 +447,6 @@ interface DeploymentBackend {
 
 // Mapper backend vers frontend
 function mapDeployment(d: DeploymentBackend): Deployment {
-  // Calculer la progression basée sur le statut
-  const progressMap: Record<string, number> = {
-    pending: 0,
-    creating_vm: 20,
-    installing_os: 50,
-    post_install: 75,
-    installing_software: 90,
-    completed: 100,
-    failed: 0,
-    cancelled: 0,
-  };
-  
   return {
     id: d.id,
     vm_name: d.vm_name,
@@ -466,7 +455,7 @@ function mapDeployment(d: DeploymentBackend): Deployment {
     os_template_id: d.os_template_id,
     vm_id: d.vm_id || undefined,
     status: d.status as Deployment['status'],
-    progress: progressMap[d.status] || 0,
+    progress: d.progress ?? 0,  // Utilise la progression du backend
     error_message: d.error_message || undefined,
     config: {
       vm_name: d.vm_name,

@@ -247,13 +247,25 @@ export interface DashboardStats {
 }
 
 export interface HealthCheck {
-  status: 'healthy' | 'unhealthy';
-  database: boolean;
-  redis: boolean;
-  hypervisors: {
-    name: string;
-    connected: boolean;
-  }[];
+  status: 'healthy' | 'unhealthy' | 'degraded';
+  timestamp: string;
+  version: string;
+  environment: string;
+  checks: {
+    database: {
+      status: 'healthy' | 'unhealthy';
+      host?: string;
+      error?: string;
+    };
+    redis: {
+      status: 'healthy' | 'unhealthy' | 'unknown';
+      message?: string;
+    };
+    celery: {
+      status: 'healthy' | 'unhealthy' | 'unknown';
+      message?: string;
+    };
+  };
 }
 
 // Types pour les switches virtuels

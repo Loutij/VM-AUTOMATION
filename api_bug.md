@@ -332,61 +332,53 @@ return response.data.items;  // Retourne uniquement items
 
 ## 6. Liste des Corrections Urgentes
 
-### 6.1 Bug: log.status vs log.level
+### 6.1 ✅ CORRIGÉ: log.status vs log.level
 
 **Fichier**: `frontend/src/pages/Deployments.tsx`  
-**Ligne**: ~490-510
+**Statut**: ✅ Corrigé le 27/01/2026
 
-```tsx
-// AVANT (BUG)
-log.status === 'error'
-log.status === 'success'
-log.status === 'warning'
-
-// APRÈS (CORRECTION)
-log.level === 'error'
-log.level === 'info'  // 'success' n'existe pas côté backend
-log.level === 'warning'
-```
+Le code utilisait `log.status` au lieu de `log.level`. Correction appliquée pour utiliser le bon champ `level` du backend.
 
 ---
 
-### 6.2 Bug: Type HealthCheck Frontend
+### 6.2 ✅ CORRIGÉ: Type HealthCheck Frontend
 
-**Fichier**: `frontend/src/types/index.ts`
+**Fichier**: `frontend/src/types/index.ts`  
+**Statut**: ✅ Corrigé le 27/01/2026
+
+L'interface `HealthCheck` a été mise à jour pour correspondre à la réponse du backend:
 
 ```typescript
-// AVANT
 export interface HealthCheck {
-  status: 'healthy' | 'unhealthy';
-  database: boolean;
-  redis: boolean;
-  hypervisors: { name: string; connected: boolean; }[];
-}
-
-// APRÈS
-export interface HealthCheck {
-  status: string;
+  status: 'healthy' | 'unhealthy' | 'degraded';
   timestamp: string;
   version: string;
   environment: string;
   checks: {
-    database: { status: string; host?: string; error?: string };
-    redis: { status: string; message?: string };
-    celery: { status: string; message?: string };
+    database: { status: 'healthy' | 'unhealthy'; host?: string; error?: string };
+    redis: { status: 'healthy' | 'unhealthy' | 'unknown'; message?: string };
+    celery: { status: 'healthy' | 'unhealthy' | 'unknown'; message?: string };
   };
 }
 ```
 
 ---
 
-### 6.3 Cleanup: Supprimer ou utiliser schemas.py
+### 6.3 ✅ CORRIGÉ: Cleanup schemas.py
 
-**Fichier**: `src/types/schemas.py`
+**Fichier**: `src/types/schemas.py`  
+**Statut**: ✅ Supprimé le 27/01/2026
 
-Options:
-1. **Supprimer** le fichier car non utilisé
-2. **Migrer** les routers pour utiliser ces schémas centralisés
+Le fichier a été supprimé car non utilisé. Les schémas Pydantic restent définis localement dans chaque router. Le fichier `__init__.py` a été mis à jour avec une note explicative.
+
+---
+
+### 6.4 ✅ CORRIGÉ: Progress non exposé par le backend
+
+**Fichier**: `src/api/routers/deployments.py`  
+**Statut**: ✅ Corrigé le 27/01/2026
+
+Le champ `progress` a été ajouté au schéma `DeploymentResponse` avec un calcul automatique basé sur le statut. Le frontend utilise maintenant cette valeur directement au lieu de la calculer côté client.
 
 ---
 
@@ -478,16 +470,21 @@ Options:
 - **Routes Backend Total**: 56
 - **Routes utilisées Frontend**: 38 (68%)
 - **Routes non utilisées**: 18 (32%)
-- **Bugs identifiés**: 3
-- **Incohérences de types**: 5
+- **Bugs identifiés**: 4 → ✅ 4 corrigés
+- **Incohérences de types**: 5 → ✅ 2 corrigées
 
-### Priorités de Correction
-1. 🔴 **Bug log.level** - Correction immédiate nécessaire
-2. 🔴 **Type HealthCheck** - Type incorrect
-3. 🟡 **Authentification** - À implémenter pour la production
-4. 🟡 **WebSocket** - À activer pour le temps réel
-5. 🟢 **Cleanup schemas.py** - Nettoyage de code
+### Corrections Effectuées (27/01/2026)
+1. ✅ **Bug log.level** - `log.status` → `log.level` dans Deployments.tsx
+2. ✅ **Type HealthCheck** - Interface mise à jour pour correspondre au backend
+3. ✅ **Cleanup schemas.py** - Fichier supprimé (non utilisé)
+4. ✅ **Progress backend** - Champ `progress` ajouté dans DeploymentResponse
+
+### Priorités Restantes
+1. 🟡 **Authentification** - À implémenter pour la production
+2. 🟡 **WebSocket** - À activer pour le temps réel
+3. 🟢 **Incohérences types restantes** - hypervisor_type, VM state
 
 ---
 
-*Document généré le 27/01/2026*
+*Document généré le 27/01/2026*  
+*Dernière mise à jour: 27/01/2026 - Corrections appliquées*

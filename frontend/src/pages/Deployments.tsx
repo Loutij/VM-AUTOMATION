@@ -488,11 +488,11 @@ export function Deployments() {
                 <div
                   key={log.id}
                   className={`p-3 rounded-lg text-sm ${
-                    log.status === 'error'
+                    log.level === 'error'
                       ? 'bg-red-500/10 border border-red-500/20'
-                      : log.status === 'success'
+                      : log.level === 'info'
                       ? 'bg-green-500/10 border border-green-500/20'
-                      : log.status === 'warning'
+                      : log.level === 'warning'
                       ? 'bg-yellow-500/10 border border-yellow-500/20'
                       : 'bg-dark-700/50 border border-dark-600'
                   }`}
@@ -500,11 +500,11 @@ export function Deployments() {
                   <div className="flex items-center justify-between mb-1">
                     <span
                       className={`font-medium ${
-                        log.status === 'error'
+                        log.level === 'error'
                           ? 'text-red-400'
-                          : log.status === 'success'
+                          : log.level === 'info'
                           ? 'text-green-400'
-                          : log.status === 'warning'
+                          : log.level === 'warning'
                           ? 'text-yellow-400'
                           : 'text-blue-400'
                       }`}
