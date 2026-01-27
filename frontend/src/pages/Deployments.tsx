@@ -27,14 +27,48 @@ import {
 import { deploymentsApi } from '../services/api';
 import type { Deployment, DeploymentStatus, DeploymentLog } from '../types';
 
-const statusOrder: DeploymentStatus[] = [
+// Étapes affichées dans l'interface
+const displaySteps = [
   'pending',
   'creating_vm',
   'installing_os',
   'post_install',
   'installing_software',
   'completed',
-];
+] as const;
+
+type DisplayStep = typeof displaySteps[number];
+
+// Mapping current_step backend -> étape affichée
+const stepToDisplayStep: Record<string, DisplayStep> = {
+  'validating': 'creating_vm',
+  'creating_vm': 'creating_vm',
+  'mounting_iso': 'installing_os',
+  'deploying_dism': 'installing_os',
+  'configuring_network': 'installing_os',
+  'starting_installation': 'installing_os',
+  'waiting_vm_ready': 'installing_os',
+  'post_configuration': 'post_install',
+  'installing_software': 'installing_software',
+  'finalizing': 'installing_software',
+  'completed': 'completed',
+  'failed': 'completed',
+};
+
+// Fonction pour obtenir l'étape affichée à partir du déploiement
+const getDisplayStep = (deployment: Deployment): DisplayStep => {
+  // Statuts terminaux
+  if (deployment.status === 'completed') return 'completed';
+  if (deployment.status === 'failed' || deployment.status === 'cancelled') return 'completed';
+  if (deployment.status === 'pending') return 'pending';
+  
+  // Utiliser current_step pour les déploiements en cours
+  if (deployment.current_step) {
+    return stepToDisplayStep[deployment.current_step] || 'creating_vm';
+  }
+  
+  return 'pending';
+};
 
 export function Deployments() {
   const queryClient = useQueryClient();
@@ -175,21 +209,22 @@ export function Deployments() {
   const isActive = (status: DeploymentStatus) =>
     !['completed', 'failed', 'cancelled'].includes(status);
 
-  const getStepIcon = (step: DeploymentStatus, currentStatus: DeploymentStatus) => {
-    const currentIndex = statusOrder.indexOf(currentStatus);
-    const stepIndex = statusOrder.indexOf(step);
+  const getStepIcon = (step: DisplayStep, deployment: Deployment) => {
+    const currentDisplayStep = getDisplayStep(deployment);
+    const currentIndex = displaySteps.indexOf(currentDisplayStep);
+    const stepIndex = displaySteps.indexOf(step);
 
-    if (currentStatus === 'failed' || currentStatus === 'cancelled') {
+    if (deployment.status === 'failed' || deployment.status === 'cancelled') {
       if (stepIndex <= currentIndex) {
         return <XCircle size={16} className="text-red-500" />;
       }
       return <div className="w-4 h-4 rounded-full border-2 border-dark-600" />;
     }
 
-    if (stepIndex < currentIndex || currentStatus === 'completed') {
+    if (stepIndex < currentIndex || deployment.status === 'completed') {
       return <CheckCircle size={16} className="text-green-500" />;
     }
-    if (stepIndex === currentIndex) {
+    if (stepIndex === currentIndex && deployment.status !== 'pending') {
       return <Loader2 size={16} className="text-primary-500 animate-spin" />;
     }
     return <div className="w-4 h-4 rounded-full border-2 border-dark-600" />;
@@ -422,10 +457,10 @@ export function Deployments() {
 
                 {/* Steps timeline */}
                 <div className="flex items-center gap-2 overflow-x-auto pb-2">
-                  {statusOrder.slice(0, -1).map((step, index) => (
+                  {displaySteps.slice(0, -1).map((step, index) => (
                     <div key={step} className="flex items-center">
                       <div className="flex items-center gap-2 px-3 py-1.5 bg-dark-700/50 rounded-lg whitespace-nowrap">
-                        {getStepIcon(step, deployment.status)}
+                        {getStepIcon(step, deployment)}
                         <span className="text-sm text-dark-300">
                           {step === 'pending' && 'En attente'}
                           {step === 'creating_vm' && 'Création VM'}
@@ -434,7 +469,7 @@ export function Deployments() {
                           {step === 'installing_software' && 'Logiciels'}
                         </span>
                       </div>
-                      {index < statusOrder.length - 2 && (
+                      {index < displaySteps.length - 2 && (
                         <ChevronRight size={16} className="text-dark-600 mx-1" />
                       )}
                     </div>

@@ -157,6 +157,7 @@ export interface Deployment {
   vm_id?: string;
   status: DeploymentStatus;
   progress: number;
+  current_step?: string;  // Étape courante du déploiement
   error_message?: string;
   config: DeploymentConfig;
   logs?: DeploymentLog[];

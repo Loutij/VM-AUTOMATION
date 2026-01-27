@@ -115,23 +115,43 @@ class DeploymentResponse(BaseModel):
         from_attributes = True
 
 
-# Mapping statut -> progression
-PROGRESS_MAP: dict[str, int] = {
+# Mapping statut -> progression (pour les statuts terminaux)
+STATUS_PROGRESS_MAP: dict[str, int] = {
     "pending": 0,
-    "in_progress": 10,
-    "creating_vm": 20,
-    "installing_os": 50,
-    "post_install": 75,
-    "installing_software": 90,
     "completed": 100,
     "failed": 0,
     "cancelled": 0,
 }
 
+# Mapping current_step -> progression (pour les étapes intermédiaires)
+STEP_PROGRESS_MAP: dict[str, int] = {
+    "validating": 5,
+    "creating_vm": 15,
+    "mounting_iso": 25,
+    "deploying_dism": 35,
+    "configuring_network": 45,
+    "starting_installation": 55,
+    "waiting_vm_ready": 65,
+    "post_configuration": 75,
+    "installing_software": 85,
+    "finalizing": 95,
+    "completed": 100,
+    "failed": 0,
+}
 
-def get_progress_from_status(status: str) -> int:
-    """Calcule la progression à partir du statut."""
-    return PROGRESS_MAP.get(status, 0)
+
+def get_progress_from_status(status: str, current_step: str | None = None) -> int:
+    """Calcule la progression à partir du statut et de l'étape courante."""
+    # Statuts terminaux ont une progression fixe
+    if status in STATUS_PROGRESS_MAP:
+        return STATUS_PROGRESS_MAP[status]
+    
+    # Pour les statuts en cours, utiliser current_step
+    if current_step:
+        return STEP_PROGRESS_MAP.get(current_step, 10)
+    
+    # Fallback pour in_progress sans step
+    return 10
 
 
 class DeploymentList(BaseModel):
@@ -206,7 +226,7 @@ async def list_deployments(
             os_template_id=d.os_template_id,
             vm_id=d.vm_id,
             status=d.status.value,
-            progress=get_progress_from_status(d.status.value),
+            progress=get_progress_from_status(d.status.value, d.current_step),
             current_step=d.current_step,
             error_message=d.error_message,
             config=d.config,
@@ -321,7 +341,7 @@ async def create_deployment(
         os_template_id=created.os_template_id,
         vm_id=created.vm_id,
         status=created.status.value,
-        progress=get_progress_from_status(created.status.value),
+        progress=get_progress_from_status(created.status.value, created.current_step),
         current_step=created.current_step,
         error_message=created.error_message,
         config=created.config,
@@ -354,7 +374,7 @@ async def get_deployment(
         os_template_id=deployment.os_template_id,
         vm_id=deployment.vm_id,
         status=deployment.status.value,
-        progress=get_progress_from_status(deployment.status.value),
+        progress=get_progress_from_status(deployment.status.value, deployment.current_step),
         current_step=deployment.current_step,
         error_message=deployment.error_message,
         config=deployment.config,
@@ -388,7 +408,7 @@ async def start_deployment(
         os_template_id=deployment.os_template_id,
         vm_id=deployment.vm_id,
         status=deployment.status.value,
-        progress=get_progress_from_status(deployment.status.value),
+        progress=get_progress_from_status(deployment.status.value, deployment.current_step),
         current_step=deployment.current_step,
         error_message=deployment.error_message,
         config=deployment.config,
@@ -422,7 +442,7 @@ async def cancel_deployment(
         os_template_id=deployment.os_template_id,
         vm_id=deployment.vm_id,
         status=deployment.status.value,
-        progress=get_progress_from_status(deployment.status.value),
+        progress=get_progress_from_status(deployment.status.value, deployment.current_step),
         current_step=deployment.current_step,
         error_message=deployment.error_message,
         config=deployment.config,
