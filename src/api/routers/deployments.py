@@ -486,47 +486,86 @@ async def resume_deployment(
         raise HTTPException(status_code=400, detail="VM not found in database")
     
     async def run_resume_background(dep_id, vm_id):
-        """Reprend le déploiement en arrière-plan."""
+        """Reprend le déploiement en arrière-plan avec installation directe."""
         from src.common.database import db_session
+        from src.domain.vm_service import VMService
+        from src.domain.software_install_service import SoftwareInstallService
+        from src.domain.software_catalog import get_software_by_name
+        from sqlalchemy import update as sql_update
+        
+        async def update_status(session, status, step, msg=None):
+            await session.execute(
+                sql_update(Deployment).where(Deployment.id == dep_id).values(
+                    status=status, current_step=step, error_message=msg
+                )
+            )
+            await session.commit()
+            logger.info("resume_status_update", deployment_id=str(dep_id), status=status.value, step=step)
+        
         try:
             async with db_session() as session:
-                bg_service = DeploymentService(session)
+                # Récupérer le déploiement et la VM
                 dep_result = await session.execute(select(Deployment).where(Deployment.id == dep_id))
                 dep = dep_result.scalar_one()
                 vm_result = await session.execute(select(VirtualMachine).where(VirtualMachine.id == vm_id))
                 vm_obj = vm_result.scalar_one()
                 
-                # Déterminer quelle étape reprendre
-                current_step = dep.current_step or "post_configuration"
-                logger.info("resume_deployment_step", deployment_id=str(dep_id), step=current_step)
-                
-                if current_step in ("post_configuration", "post_install"):
-                    # Exécuter post-configuration
-                    await bg_service._execute_post_configuration(dep, vm_obj)
-                
-                # Installer les logiciels si configurés
                 config = dep.config or {}
-                software_profile = config.get("software_profile")
+                admin_password = config.get("admin_password", "")
+                credentials = ("Administrator", admin_password)
+                vm_name = vm_obj.hypervisor_vm_id or vm_obj.name
+                
+                logger.info("resume_starting", deployment_id=str(dep_id), vm_name=vm_name)
+                
+                # Obtenir le client Hyper-V
+                vm_service = VMService(session)
+                client = await vm_service._get_hypervisor_client(dep.hypervisor_id)
+                
+                # 1. Installer Chocolatey
+                await update_status(session, DeploymentStatus.IN_PROGRESS, "installing_software")
+                logger.info("resume_installing_chocolatey", vm_name=vm_name)
+                
+                choco_script = """$ErrorActionPreference='Stop';if(!(Get-Command choco -EA 0)){Set-ExecutionPolicy Bypass -Scope Process -Force;[System.Net.ServicePointManager]::SecurityProtocol=[System.Net.ServicePointManager]::SecurityProtocol -bor 3072;iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))};"Chocolatey OK"
+"""
+                result = await client.execute_in_vm(vm_name, choco_script, credentials, timeout=300)
+                if result.success:
+                    logger.info("resume_chocolatey_installed", vm_name=vm_name, output=result.output[:200] if result.output else "")
+                else:
+                    logger.error("resume_chocolatey_failed", vm_name=vm_name, error=result.error)
+                    raise Exception(f"Chocolatey install failed: {result.error}")
+                
+                # 2. Installer les packages
                 packages = config.get("packages", [])
+                package_configs = config.get("package_configs", {})
                 
-                if software_profile or packages:
-                    await bg_service._update_deployment_status(
-                        dep, DeploymentStatus.INSTALLING_SOFTWARE, "installing_software"
-                    )
-                    await bg_service._install_software(dep, vm_obj)
+                for pkg_name in packages:
+                    logger.info("resume_installing_package", vm_name=vm_name, package=pkg_name)
+                    
+                    install_script = f"""$c="$env:ProgramData\\chocolatey\\bin\\choco.exe";if(!(Test-Path $c)){{throw "Choco not found"}};$r=&$c install {pkg_name} -y --no-progress 2>&1;$x=$LASTEXITCODE;if($x-ne 0){{throw "Install failed: $r"}};"{pkg_name} installed"
+"""
+                    result = await client.execute_in_vm(vm_name, install_script, credentials, timeout=300)
+                    if result.success:
+                        logger.info("resume_package_installed", vm_name=vm_name, package=pkg_name, output=result.output[:100] if result.output else "")
+                    else:
+                        logger.warning("resume_package_failed", vm_name=vm_name, package=pkg_name, error=result.error)
+                    
+                    # Configurer le package si nécessaire
+                    pkg_config = package_configs.get(pkg_name, {})
+                    software_def = get_software_by_name(pkg_name)
+                    if software_def and software_def.get("post_install_script") and pkg_config:
+                        script = software_def["post_install_script"]
+                        for key, value in pkg_config.items():
+                            script = script.replace(f"{{{key}}}", str(value) if value else "")
+                        
+                        logger.info("resume_configuring_package", vm_name=vm_name, package=pkg_name)
+                        cfg_result = await client.execute_in_vm(vm_name, script, credentials, timeout=120)
+                        if cfg_result.success:
+                            logger.info("resume_package_configured", vm_name=vm_name, package=pkg_name)
+                        else:
+                            logger.warning("resume_package_config_failed", vm_name=vm_name, package=pkg_name, error=cfg_result.error)
                 
-                # Finalisation
-                await bg_service._update_deployment_status(
-                    dep, DeploymentStatus.IN_PROGRESS, "finalizing"
-                )
-                await bg_service._finalize_deployment(dep, vm_obj)
-                
-                # Terminé
-                await bg_service._update_deployment_status(
-                    dep, DeploymentStatus.COMPLETED, "completed"
-                )
-                await bg_service._log_step(dep, "completed", "Deployment resumed and completed successfully.")
-                
+                # 3. Finalisation
+                await update_status(session, DeploymentStatus.COMPLETED, "completed")
                 logger.info("resume_deployment_completed", deployment_id=str(dep_id))
                 
         except Exception as e:
@@ -534,9 +573,8 @@ async def resume_deployment(
             logger.error("resume_deployment_failed", deployment_id=str(dep_id), error=error_msg, traceback=traceback.format_exc())
             try:
                 async with db_session() as error_session:
-                    from sqlalchemy import update
                     await error_session.execute(
-                        update(Deployment).where(Deployment.id == dep_id).values(
+                        sql_update(Deployment).where(Deployment.id == dep_id).values(
                             status=DeploymentStatus.FAILED,
                             current_step="failed",
                             error_message=error_msg[:500]
