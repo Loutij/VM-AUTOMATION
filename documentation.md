@@ -304,7 +304,28 @@ docker-compose -f docker-compose.prod.yml up -d
 
 ## Changelog
 
-### v0.6.0 (2026-01-27) - En cours
+### v0.7.0 (2026-01-27) - Intégration Post-Install Complète
+- **Workflow de déploiement complet** :
+  - Nouvelles étapes : `WAITING_VM_READY` → `POST_CONFIGURATION` → `INSTALLING_SOFTWARE` → `FINALIZING`
+  - Attente automatique que la VM soit prête (heartbeat + PowerShell Direct accessible)
+  - Installation automatique des logiciels selon le profil choisi
+  - Configuration automatique des services (RDP, WinRM, SSH)
+- **Endpoint post-install manuel** :
+  - `POST /vms/{id}/post-install` : exécute les configurations sur une VM existante
+  - Permet d'ajouter des logiciels ou configurer des services après le déploiement initial
+- **Configuration logiciels spécifiques** :
+  - `configure_zabbix_agent()` : configurer server, hostname, port, remote commands
+  - `configure_sql_server()` : mode mixte, TCP/IP, port, firewall
+  - `configure_iis()` : création site, binding, port
+  - `join_domain()` : joindre un domaine AD via PowerShell Direct
+- **Frontend amélioré** :
+  - Transmission complète des options (services, software_profile, packages) au backend
+  - Types TypeScript pour services et sécurité
+- **API étendue** :
+  - Nouveaux paramètres `services`, `security`, `software_profile`, `packages` dans DeploymentCreate
+  - Configuration par défaut des services (RDP + WinRM activés)
+
+### v0.6.0 (2026-01-27)
 - **Synchronisation VMs Hyper-V ↔ DB** :
   - Nouvel endpoint `POST /hypervisors/{id}/sync`
   - Méthode `sync_all_vms()` : importe les VMs manquantes, met à jour l'état, marque les VMs supprimées
