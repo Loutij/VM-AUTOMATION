@@ -267,16 +267,34 @@
                     <CommandLine>powershell -Command "winrm quickconfig -quiet"</CommandLine>
                     <Description>Quick configure WinRM</Description>
                 </SynchronousCommand>
-                {% if join_domain %}
+                <!-- Configurer le profil réseau sur Privé pour activer la découverte -->
                 <SynchronousCommand wcm:action="add">
                     <Order>5</Order>
+                    <CommandLine>powershell -Command "Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private"</CommandLine>
+                    <Description>Set network profile to Private</Description>
+                </SynchronousCommand>
+                <!-- Activer la découverte réseau -->
+                <SynchronousCommand wcm:action="add">
+                    <Order>6</Order>
+                    <CommandLine>netsh advfirewall firewall set rule group="Network Discovery" new enable=Yes</CommandLine>
+                    <Description>Enable Network Discovery</Description>
+                </SynchronousCommand>
+                <!-- Activer le partage de fichiers et imprimantes -->
+                <SynchronousCommand wcm:action="add">
+                    <Order>7</Order>
+                    <CommandLine>netsh advfirewall firewall set rule group="File and Printer Sharing" new enable=Yes</CommandLine>
+                    <Description>Enable File and Printer Sharing</Description>
+                </SynchronousCommand>
+                {% if join_domain %}
+                <SynchronousCommand wcm:action="add">
+                    <Order>8</Order>
                     <CommandLine>powershell -Command "Add-Computer -DomainName '{{ domain_name }}' -Credential (New-Object PSCredential('{{ domain_user }}', (ConvertTo-SecureString '{{ domain_password }}' -AsPlainText -Force))) -OUPath '{{ domain_ou | default('') }}' -Restart"</CommandLine>
                     <Description>Join Active Directory Domain</Description>
                 </SynchronousCommand>
                 {% endif %}
                 {% for cmd in post_install_commands | default([]) %}
                 <SynchronousCommand wcm:action="add">
-                    <Order>{{ loop.index + 10 }}</Order>
+                    <Order>{{ loop.index + 20 }}</Order>
                     <CommandLine>{{ cmd.command }}</CommandLine>
                     <Description>{{ cmd.description | default('Custom command') }}</Description>
                 </SynchronousCommand>

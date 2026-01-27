@@ -1588,6 +1588,13 @@ echo [%date% %time%] SetupComplete starting >> C:\\Windows\\Setup\\Scripts\\setu
 REM Activer le compte Administrator et définir le mot de passe
 net user Administrator "{admin_password}" /active:yes >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
 
+REM Configurer le profil réseau sur Privé (pour activer la découverte)
+powershell -Command "Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private" >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
+
+REM Activer la découverte réseau et le partage
+netsh advfirewall firewall set rule group="Network Discovery" new enable=Yes >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
+netsh advfirewall firewall set rule group="File and Printer Sharing" new enable=Yes >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
+
 REM Configurer WinRM
 powershell -Command "Enable-PSRemoting -Force -SkipNetworkProfileCheck" >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
 powershell -Command "Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value '*' -Force" >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
