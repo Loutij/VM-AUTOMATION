@@ -512,7 +512,7 @@ export function NewDeployment() {
   };
 
   return (
-    <div className="min-h-screen bg-dark-900">
+    <div className="min-h-screen bg-light-100 dark:bg-dark-900">
       <Header title="Nouveau déploiement" />
       <div className="p-6">
         {/* Bouton retour */}
@@ -533,10 +533,10 @@ export function NewDeployment() {
                 <div
                   className={`flex items-center gap-2 cursor-pointer ${
                     currentStep === step.id
-                      ? 'text-primary-500'
+                      ? 'text-oto-500'
                       : currentStep > step.id
                       ? 'text-green-500'
-                      : 'text-dark-400'
+                      : 'text-gray-400 dark:text-dark-400'
                   }`}
                   onClick={() => step.id < currentStep && setCurrentStep(step.id)}
                   title={step.name}
@@ -544,10 +544,10 @@ export function NewDeployment() {
                   <div
                     className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
                       currentStep === step.id
-                        ? 'bg-primary-600'
+                        ? 'bg-oto-600'
                         : currentStep > step.id
                         ? 'bg-green-600'
-                        : 'bg-dark-700'
+                        : 'bg-light-200 dark:bg-dark-700'
                     }`}
                   >
                     {currentStep > step.id ? (
@@ -559,7 +559,7 @@ export function NewDeployment() {
                   <span className="font-medium hidden lg:inline whitespace-nowrap">{step.name}</span>
                 </div>
                 {index < steps.length - 1 && (
-                  <ChevronRight size={20} className="mx-1 md:mx-3 text-dark-600 flex-shrink-0" />
+                  <ChevronRight size={20} className="mx-1 md:mx-3 text-gray-300 dark:text-dark-600 flex-shrink-0" />
                 )}
               </div>
             ))}
@@ -572,10 +572,10 @@ export function NewDeployment() {
           {currentStep === 1 && (
             <div className="space-y-6">
               <div>
-                <h2 className="text-xl font-semibold text-white mb-2">
+                <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
                   Sélection de l'infrastructure
                 </h2>
-                <p className="text-dark-400">
+                <p className="text-gray-500 dark:text-dark-400">
                   Choisissez l'hyperviseur et le template OS pour votre VM.
                 </p>
               </div>
@@ -583,14 +583,14 @@ export function NewDeployment() {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Sélection hyperviseur */}
                 <div>
-                  <label className="block text-sm font-medium text-dark-200 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-dark-200 mb-2">
                     <Server size={16} className="inline mr-2" />
                     Hyperviseur
                   </label>
                   {hypervisorsLoading ? (
-                    <div className="h-12 bg-dark-700 animate-pulse rounded-lg" />
+                    <div className="h-12 bg-light-200 dark:bg-dark-700 animate-pulse rounded-lg" />
                   ) : hypervisors.length === 0 ? (
-                    <div className="p-4 bg-dark-700 rounded-lg text-dark-400 text-center">
+                    <div className="p-4 bg-light-200 dark:bg-dark-700 rounded-lg text-gray-500 dark:text-dark-400 text-center">
                       Aucun hyperviseur configuré.{' '}
                       <button
                         onClick={() => navigate('/hypervisors')}
@@ -606,8 +606,8 @@ export function NewDeployment() {
                           key={h.id}
                           className={`flex items-center gap-3 p-4 rounded-lg border cursor-pointer transition-colors ${
                             formData.hypervisor_id === h.id
-                              ? 'border-primary-500 bg-primary-500/10'
-                              : 'border-dark-600 hover:border-dark-500 bg-dark-700/50'
+                              ? 'border-oto-500 bg-oto-500/10'
+                              : 'border-light-300 dark:border-dark-600 hover:border-oto-300 dark:hover:border-dark-500 bg-white dark:bg-dark-700/50'
                           }`}
                         >
                           <input
@@ -623,17 +623,17 @@ export function NewDeployment() {
                           <div
                             className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
                               formData.hypervisor_id === h.id
-                                ? 'border-primary-500'
-                                : 'border-dark-500'
+                                ? 'border-oto-500'
+                                : 'border-gray-300 dark:border-dark-500'
                             }`}
                           >
                             {formData.hypervisor_id === h.id && (
-                              <div className="w-2 h-2 rounded-full bg-primary-500" />
+                              <div className="w-2 h-2 rounded-full bg-oto-500" />
                             )}
                           </div>
                           <div className="flex-1">
-                            <p className="font-medium text-white">{h.name}</p>
-                            <p className="text-sm text-dark-400">
+                            <p className="font-medium text-gray-900 dark:text-white">{h.name}</p>
+                            <p className="text-sm text-gray-500 dark:text-dark-400">
                               {h.type.toUpperCase()} • {h.host}
                             </p>
                           </div>
@@ -650,18 +650,18 @@ export function NewDeployment() {
 
                 {/* Sélection template */}
                 <div>
-                  <label className="block text-sm font-medium text-dark-200 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-dark-200 mb-2">
                     <FileCode size={16} className="inline mr-2" />
                     Template OS
                   </label>
                   {templatesLoading ? (
-                    <div className="h-12 bg-dark-700 animate-pulse rounded-lg" />
+                    <div className="h-12 bg-light-200 dark:bg-dark-700 animate-pulse rounded-lg" />
                   ) : templates.length === 0 ? (
-                    <div className="p-4 bg-dark-700 rounded-lg text-dark-400 text-center">
+                    <div className="p-4 bg-light-200 dark:bg-dark-700 rounded-lg text-gray-500 dark:text-dark-400 text-center">
                       Aucun template disponible.{' '}
                       <button
                         onClick={() => navigate('/templates')}
-                        className="text-primary-500 hover:underline"
+                        className="text-oto-500 hover:underline"
                       >
                         En créer un
                       </button>
@@ -673,8 +673,8 @@ export function NewDeployment() {
                           key={t.id}
                           className={`flex items-center gap-3 p-4 rounded-lg border cursor-pointer transition-colors ${
                             formData.os_template_id === t.id
-                              ? 'border-primary-500 bg-primary-500/10'
-                              : 'border-dark-600 hover:border-dark-500 bg-dark-700/50'
+                              ? 'border-oto-500 bg-oto-500/10'
+                              : 'border-light-300 dark:border-dark-600 hover:border-oto-300 dark:hover:border-dark-500 bg-white dark:bg-dark-700/50'
                           }`}
                         >
                           <input
@@ -688,12 +688,12 @@ export function NewDeployment() {
                           <div
                             className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
                               formData.os_template_id === t.id
-                                ? 'border-primary-500'
-                                : 'border-dark-500'
+                                ? 'border-oto-500'
+                                : 'border-gray-300 dark:border-dark-500'
                             }`}
                           >
                             {formData.os_template_id === t.id && (
-                              <div className="w-2 h-2 rounded-full bg-primary-500" />
+                              <div className="w-2 h-2 rounded-full bg-oto-500" />
                             )}
                           </div>
                           <div
@@ -710,8 +710,8 @@ export function NewDeployment() {
                             )}
                           </div>
                           <div className="flex-1">
-                            <p className="font-medium text-white">{t.name}</p>
-                            <p className="text-sm text-dark-400">{t.os_type}</p>
+                            <p className="font-medium text-gray-900 dark:text-white">{t.name}</p>
+                            <p className="text-sm text-gray-500 dark:text-dark-400">{t.os_type}</p>
                           </div>
                         </label>
                       ))}
@@ -726,10 +726,10 @@ export function NewDeployment() {
           {currentStep === 2 && (
             <div className="space-y-6">
               <div>
-                <h2 className="text-xl font-semibold text-white mb-2">
+                <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
                   Configuration des ressources
                 </h2>
-                <p className="text-dark-400">
+                <p className="text-gray-500 dark:text-dark-400">
                   Définissez le nom et les ressources de votre VM.
                 </p>
               </div>
@@ -754,7 +754,7 @@ export function NewDeployment() {
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div>
-                  <label className="block text-sm font-medium text-dark-200 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-dark-200 mb-2">
                     <Cpu size={16} className="inline mr-2" />
                     CPUs
                   </label>
@@ -767,16 +767,16 @@ export function NewDeployment() {
                       onChange={(e) =>
                         setFormData({ ...formData, cpu_count: parseInt(e.target.value) })
                       }
-                      className="flex-1 h-2 bg-dark-700 rounded-full appearance-none cursor-pointer accent-primary-500"
+                      className="flex-1 h-2 bg-light-200 dark:bg-dark-700 rounded-full appearance-none cursor-pointer accent-oto-500"
                     />
-                    <span className="w-12 text-center font-medium text-white">
+                    <span className="w-12 text-center font-medium text-gray-900 dark:text-white">
                       {formData.cpu_count}
                     </span>
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-dark-200 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-dark-200 mb-2">
                     <MemoryStick size={16} className="inline mr-2" />
                     RAM
                   </label>
@@ -797,7 +797,7 @@ export function NewDeployment() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-dark-200 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-dark-200 mb-2">
                     <HardDrive size={16} className="inline mr-2" />
                     Disque
                   </label>
@@ -820,21 +820,21 @@ export function NewDeployment() {
               </div>
 
               {/* Emplacement du disque virtuel */}
-              <div className="border border-dark-600 rounded-lg p-4">
-                <h3 className="text-sm font-medium text-dark-200 mb-4 flex items-center gap-2">
+              <div className="border border-light-300 dark:border-dark-600 rounded-lg p-4">
+                <h3 className="text-sm font-medium text-gray-700 dark:text-dark-200 mb-4 flex items-center gap-2">
                   <FolderOpen size={16} />
                   Emplacement du disque virtuel
                 </h3>
                 
                 {/* Sélecteur de disque visuel */}
                 {storageLoading ? (
-                  <div className="flex items-center gap-2 text-dark-400 py-4">
+                  <div className="flex items-center gap-2 text-gray-500 dark:text-dark-400 py-4">
                     <Loader2 size={16} className="animate-spin" />
                     Chargement des disques disponibles...
                   </div>
                 ) : storageLocations.length > 0 ? (
                   <div className="space-y-4">
-                    <p className="text-xs text-dark-400 mb-3">Sélectionnez un disque pour stocker le fichier VHDX :</p>
+                    <p className="text-xs text-gray-500 dark:text-dark-400 mb-3">Sélectionnez un disque pour stocker le fichier VHDX :</p>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                       {storageLocations.map((storage: StorageLocation) => {
                         const isSelected = formData.vhdx_path === storage.path;
@@ -844,8 +844,8 @@ export function NewDeployment() {
                             key={storage.drive_letter}
                             className={`p-4 rounded-lg border cursor-pointer transition-all ${
                               isSelected
-                                ? 'border-primary-500 bg-primary-500/10 ring-1 ring-primary-500'
-                                : 'border-dark-600 hover:border-dark-500 bg-dark-700/30'
+                                ? 'border-oto-500 bg-oto-500/10 ring-1 ring-oto-500'
+                                : 'border-light-300 dark:border-dark-600 hover:border-oto-300 dark:hover:border-dark-500 bg-white dark:bg-dark-700/30'
                             }`}
                           >
                             <input
@@ -858,8 +858,8 @@ export function NewDeployment() {
                             />
                             <div className="flex items-center justify-between mb-2">
                               <div className="flex items-center gap-2">
-                                <HardDrive size={18} className={isSelected ? 'text-primary-500' : 'text-dark-400'} />
-                                <span className="font-bold text-white text-lg">{storage.drive_letter}:</span>
+                                <HardDrive size={18} className={isSelected ? 'text-oto-500' : 'text-gray-400 dark:text-dark-400'} />
+                                <span className="font-bold text-gray-900 dark:text-white text-lg">{storage.drive_letter}:</span>
                               </div>
                               <div className="flex gap-1">
                                 {storage.is_default && (
@@ -872,19 +872,19 @@ export function NewDeployment() {
                             </div>
                             
                             {/* Barre de progression */}
-                            <div className="h-2 bg-dark-600 rounded-full overflow-hidden mb-2">
+                            <div className="h-2 bg-light-200 dark:bg-dark-600 rounded-full overflow-hidden mb-2">
                               <div 
                                 className={`h-full rounded-full transition-all ${
                                   usedPercent > 90 ? 'bg-red-500' :
                                   usedPercent > 70 ? 'bg-yellow-500' :
-                                  'bg-primary-500'
+                                  'bg-oto-500'
                                 }`}
                                 style={{ width: `${usedPercent}%` }}
                               />
                             </div>
                             
                             <div className="flex justify-between text-xs">
-                              <span className="text-dark-400">
+                              <span className="text-gray-500 dark:text-dark-400">
                                 {storage.used_gb.toFixed(1)} Go utilisés
                               </span>
                               <span className={`font-medium ${
@@ -895,7 +895,7 @@ export function NewDeployment() {
                                 {storage.free_gb.toFixed(1)} Go libres
                               </span>
                             </div>
-                            <p className="text-xs text-dark-500 mt-1 truncate">{storage.path}</p>
+                            <p className="text-xs text-gray-400 dark:text-dark-500 mt-1 truncate">{storage.path}</p>
                           </label>
                         );
                       })}
@@ -904,8 +904,8 @@ export function NewDeployment() {
                       <label
                         className={`p-4 rounded-lg border border-dashed cursor-pointer transition-all ${
                           formData.vhdx_path && !storageLocations.some((s: StorageLocation) => s.path === formData.vhdx_path)
-                            ? 'border-primary-500 bg-primary-500/10'
-                            : 'border-dark-500 hover:border-dark-400'
+                            ? 'border-oto-500 bg-oto-500/10'
+                            : 'border-gray-300 dark:border-dark-500 hover:border-oto-300 dark:hover:border-dark-400'
                         }`}
                       >
                         <input
@@ -917,10 +917,10 @@ export function NewDeployment() {
                           className="sr-only"
                         />
                         <div className="flex items-center gap-2 mb-2">
-                          <FolderOpen size={18} className="text-dark-400" />
-                          <span className="font-medium text-dark-300">Chemin personnalisé</span>
+                          <FolderOpen size={18} className="text-gray-400 dark:text-dark-400" />
+                          <span className="font-medium text-gray-600 dark:text-dark-300">Chemin personnalisé</span>
                         </div>
-                        <p className="text-xs text-dark-400">Spécifier un chemin manuel</p>
+                        <p className="text-xs text-gray-500 dark:text-dark-400">Spécifier un chemin manuel</p>
                       </label>
                     </div>
                     
@@ -937,7 +937,7 @@ export function NewDeployment() {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    <p className="text-xs text-dark-400">Aucun disque disponible détecté. Entrez le chemin manuellement :</p>
+                    <p className="text-xs text-gray-500 dark:text-dark-400">Aucun disque disponible détecté. Entrez le chemin manuellement :</p>
                     <Input
                       label="Chemin du fichier VHDX"
                       value={formData.vhdx_path}
@@ -948,10 +948,10 @@ export function NewDeployment() {
                   </div>
                 )}
                 
-                <div className="mt-3 p-3 bg-dark-700/50 rounded-lg">
-                  <p className="text-xs text-dark-400">
-                    <strong className="text-dark-300">Fichier créé :</strong>{' '}
-                    <code className="bg-dark-600 px-1 rounded">
+                <div className="mt-3 p-3 bg-light-100 dark:bg-dark-700/50 rounded-lg">
+                  <p className="text-xs text-gray-500 dark:text-dark-400">
+                    <strong className="text-gray-600 dark:text-dark-300">Fichier créé :</strong>{' '}
+                    <code className="bg-light-200 dark:bg-dark-600 px-1 rounded text-gray-700 dark:text-gray-300">
                       {formData.vhdx_path || 'C:\\Hyper-V\\VirtualHardDisks'}\\{formData.vm_name || 'ma-vm'}.vhdx
                     </code>
                   </p>
@@ -964,30 +964,30 @@ export function NewDeployment() {
           {currentStep === 3 && (
             <div className="space-y-6">
               <div>
-                <h2 className="text-xl font-semibold text-white mb-2">
+                <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
                   Configuration réseau
                 </h2>
-                <p className="text-dark-400">
+                <p className="text-gray-500 dark:text-dark-400">
                   Configurez le switch virtuel, VLAN et les paramètres IP.
                 </p>
               </div>
 
               {/* Sélection du switch */}
-              <div className="border border-dark-600 rounded-lg p-4">
-                <h3 className="text-sm font-medium text-dark-200 mb-4 flex items-center gap-2">
+              <div className="border border-light-300 dark:border-dark-600 rounded-lg p-4">
+                <h3 className="text-sm font-medium text-gray-700 dark:text-dark-200 mb-4 flex items-center gap-2">
                   <Wifi size={16} />
                   Switch virtuel
                 </h3>
                 
                 {switchesLoading ? (
-                  <div className="flex items-center gap-2 text-dark-400">
+                  <div className="flex items-center gap-2 text-gray-500 dark:text-dark-400">
                     <Loader2 size={16} className="animate-spin" />
                     Chargement des switches...
                   </div>
                 ) : switches.length === 0 ? (
                   <div className="text-center py-4">
-                    <Network size={32} className="mx-auto mb-2 text-dark-500" />
-                    <p className="text-dark-400 mb-3">Aucun switch virtuel trouvé</p>
+                    <Network size={32} className="mx-auto mb-2 text-gray-400 dark:text-dark-500" />
+                    <p className="text-gray-500 dark:text-dark-400 mb-3">Aucun switch virtuel trouvé</p>
                     <Button
                       variant="secondary"
                       size="sm"
@@ -1005,8 +1005,8 @@ export function NewDeployment() {
                           key={sw.name}
                           className={`p-3 rounded-lg border cursor-pointer transition-colors ${
                             formData.network_switch === sw.name
-                              ? 'border-primary-500 bg-primary-500/10'
-                              : 'border-dark-600 hover:border-dark-500'
+                              ? 'border-oto-500 bg-oto-500/10'
+                              : 'border-light-300 dark:border-dark-600 hover:border-oto-300 dark:hover:border-dark-500'
                           }`}
                         >
                           <input
@@ -1020,8 +1020,8 @@ export function NewDeployment() {
                             className="sr-only"
                           />
                           <div className="flex items-center gap-2">
-                            <Network size={16} className={formData.network_switch === sw.name ? 'text-primary-500' : 'text-dark-400'} />
-                            <span className="font-medium text-white">{sw.name}</span>
+                            <Network size={16} className={formData.network_switch === sw.name ? 'text-oto-500' : 'text-gray-400 dark:text-dark-400'} />
+                            <span className="font-medium text-gray-900 dark:text-white">{sw.name}</span>
                           </div>
                           <div className="mt-1 flex items-center gap-2">
                             <span className={`text-xs px-2 py-0.5 rounded ${
@@ -1033,7 +1033,7 @@ export function NewDeployment() {
                             </span>
                           </div>
                           {sw.notes && (
-                            <p className="text-xs text-dark-400 mt-1 truncate">{sw.notes}</p>
+                            <p className="text-xs text-gray-500 dark:text-dark-400 mt-1 truncate">{sw.notes}</p>
                           )}
                         </label>
                       ))}
@@ -1042,13 +1042,13 @@ export function NewDeployment() {
                       <button
                         type="button"
                         onClick={() => setIsCreateSwitchModalOpen(true)}
-                        className="p-3 rounded-lg border border-dashed border-dark-500 hover:border-primary-500 hover:bg-primary-500/5 transition-colors text-left"
+                        className="p-3 rounded-lg border border-dashed border-gray-300 dark:border-dark-500 hover:border-oto-500 hover:bg-oto-500/5 transition-colors text-left"
                       >
                         <div className="flex items-center gap-2">
-                          <Plus size={16} className="text-primary-500" />
-                          <span className="font-medium text-primary-400">Créer un switch</span>
+                          <Plus size={16} className="text-oto-500" />
+                          <span className="font-medium text-oto-500 dark:text-primary-400">Créer un switch</span>
                         </div>
-                        <p className="text-xs text-dark-400 mt-1">
+                        <p className="text-xs text-gray-500 dark:text-dark-400 mt-1">
                           Ajouter un nouveau switch virtuel
                         </p>
                       </button>
@@ -1077,11 +1077,11 @@ export function NewDeployment() {
               </div>
 
               {/* Configuration IP statique */}
-              <div className="border border-dark-600 rounded-lg p-4">
+              <div className="border border-light-300 dark:border-dark-600 rounded-lg p-4">
                 <div className="flex items-center justify-between mb-4">
                   <div>
-                    <span className="font-medium text-white">Configuration IP statique</span>
-                    <p className="text-sm text-dark-400">Par défaut, DHCP sera utilisé</p>
+                    <span className="font-medium text-gray-900 dark:text-white">Configuration IP statique</span>
+                    <p className="text-sm text-gray-500 dark:text-dark-400">Par défaut, DHCP sera utilisé</p>
                   </div>
                   <Switch
                     checked={formData.use_static_ip}
@@ -1090,7 +1090,7 @@ export function NewDeployment() {
                 </div>
 
                 {formData.use_static_ip && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-dark-600">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-light-200 dark:border-dark-600">
                     <Input
                       label="Adresse IP"
                       value={formData.ip_address}
@@ -1148,17 +1148,17 @@ export function NewDeployment() {
           {currentStep === 4 && (
             <div className="space-y-6">
               <div>
-                <h2 className="text-xl font-semibold text-white mb-2">
+                <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
                   Options avancées
                 </h2>
-                <p className="text-dark-400">
+                <p className="text-gray-500 dark:text-dark-400">
                   Configurez les services, logiciels et options de déploiement.
                 </p>
               </div>
 
               {/* Mot de passe administrateur */}
-              <div className="border border-dark-600 rounded-lg p-4">
-                <h3 className="text-sm font-medium text-dark-200 mb-4 flex items-center gap-2">
+              <div className="border border-light-300 dark:border-dark-600 rounded-lg p-4">
+                <h3 className="text-sm font-medium text-gray-700 dark:text-dark-200 mb-4 flex items-center gap-2">
                   <Key size={16} />
                   Compte administrateur
                 </h3>
@@ -1191,8 +1191,8 @@ export function NewDeployment() {
               </div>
 
               {/* Services */}
-              <div className="border border-dark-600 rounded-lg p-4">
-                <h3 className="text-sm font-medium text-dark-200 mb-4 flex items-center gap-2">
+              <div className="border border-light-300 dark:border-dark-600 rounded-lg p-4">
+                <h3 className="text-sm font-medium text-gray-700 dark:text-dark-200 mb-4 flex items-center gap-2">
                   <Shield size={16} />
                   Services à activer
                 </h3>
@@ -1200,8 +1200,8 @@ export function NewDeployment() {
                   {WINDOWS_SERVICES.map((service) => (
                     <div key={service.id} className="flex items-center justify-between">
                       <div>
-                        <span className="font-medium text-white">{service.name}</span>
-                        <p className="text-sm text-dark-400">{service.description}</p>
+                        <span className="font-medium text-gray-900 dark:text-white">{service.name}</span>
+                        <p className="text-sm text-gray-500 dark:text-dark-400">{service.description}</p>
                       </div>
                       <Switch
                         checked={
@@ -1227,13 +1227,13 @@ export function NewDeployment() {
               </div>
 
               {/* Windows Update */}
-              <div className="border border-dark-600 rounded-lg p-4">
+              <div className="border border-light-300 dark:border-dark-600 rounded-lg p-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <RefreshCw size={18} className="text-dark-400" />
+                    <RefreshCw size={18} className="text-gray-400 dark:text-dark-400" />
                     <div>
-                      <span className="font-medium text-white">Windows Update</span>
-                      <p className="text-sm text-dark-400">
+                      <span className="font-medium text-gray-900 dark:text-white">Windows Update</span>
+                      <p className="text-sm text-gray-500 dark:text-dark-400">
                         Installer les mises à jour après l'installation
                       </p>
                     </div>
@@ -1248,9 +1248,9 @@ export function NewDeployment() {
               </div>
 
               {/* Profil logiciels */}
-              <div className="border border-dark-600 rounded-lg p-4">
+              <div className="border border-light-300 dark:border-dark-600 rounded-lg p-4">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-sm font-medium text-dark-200 flex items-center gap-2">
+                  <h3 className="text-sm font-medium text-gray-700 dark:text-dark-200 flex items-center gap-2">
                     <Package size={16} />
                     Logiciels à installer
                   </h3>
@@ -1265,15 +1265,15 @@ export function NewDeployment() {
                 </div>
 
                 {/* Profils pré-définis */}
-                <p className="text-xs text-dark-400 mb-3">Profils pré-configurés :</p>
+                <p className="text-xs text-gray-500 dark:text-dark-400 mb-3">Profils pré-configurés :</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                   {softwareProfiles.map((profile) => (
                     <label
                       key={profile.name}
                       className={`p-3 rounded-lg border cursor-pointer transition-colors ${
                         formData.software_profile === profile.name && formData.custom_packages.length === 0
-                          ? 'border-primary-500 bg-primary-500/10'
-                          : 'border-dark-600 hover:border-dark-500'
+                          ? 'border-oto-500 bg-oto-500/10'
+                          : 'border-light-300 dark:border-dark-600 hover:border-oto-300 dark:hover:border-dark-500'
                       }`}
                     >
                       <input
@@ -1286,16 +1286,16 @@ export function NewDeployment() {
                         }
                         className="sr-only"
                       />
-                      <p className="font-medium text-white">{profile.display_name}</p>
-                      <p className="text-xs text-dark-400 mt-1">{profile.description}</p>
-                      <p className="text-xs text-primary-400 mt-1">{profile.package_count} packages</p>
+                      <p className="font-medium text-gray-900 dark:text-white">{profile.display_name}</p>
+                      <p className="text-xs text-gray-500 dark:text-dark-400 mt-1">{profile.description}</p>
+                      <p className="text-xs text-oto-500 mt-1">{profile.package_count} packages</p>
                     </label>
                   ))}
                   <label
                     className={`p-3 rounded-lg border cursor-pointer transition-colors ${
                       formData.software_profile === '' && formData.custom_packages.length === 0
-                        ? 'border-primary-500 bg-primary-500/10'
-                        : 'border-dark-600 hover:border-dark-500'
+                        ? 'border-oto-500 bg-oto-500/10'
+                        : 'border-light-300 dark:border-dark-600 hover:border-oto-300 dark:hover:border-dark-500'
                     }`}
                   >
                     <input
@@ -1306,20 +1306,20 @@ export function NewDeployment() {
                       onChange={() => setFormData({ ...formData, software_profile: '', custom_packages: [] })}
                       className="sr-only"
                     />
-                    <p className="font-medium text-white">Aucun</p>
-                    <p className="text-xs text-dark-400 mt-1">Pas de logiciels supplémentaires</p>
+                    <p className="font-medium text-gray-900 dark:text-white">Aucun</p>
+                    <p className="text-xs text-gray-500 dark:text-dark-400 mt-1">Pas de logiciels supplémentaires</p>
                   </label>
                 </div>
 
                 {/* Packages personnalisés sélectionnés */}
                 {formData.custom_packages.length > 0 && (
-                  <div className="mt-4 pt-4 border-t border-dark-600">
-                    <p className="text-xs text-dark-400 mb-2">Sélection personnalisée ({formData.custom_packages.length} packages) :</p>
+                  <div className="mt-4 pt-4 border-t border-light-200 dark:border-dark-600">
+                    <p className="text-xs text-gray-500 dark:text-dark-400 mb-2">Sélection personnalisée ({formData.custom_packages.length} packages) :</p>
                     <div className="flex flex-wrap gap-2">
                       {formData.custom_packages.map((pkg) => (
                         <span
                           key={pkg}
-                          className="px-2 py-1 bg-primary-500/20 text-primary-400 text-xs rounded-full flex items-center gap-1"
+                          className="px-2 py-1 bg-oto-100 dark:bg-primary-500/20 text-oto-600 dark:text-primary-400 text-xs rounded-full flex items-center gap-1"
                         >
                           {pkg}
                           <button
@@ -1330,7 +1330,7 @@ export function NewDeployment() {
                                 custom_packages: formData.custom_packages.filter((p) => p !== pkg),
                               })
                             }
-                            className="hover:text-white"
+                            className="hover:text-oto-700 dark:hover:text-white"
                           >
                             ×
                           </button>
@@ -1342,13 +1342,13 @@ export function NewDeployment() {
               </div>
 
               {/* Jonction domaine AD */}
-              <div className="border border-dark-600 rounded-lg p-4">
+              <div className="border border-light-300 dark:border-dark-600 rounded-lg p-4">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-3">
-                    <Building2 size={18} className="text-dark-400" />
+                    <Building2 size={18} className="text-gray-400 dark:text-dark-400" />
                     <div>
-                      <span className="font-medium text-white">Joindre un domaine Active Directory</span>
-                      <p className="text-sm text-dark-400">Intégrer la VM au domaine AD</p>
+                      <span className="font-medium text-gray-900 dark:text-white">Joindre un domaine Active Directory</span>
+                      <p className="text-sm text-gray-500 dark:text-dark-400">Intégrer la VM au domaine AD</p>
                     </div>
                   </div>
                   <Switch
@@ -1358,7 +1358,7 @@ export function NewDeployment() {
                 </div>
 
                 {formData.join_domain && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-dark-600">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-light-200 dark:border-dark-600">
                     <Input
                       label="Nom du domaine"
                       value={formData.domain_name}
@@ -1404,31 +1404,31 @@ export function NewDeployment() {
           {currentStep === 5 && (
             <div className="space-y-6">
               <div>
-                <h2 className="text-xl font-semibold text-white mb-2">
+                <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
                   Résumé du déploiement
                 </h2>
-                <p className="text-dark-400">
+                <p className="text-gray-500 dark:text-dark-400">
                   Vérifiez les informations avant de lancer le déploiement.
                 </p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {/* Infrastructure */}
-                <div className="bg-dark-700/50 rounded-lg p-4">
-                  <h3 className="text-sm font-medium text-dark-400 mb-3 flex items-center gap-2">
+                <div className="bg-light-100 dark:bg-dark-700/50 rounded-lg p-4">
+                  <h3 className="text-sm font-medium text-gray-500 dark:text-dark-400 mb-3 flex items-center gap-2">
                     <Server size={14} />
                     Infrastructure
                   </h3>
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
-                      <span className="text-dark-300">Hyperviseur</span>
-                      <span className="text-white font-medium">
+                      <span className="text-gray-600 dark:text-dark-300">Hyperviseur</span>
+                      <span className="text-gray-900 dark:text-white font-medium">
                         {selectedHypervisor?.name || '-'}
                       </span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-dark-300">Template</span>
-                      <span className="text-white font-medium">
+                      <span className="text-gray-600 dark:text-dark-300">Template</span>
+                      <span className="text-gray-900 dark:text-white font-medium">
                         {selectedTemplate?.name || '-'}
                       </span>
                     </div>
@@ -1436,19 +1436,19 @@ export function NewDeployment() {
                 </div>
 
                 {/* Configuration VM */}
-                <div className="bg-dark-700/50 rounded-lg p-4">
-                  <h3 className="text-sm font-medium text-dark-400 mb-3 flex items-center gap-2">
+                <div className="bg-light-100 dark:bg-dark-700/50 rounded-lg p-4">
+                  <h3 className="text-sm font-medium text-gray-500 dark:text-dark-400 mb-3 flex items-center gap-2">
                     <Cpu size={14} />
                     Machine virtuelle
                   </h3>
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
-                      <span className="text-dark-300">Nom</span>
-                      <span className="text-white font-medium">{formData.vm_name || '-'}</span>
+                      <span className="text-gray-600 dark:text-dark-300">Nom</span>
+                      <span className="text-gray-900 dark:text-white font-medium">{formData.vm_name || '-'}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-dark-300">CPU / RAM / Disque</span>
-                      <span className="text-white font-medium">
+                      <span className="text-gray-600 dark:text-dark-300">CPU / RAM / Disque</span>
+                      <span className="text-gray-900 dark:text-white font-medium">
                         {formData.cpu_count} vCPU / {formData.ram_gb} Go / {formData.disk_gb} GB
                       </span>
                     </div>
@@ -1456,22 +1456,22 @@ export function NewDeployment() {
                 </div>
 
                 {/* Réseau */}
-                <div className="bg-dark-700/50 rounded-lg p-4">
-                  <h3 className="text-sm font-medium text-dark-400 mb-3 flex items-center gap-2">
+                <div className="bg-light-100 dark:bg-dark-700/50 rounded-lg p-4">
+                  <h3 className="text-sm font-medium text-gray-500 dark:text-dark-400 mb-3 flex items-center gap-2">
                     <Network size={14} />
                     Réseau
                   </h3>
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
-                      <span className="text-dark-300">Switch</span>
-                      <span className="text-white font-medium">
+                      <span className="text-gray-600 dark:text-dark-300">Switch</span>
+                      <span className="text-gray-900 dark:text-white font-medium">
                         {formData.network_switch}
                         {formData.vlan_id && ` (VLAN ${formData.vlan_id})`}
                       </span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-dark-300">IP</span>
-                      <span className="text-white font-medium">
+                      <span className="text-gray-600 dark:text-dark-300">IP</span>
+                      <span className="text-gray-900 dark:text-white font-medium">
                         {formData.use_static_ip ? formData.ip_address : 'DHCP'}
                       </span>
                     </div>
@@ -1479,8 +1479,8 @@ export function NewDeployment() {
                 </div>
 
                 {/* Services */}
-                <div className="bg-dark-700/50 rounded-lg p-4">
-                  <h3 className="text-sm font-medium text-dark-400 mb-3 flex items-center gap-2">
+                <div className="bg-light-100 dark:bg-dark-700/50 rounded-lg p-4">
+                  <h3 className="text-sm font-medium text-gray-500 dark:text-dark-400 mb-3 flex items-center gap-2">
                     <Shield size={14} />
                     Services
                   </h3>
@@ -1501,23 +1501,23 @@ export function NewDeployment() {
                 </div>
 
                 {/* Logiciels */}
-                <div className="bg-dark-700/50 rounded-lg p-4">
-                  <h3 className="text-sm font-medium text-dark-400 mb-3 flex items-center gap-2">
+                <div className="bg-light-100 dark:bg-dark-700/50 rounded-lg p-4">
+                  <h3 className="text-sm font-medium text-gray-500 dark:text-dark-400 mb-3 flex items-center gap-2">
                     <Package size={14} />
                     Logiciels
                   </h3>
                   <div className="text-sm">
                     {formData.custom_packages.length > 0 ? (
                       <div>
-                        <span className="text-white font-medium">Sélection personnalisée</span>
+                        <span className="text-gray-900 dark:text-white font-medium">Sélection personnalisée</span>
                         <div className="flex flex-wrap gap-1 mt-2">
                           {formData.custom_packages.slice(0, 5).map((pkg) => (
-                            <span key={pkg} className="px-2 py-0.5 bg-primary-500/20 text-primary-400 text-xs rounded">
+                            <span key={pkg} className="px-2 py-0.5 bg-oto-100 dark:bg-primary-500/20 text-oto-600 dark:text-primary-400 text-xs rounded">
                               {pkg}
                             </span>
                           ))}
                           {formData.custom_packages.length > 5 && (
-                            <span className="text-xs text-dark-400">
+                            <span className="text-xs text-gray-500 dark:text-dark-400">
                               +{formData.custom_packages.length - 5} autres
                             </span>
                           )}
@@ -1525,31 +1525,31 @@ export function NewDeployment() {
                       </div>
                     ) : selectedProfile ? (
                       <div>
-                        <span className="text-white font-medium">{selectedProfile.display_name}</span>
-                        <p className="text-xs text-dark-400 mt-1">{selectedProfile.description}</p>
+                        <span className="text-gray-900 dark:text-white font-medium">{selectedProfile.display_name}</span>
+                        <p className="text-xs text-gray-500 dark:text-dark-400 mt-1">{selectedProfile.description}</p>
                       </div>
                     ) : (
-                      <span className="text-dark-400">Aucun logiciel sélectionné</span>
+                      <span className="text-gray-500 dark:text-dark-400">Aucun logiciel sélectionné</span>
                     )}
                   </div>
                 </div>
 
                 {/* Domaine */}
-                <div className="bg-dark-700/50 rounded-lg p-4">
-                  <h3 className="text-sm font-medium text-dark-400 mb-3 flex items-center gap-2">
+                <div className="bg-light-100 dark:bg-dark-700/50 rounded-lg p-4">
+                  <h3 className="text-sm font-medium text-gray-500 dark:text-dark-400 mb-3 flex items-center gap-2">
                     <Building2 size={14} />
                     Domaine AD
                   </h3>
                   <div className="text-sm">
                     {formData.join_domain ? (
                       <div className="space-y-1">
-                        <span className="text-white font-medium">{formData.domain_name}</span>
+                        <span className="text-gray-900 dark:text-white font-medium">{formData.domain_name}</span>
                         {formData.domain_ou && (
-                          <p className="text-xs text-dark-400">OU: {formData.domain_ou}</p>
+                          <p className="text-xs text-gray-500 dark:text-dark-400">OU: {formData.domain_ou}</p>
                         )}
                       </div>
                     ) : (
-                      <span className="text-dark-400">Pas de jonction au domaine</span>
+                      <span className="text-gray-500 dark:text-dark-400">Pas de jonction au domaine</span>
                     )}
                   </div>
                 </div>
@@ -1575,7 +1575,7 @@ export function NewDeployment() {
           )}
 
           {/* Navigation */}
-          <div className="flex items-center justify-between mt-8 pt-6 border-t border-dark-700">
+          <div className="flex items-center justify-between mt-8 pt-6 border-t border-light-200 dark:border-dark-700">
             <Button
               variant="secondary"
               leftIcon={<ChevronLeft size={18} />}
@@ -1755,12 +1755,12 @@ export function NewDeployment() {
           }
         >
           <form id="pkg-config-form" className="space-y-4">
-            <p className="text-sm text-dark-400 mb-4">
+            <p className="text-sm text-gray-500 dark:text-dark-400 mb-4">
               Ce logiciel nécessite une configuration. Remplissez les champs ci-dessous.
             </p>
             {configModalPackage.config_schema.fields.map((field: ConfigField) => (
               <div key={field.name}>
-                <label className="block text-sm font-medium text-dark-200 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-dark-200 mb-1">
                   {field.label}
                   {field.required && <span className="text-red-500 ml-1">*</span>}
                 </label>
@@ -1769,13 +1769,13 @@ export function NewDeployment() {
                     type="checkbox"
                     name={field.name}
                     defaultChecked={field.default as boolean}
-                    className="h-4 w-4 rounded border-dark-600 bg-dark-700"
+                    className="h-4 w-4 rounded border-light-300 dark:border-dark-600 bg-white dark:bg-dark-700"
                   />
                 ) : field.type === 'select' && field.options ? (
                   <select
                     name={field.name}
                     defaultValue={field.default as string}
-                    className="w-full px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white"
+                    className="w-full px-3 py-2 bg-white dark:bg-dark-700 border border-light-300 dark:border-dark-600 rounded-lg text-gray-900 dark:text-white"
                     required={field.required}
                   >
                     {field.options.map(opt => (
@@ -1789,17 +1789,17 @@ export function NewDeployment() {
                     defaultValue={field.default as string | number}
                     placeholder={field.placeholder || ''}
                     required={field.required}
-                    className="w-full px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white placeholder-dark-400"
+                    className="w-full px-3 py-2 bg-white dark:bg-dark-700 border border-light-300 dark:border-dark-600 rounded-lg text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-dark-400"
                   />
                 )}
                 {field.description && (
-                  <p className="text-xs text-dark-400 mt-1">{field.description}</p>
+                  <p className="text-xs text-gray-500 dark:text-dark-400 mt-1">{field.description}</p>
                 )}
               </div>
             ))}
           </form>
           {pendingConfigPackages.length > 1 && (
-            <p className="text-xs text-dark-400 mt-4">
+            <p className="text-xs text-gray-500 dark:text-dark-400 mt-4">
               {pendingConfigPackages.length - 1} autre(s) package(s) à configurer
             </p>
           )}

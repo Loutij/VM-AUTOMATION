@@ -22,11 +22,15 @@ import {
   Mail,
   Send,
   Loader2,
+  Palette,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { Header } from '../components/layout';
 import { Button, Input, Select, Switch, useToast } from '../components/ui';
 import { healthApi, apiClient } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import { useTheme } from '../contexts/ThemeContext';
 import type { AppSettings, HealthCheck } from '../types';
 import { DEFAULT_SETTINGS } from '../types';
 
@@ -74,12 +78,12 @@ function SettingsSection({
   return (
     <div className="card p-6">
       <div className="flex items-start gap-4 mb-6">
-        <div className="w-10 h-10 bg-primary-600/20 rounded-lg flex items-center justify-center flex-shrink-0">
-          <Icon size={20} className="text-primary-500" />
+        <div className="w-10 h-10 bg-oto-100 dark:bg-primary-600/20 rounded-lg flex items-center justify-center flex-shrink-0">
+          <Icon size={20} className="text-oto-500" />
         </div>
         <div>
-          <h3 className="text-lg font-semibold text-white">{title}</h3>
-          {description && <p className="text-sm text-dark-400 mt-1">{description}</p>}
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{title}</h3>
+          {description && <p className="text-sm text-gray-500 dark:text-dark-400 mt-1">{description}</p>}
         </div>
       </div>
       <div className="space-y-4">{children}</div>
@@ -91,6 +95,7 @@ export function Settings() {
   const { settings, saveSettings, resetSettings } = useSettings();
   const { user } = useAuth();
   const { addToast } = useToast();
+  const { theme, setTheme, resolvedTheme } = useTheme();
   
   // États locaux pour les formulaires
   const [localSettings, setLocalSettings] = useState<AppSettings>(settings);
@@ -342,14 +347,14 @@ export function Settings() {
   };
 
   return (
-    <div className="min-h-screen bg-dark-900">
+    <div className="min-h-screen bg-light-100 dark:bg-dark-900">
       <Header title="Paramètres" />
       
       <div className="p-4 sm:p-6 max-w-4xl mx-auto">
         {/* Barre d'actions sticky */}
         {hasChanges && (
-          <div className="sticky top-0 z-10 mb-6 p-4 bg-primary-600/10 border border-primary-500/20 rounded-lg flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-2 text-primary-400">
+          <div className="sticky top-0 z-10 mb-6 p-4 bg-oto-100 dark:bg-primary-600/10 border border-oto-200 dark:border-primary-500/20 rounded-lg flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-2 text-oto-600 dark:text-primary-400">
               <AlertTriangle size={20} />
               <span>Vous avez des modifications non enregistrées</span>
             </div>
@@ -374,6 +379,77 @@ export function Settings() {
         )}
 
         <div className="space-y-6">
+          {/* Thème */}
+          <SettingsSection
+            icon={Palette}
+            title="Thème"
+            description="Personnalisez l'apparence de l'interface"
+          >
+            <div className="space-y-4">
+              {/* Affichage du thème actuel */}
+              <div className="flex items-center justify-between p-4 bg-light-100 dark:bg-dark-700/50 rounded-lg">
+                <div className="flex items-center gap-3">
+                  {resolvedTheme === 'dark' ? (
+                    <Moon size={20} className="text-oto-500" />
+                  ) : (
+                    <Sun size={20} className="text-yellow-500" />
+                  )}
+                  <div>
+                    <p className="font-medium text-gray-900 dark:text-white">
+                      Mode {resolvedTheme === 'dark' ? 'sombre' : 'clair'} actif
+                    </p>
+                    <p className="text-sm text-gray-500 dark:text-dark-400">
+                      {theme === 'system' ? 'Basé sur les préférences système' : 'Défini manuellement'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Sélection du thème */}
+              <div className="grid grid-cols-3 gap-3">
+                <button
+                  onClick={() => setTheme('light')}
+                  className={`p-4 rounded-lg border-2 transition-all text-center ${
+                    theme === 'light'
+                      ? 'border-oto-500 bg-oto-50 dark:bg-oto-500/10'
+                      : 'border-light-300 dark:border-dark-600 hover:border-oto-300'
+                  }`}
+                >
+                  <Sun size={24} className={`mx-auto mb-2 ${theme === 'light' ? 'text-oto-500' : 'text-gray-400'}`} />
+                  <span className={`text-sm font-medium ${theme === 'light' ? 'text-oto-600 dark:text-oto-400' : 'text-gray-600 dark:text-gray-400'}`}>
+                    Clair
+                  </span>
+                </button>
+                <button
+                  onClick={() => setTheme('dark')}
+                  className={`p-4 rounded-lg border-2 transition-all text-center ${
+                    theme === 'dark'
+                      ? 'border-oto-500 bg-oto-50 dark:bg-oto-500/10'
+                      : 'border-light-300 dark:border-dark-600 hover:border-oto-300'
+                  }`}
+                >
+                  <Moon size={24} className={`mx-auto mb-2 ${theme === 'dark' ? 'text-oto-500' : 'text-gray-400'}`} />
+                  <span className={`text-sm font-medium ${theme === 'dark' ? 'text-oto-600 dark:text-oto-400' : 'text-gray-600 dark:text-gray-400'}`}>
+                    Sombre
+                  </span>
+                </button>
+                <button
+                  onClick={() => setTheme('system')}
+                  className={`p-4 rounded-lg border-2 transition-all text-center ${
+                    theme === 'system'
+                      ? 'border-oto-500 bg-oto-50 dark:bg-oto-500/10'
+                      : 'border-light-300 dark:border-dark-600 hover:border-oto-300'
+                  }`}
+                >
+                  <Monitor size={24} className={`mx-auto mb-2 ${theme === 'system' ? 'text-oto-500' : 'text-gray-400'}`} />
+                  <span className={`text-sm font-medium ${theme === 'system' ? 'text-oto-600 dark:text-oto-400' : 'text-gray-600 dark:text-gray-400'}`}>
+                    Système
+                  </span>
+                </button>
+              </div>
+            </div>
+          </SettingsSection>
+
           {/* Paramètres généraux */}
           <SettingsSection
             icon={Globe}
@@ -390,17 +466,6 @@ export function Settings() {
               ]}
               helperText="La langue de l'interface utilisateur"
             />
-            <Select
-              label="Thème"
-              value={localSettings.theme}
-              onChange={(e) => updateSetting('theme', e.target.value as 'dark' | 'light' | 'system')}
-              options={[
-                { value: 'dark', label: 'Sombre' },
-                { value: 'light', label: 'Clair' },
-                { value: 'system', label: 'Automatique (système)' },
-              ]}
-              helperText="Apparence de l'application"
-            />
           </SettingsSection>
 
           {/* Notifications */}
@@ -415,7 +480,7 @@ export function Settings() {
               checked={localSettings.notifications.enabled}
               onChange={(checked) => updateNestedSetting('notifications', 'enabled', checked)}
             />
-            <div className={`space-y-4 pl-4 border-l-2 border-dark-700 ${!localSettings.notifications.enabled ? 'opacity-50 pointer-events-none' : ''}`}>
+            <div className={`space-y-4 pl-4 border-l-2 border-light-200 dark:border-dark-700 ${!localSettings.notifications.enabled ? 'opacity-50 pointer-events-none' : ''}`}>
               <Switch
                 label="Déploiement terminé"
                 description="Notification quand un déploiement est complété avec succès"
@@ -454,33 +519,33 @@ export function Settings() {
             description="Configuration SMTP pour les notifications de déploiement"
           >
             {isLoadingSMTP ? (
-              <div className="flex items-center gap-2 text-dark-400 py-4">
+              <div className="flex items-center gap-2 text-gray-500 dark:text-dark-400 py-4">
                 <Loader2 size={16} className="animate-spin" />
                 Chargement de la configuration...
               </div>
             ) : smtpConfig ? (
               <div className="space-y-4">
                 {/* Statut */}
-                <div className="flex items-center justify-between p-4 bg-dark-700/50 rounded-lg">
+                <div className="flex items-center justify-between p-4 bg-light-100 dark:bg-dark-700/50 rounded-lg">
                   <div className="flex items-center gap-3">
                     {smtpConfig.enabled ? (
                       <CheckCircle size={20} className="text-green-500" />
                     ) : (
-                      <XCircle size={20} className="text-dark-400" />
+                      <XCircle size={20} className="text-gray-400 dark:text-dark-400" />
                     )}
                     <div>
-                      <p className="font-medium text-white">
+                      <p className="font-medium text-gray-900 dark:text-white">
                         {smtpConfig.enabled ? 'Notifications email activées' : 'Notifications email désactivées'}
                       </p>
-                      <p className="text-sm text-dark-400">
+                      <p className="text-sm text-gray-500 dark:text-dark-400">
                         {smtpConfig.host}:{smtpConfig.port} {smtpConfig.use_ssl ? '(SSL)' : ''}
                       </p>
                     </div>
                   </div>
                   <span className={`px-2 py-1 rounded text-xs ${
                     smtpConfig.enabled 
-                      ? 'bg-green-500/20 text-green-400' 
-                      : 'bg-dark-600 text-dark-400'
+                      ? 'bg-green-100 dark:bg-green-500/20 text-green-600 dark:text-green-400' 
+                      : 'bg-light-200 dark:bg-dark-600 text-gray-500 dark:text-dark-400'
                   }`}>
                     {smtpConfig.enabled ? 'Actif' : 'Inactif'}
                   </span>
@@ -488,27 +553,27 @@ export function Settings() {
 
                 {/* Configuration actuelle */}
                 <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div className="p-3 bg-dark-700/30 rounded">
-                    <span className="text-dark-400 block mb-1">Serveur SMTP</span>
-                    <span className="text-white font-mono">{smtpConfig.host}</span>
+                  <div className="p-3 bg-light-100 dark:bg-dark-700/30 rounded">
+                    <span className="text-gray-500 dark:text-dark-400 block mb-1">Serveur SMTP</span>
+                    <span className="text-gray-900 dark:text-white font-mono">{smtpConfig.host}</span>
                   </div>
-                  <div className="p-3 bg-dark-700/30 rounded">
-                    <span className="text-dark-400 block mb-1">Port</span>
-                    <span className="text-white font-mono">{smtpConfig.port}</span>
+                  <div className="p-3 bg-light-100 dark:bg-dark-700/30 rounded">
+                    <span className="text-gray-500 dark:text-dark-400 block mb-1">Port</span>
+                    <span className="text-gray-900 dark:text-white font-mono">{smtpConfig.port}</span>
                   </div>
-                  <div className="p-3 bg-dark-700/30 rounded">
-                    <span className="text-dark-400 block mb-1">Utilisateur</span>
-                    <span className="text-white font-mono">{smtpConfig.user || '-'}</span>
+                  <div className="p-3 bg-light-100 dark:bg-dark-700/30 rounded">
+                    <span className="text-gray-500 dark:text-dark-400 block mb-1">Utilisateur</span>
+                    <span className="text-gray-900 dark:text-white font-mono">{smtpConfig.user || '-'}</span>
                   </div>
-                  <div className="p-3 bg-dark-700/30 rounded">
-                    <span className="text-dark-400 block mb-1">Expéditeur</span>
-                    <span className="text-white font-mono">{smtpConfig.from_addr || '-'}</span>
+                  <div className="p-3 bg-light-100 dark:bg-dark-700/30 rounded">
+                    <span className="text-gray-500 dark:text-dark-400 block mb-1">Expéditeur</span>
+                    <span className="text-gray-900 dark:text-white font-mono">{smtpConfig.from_addr || '-'}</span>
                   </div>
                 </div>
 
                 {/* Test email */}
-                <div className="border-t border-dark-700 pt-4">
-                  <h4 className="text-sm font-medium text-dark-200 mb-4 flex items-center gap-2">
+                <div className="border-t border-light-200 dark:border-dark-700 pt-4">
+                  <h4 className="text-sm font-medium text-gray-700 dark:text-dark-200 mb-4 flex items-center gap-2">
                     <Send size={16} />
                     Envoyer un email de test
                   </h4>
@@ -529,7 +594,7 @@ export function Settings() {
                       Envoyer
                     </Button>
                   </div>
-                  <p className="text-xs text-dark-400 mt-2">
+                  <p className="text-xs text-gray-500 dark:text-dark-400 mt-2">
                     Un email de test sera envoyé pour vérifier la configuration SMTP.
                   </p>
                 </div>
@@ -544,7 +609,7 @@ export function Settings() {
                 </div>
               </div>
             ) : (
-              <div className="text-center py-4 text-dark-400">
+              <div className="text-center py-4 text-gray-500 dark:text-dark-400">
                 <Mail size={24} className="mx-auto mb-2 opacity-50" />
                 <p>Configuration SMTP non disponible</p>
                 <p className="text-sm">Configurez les variables d'environnement SMTP sur le serveur</p>
@@ -641,7 +706,7 @@ export function Settings() {
             title="Connexion API"
             description="Vérifiez l'état de la connexion au serveur"
           >
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 bg-dark-700/50 rounded-lg">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 bg-light-100 dark:bg-dark-700/50 rounded-lg">
               <div className="flex items-center gap-3">
                 {healthStatus ? (
                   healthStatus.status === 'healthy' ? (
@@ -650,10 +715,10 @@ export function Settings() {
                     <AlertTriangle size={24} className="text-yellow-500" />
                   )
                 ) : (
-                  <XCircle size={24} className="text-dark-500" />
+                  <XCircle size={24} className="text-gray-400 dark:text-dark-500" />
                 )}
                 <div>
-                  <p className="font-medium text-white">
+                  <p className="font-medium text-gray-900 dark:text-white">
                     {healthStatus
                       ? healthStatus.status === 'healthy'
                         ? 'API connectée'
@@ -661,7 +726,7 @@ export function Settings() {
                       : 'Statut inconnu'}
                   </p>
                   {healthStatus && (
-                    <p className="text-sm text-dark-400">
+                    <p className="text-sm text-gray-500 dark:text-dark-400">
                       DB: {healthStatus.checks?.database?.status === 'healthy' ? '✓' : '✗'} | 
                       Redis: {healthStatus.checks?.redis?.status === 'healthy' ? '✓' : '✗'} | 
                       Celery: {healthStatus.checks?.celery?.status === 'healthy' ? '✓' : '✗'}
@@ -688,16 +753,16 @@ export function Settings() {
             description="Gérez votre compte et votre sécurité"
           >
             {user && (
-              <div className="p-4 bg-dark-700/50 rounded-lg mb-4">
+              <div className="p-4 bg-light-100 dark:bg-dark-700/50 rounded-lg mb-4">
                 <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-primary-600/20 rounded-full flex items-center justify-center">
-                    <User size={24} className="text-primary-500" />
+                  <div className="w-12 h-12 bg-oto-100 dark:bg-primary-600/20 rounded-full flex items-center justify-center">
+                    <User size={24} className="text-oto-500" />
                   </div>
                   <div>
-                    <p className="font-medium text-white">{user.full_name || user.username}</p>
-                    <p className="text-sm text-dark-400">{user.email}</p>
+                    <p className="font-medium text-gray-900 dark:text-white">{user.full_name || user.username}</p>
+                    <p className="text-sm text-gray-500 dark:text-dark-400">{user.email}</p>
                     {user.is_superuser && (
-                      <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 bg-yellow-500/20 text-yellow-500 text-xs rounded">
+                      <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 bg-yellow-100 dark:bg-yellow-500/20 text-yellow-600 dark:text-yellow-500 text-xs rounded">
                         <Shield size={12} />
                         Administrateur
                       </span>
@@ -707,8 +772,8 @@ export function Settings() {
               </div>
             )}
             
-            <div className="border-t border-dark-700 pt-4">
-              <h4 className="text-sm font-medium text-dark-200 mb-4 flex items-center gap-2">
+            <div className="border-t border-light-200 dark:border-dark-700 pt-4">
+              <h4 className="text-sm font-medium text-gray-700 dark:text-dark-200 mb-4 flex items-center gap-2">
                 <Key size={16} />
                 Changer le mot de passe
               </h4>
@@ -780,7 +845,7 @@ export function Settings() {
                 </Button>
               </div>
             </div>
-            <p className="text-sm text-dark-400">
+            <p className="text-sm text-gray-500 dark:text-dark-400">
               La configuration exportée inclut vos préférences locales (thème, notifications, valeurs par défaut).
               Elle n'inclut pas les données sensibles comme les mots de passe.
             </p>
@@ -793,30 +858,30 @@ export function Settings() {
             description="Informations sur l'application"
           >
             <div className="space-y-3">
-              <div className="flex justify-between items-center py-2 border-b border-dark-700">
-                <span className="text-dark-400">Version</span>
-                <span className="text-white font-mono">1.0.0</span>
+              <div className="flex justify-between items-center py-2 border-b border-light-200 dark:border-dark-700">
+                <span className="text-gray-500 dark:text-dark-400">Version</span>
+                <span className="text-gray-900 dark:text-white font-mono">1.0.0</span>
               </div>
-              <div className="flex justify-between items-center py-2 border-b border-dark-700">
-                <span className="text-dark-400">Environnement</span>
-                <span className="text-white font-mono">{import.meta.env.MODE}</span>
+              <div className="flex justify-between items-center py-2 border-b border-light-200 dark:border-dark-700">
+                <span className="text-gray-500 dark:text-dark-400">Environnement</span>
+                <span className="text-gray-900 dark:text-white font-mono">{import.meta.env.MODE}</span>
               </div>
-              <div className="flex justify-between items-center py-2 border-b border-dark-700">
-                <span className="text-dark-400">API URL</span>
-                <span className="text-white font-mono text-sm">{import.meta.env.VITE_API_URL || '/api/v1'}</span>
+              <div className="flex justify-between items-center py-2 border-b border-light-200 dark:border-dark-700">
+                <span className="text-gray-500 dark:text-dark-400">API URL</span>
+                <span className="text-gray-900 dark:text-white font-mono text-sm">{import.meta.env.VITE_API_URL || '/api/v1'}</span>
               </div>
             </div>
           </SettingsSection>
 
           {/* Actions de réinitialisation */}
-          <div className="card p-6 border-red-500/20 bg-red-500/5">
+          <div className="card p-6 border-red-200 dark:border-red-500/20 bg-red-50 dark:bg-red-500/5">
             <div className="flex items-start gap-4">
-              <div className="w-10 h-10 bg-red-500/20 rounded-lg flex items-center justify-center flex-shrink-0">
+              <div className="w-10 h-10 bg-red-100 dark:bg-red-500/20 rounded-lg flex items-center justify-center flex-shrink-0">
                 <AlertTriangle size={20} className="text-red-500" />
               </div>
               <div className="flex-1">
-                <h3 className="text-lg font-semibold text-white">Zone de danger</h3>
-                <p className="text-sm text-dark-400 mt-1 mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Zone de danger</h3>
+                <p className="text-sm text-gray-500 dark:text-dark-400 mt-1 mb-4">
                   Ces actions sont irréversibles. Procédez avec précaution.
                 </p>
                 <Button

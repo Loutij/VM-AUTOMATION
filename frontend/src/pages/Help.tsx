@@ -552,17 +552,17 @@ export function Help() {
     : faqItems;
 
   return (
-    <div className="min-h-screen bg-dark-900">
+    <div className="min-h-screen bg-light-100 dark:bg-dark-900">
       <Header title="Aide" />
       
       <div className="p-4 sm:p-6">
         {/* Hero section */}
-        <div className="card p-8 mb-6 text-center bg-gradient-to-br from-primary-600/10 to-purple-600/10 border-primary-500/20">
-          <HelpCircle size={48} className="mx-auto mb-4 text-primary-500" />
-          <h1 className="text-2xl font-bold text-white mb-2">
+        <div className="card p-8 mb-6 text-center bg-gradient-to-br from-oto-100 dark:from-primary-600/10 to-purple-100 dark:to-purple-600/10 border-oto-200 dark:border-primary-500/20">
+          <HelpCircle size={48} className="mx-auto mb-4 text-oto-500" />
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
             Centre d'aide VM Automation
           </h1>
-          <p className="text-dark-400 max-w-xl mx-auto">
+          <p className="text-gray-500 dark:text-dark-400 max-w-xl mx-auto">
             Documentation complète pour déployer vos machines virtuelles Windows et Linux
             de manière automatisée sur Hyper-V.
           </p>
@@ -582,7 +582,7 @@ export function Help() {
           {/* Sidebar navigation */}
           <div className="lg:col-span-1">
             <div className="card p-4 sticky top-6">
-              <h3 className="text-sm font-semibold text-dark-400 uppercase tracking-wider mb-3">
+              <h3 className="text-sm font-semibold text-gray-500 dark:text-dark-400 uppercase tracking-wider mb-3">
                 Navigation
               </h3>
               <nav className="space-y-1">
@@ -592,8 +592,8 @@ export function Help() {
                     onClick={() => setActiveSection(section.id)}
                     className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${
                       activeSection === section.id
-                        ? 'bg-primary-600/20 text-primary-500'
-                        : 'text-dark-300 hover:bg-dark-700/50 hover:text-white'
+                        ? 'bg-oto-100 dark:bg-primary-600/20 text-oto-600 dark:text-primary-500'
+                        : 'text-gray-600 dark:text-dark-300 hover:bg-light-100 dark:hover:bg-dark-700/50 hover:text-gray-900 dark:hover:text-white'
                     }`}
                   >
                     <section.icon size={18} />
@@ -603,8 +603,8 @@ export function Help() {
               </nav>
               
               {/* Liens externes */}
-              <div className="mt-6 pt-4 border-t border-dark-700">
-                <h3 className="text-sm font-semibold text-dark-400 uppercase tracking-wider mb-3">
+              <div className="mt-6 pt-4 border-t border-light-200 dark:border-dark-700">
+                <h3 className="text-sm font-semibold text-gray-500 dark:text-dark-400 uppercase tracking-wider mb-3">
                   Ressources
                 </h3>
                 <div className="space-y-2">
@@ -612,7 +612,7 @@ export function Help() {
                     href="https://github.com/Loutij/oto-netbox"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-2 text-sm text-dark-300 hover:text-primary-500 transition-colors"
+                    className="flex items-center gap-2 text-sm text-gray-600 dark:text-dark-300 hover:text-oto-500 transition-colors"
                   >
                     <ExternalLink size={14} />
                     GitHub Repository
@@ -621,7 +621,7 @@ export function Help() {
                     href="/api/docs"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-2 text-sm text-dark-300 hover:text-primary-500 transition-colors"
+                    className="flex items-center gap-2 text-sm text-gray-600 dark:text-dark-300 hover:text-oto-500 transition-colors"
                   >
                     <ExternalLink size={14} />
                     API Documentation
@@ -644,10 +644,10 @@ export function Help() {
                       className={searchQuery ? 'mb-8 last:mb-0' : activeSection === section.id ? '' : 'hidden'}
                     >
                       <div className="flex items-center gap-3 mb-4">
-                        <div className="w-10 h-10 bg-primary-600/20 rounded-lg flex items-center justify-center">
-                          <section.icon size={20} className="text-primary-500" />
+                        <div className="w-10 h-10 bg-oto-100 dark:bg-primary-600/20 rounded-lg flex items-center justify-center">
+                          <section.icon size={20} className="text-oto-500" />
                         </div>
-                        <h2 className="text-xl font-semibold text-white">{section.title}</h2>
+                        <h2 className="text-xl font-semibold text-gray-900 dark:text-white">{section.title}</h2>
                       </div>
                       {section.content}
                     </div>
@@ -658,12 +658,12 @@ export function Help() {
             {/* FAQ */}
             <div className="card p-6">
               <div className="flex items-center gap-3 mb-6">
-                <div className="w-10 h-10 bg-yellow-500/20 rounded-lg flex items-center justify-center">
-                  <MessageCircle size={20} className="text-yellow-500" />
+                <div className="w-10 h-10 bg-yellow-100 dark:bg-yellow-500/20 rounded-lg flex items-center justify-center">
+                  <MessageCircle size={20} className="text-yellow-600 dark:text-yellow-500" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-semibold text-white">Questions fréquentes</h2>
-                  <p className="text-sm text-dark-400">Réponses aux questions les plus courantes</p>
+                  <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Questions fréquentes</h2>
+                  <p className="text-sm text-gray-500 dark:text-dark-400">Réponses aux questions les plus courantes</p>
                 </div>
               </div>
               <FAQAccordion items={filteredFAQ} />
@@ -672,29 +672,29 @@ export function Help() {
             {/* Raccourcis clavier */}
             <div className="card p-6">
               <div className="flex items-center gap-3 mb-6">
-                <div className="w-10 h-10 bg-purple-500/20 rounded-lg flex items-center justify-center">
-                  <Keyboard size={20} className="text-purple-500" />
+                <div className="w-10 h-10 bg-purple-100 dark:bg-purple-500/20 rounded-lg flex items-center justify-center">
+                  <Keyboard size={20} className="text-purple-600 dark:text-purple-500" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-semibold text-white">Raccourcis clavier</h2>
-                  <p className="text-sm text-dark-400">Naviguez plus rapidement dans l'application</p>
+                  <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Raccourcis clavier</h2>
+                  <p className="text-sm text-gray-500 dark:text-dark-400">Naviguez plus rapidement dans l'application</p>
                 </div>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {shortcuts.map((shortcut, index) => (
                   <div
                     key={index}
-                    className="flex items-center justify-between p-3 bg-dark-700/50 rounded-lg"
+                    className="flex items-center justify-between p-3 bg-light-100 dark:bg-dark-700/50 rounded-lg"
                   >
-                    <span className="text-dark-300">{shortcut.description}</span>
+                    <span className="text-gray-600 dark:text-dark-300">{shortcut.description}</span>
                     <div className="flex items-center gap-1">
                       {shortcut.keys.map((key, i) => (
                         <span key={i}>
-                          <kbd className="px-2 py-1 bg-dark-600 border border-dark-500 rounded text-xs text-white font-mono">
+                          <kbd className="px-2 py-1 bg-white dark:bg-dark-600 border border-light-300 dark:border-dark-500 rounded text-xs text-gray-900 dark:text-white font-mono">
                             {key}
                           </kbd>
                           {i < shortcut.keys.length - 1 && (
-                            <span className="mx-1 text-dark-500">+</span>
+                            <span className="mx-1 text-gray-400 dark:text-dark-500">+</span>
                           )}
                         </span>
                       ))}
@@ -705,14 +705,14 @@ export function Help() {
             </div>
 
             {/* Contact/Support */}
-            <div className="card p-6 bg-gradient-to-r from-primary-600/10 to-blue-600/10 border-primary-500/20">
+            <div className="card p-6 bg-gradient-to-r from-oto-50 dark:from-primary-600/10 to-blue-50 dark:to-blue-600/10 border-oto-200 dark:border-primary-500/20">
               <div className="flex items-start gap-4">
-                <div className="w-12 h-12 bg-primary-600/20 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <Book size={24} className="text-primary-500" />
+                <div className="w-12 h-12 bg-oto-100 dark:bg-primary-600/20 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <Book size={24} className="text-oto-500" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-semibold text-white">Besoin d'aide supplémentaire ?</h3>
-                  <p className="text-dark-300 mt-1">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Besoin d'aide supplémentaire ?</h3>
+                  <p className="text-gray-600 dark:text-dark-300 mt-1">
                     Consultez la documentation complète ou contactez l'équipe Infrastructure IT.
                   </p>
                   <div className="flex flex-wrap gap-3 mt-4">
@@ -720,7 +720,7 @@ export function Help() {
                       href="https://github.com/Loutij/oto-netbox/issues"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg text-sm transition-colors"
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-oto-600 hover:bg-oto-700 text-white rounded-lg text-sm transition-colors"
                     >
                       <MessageCircle size={16} />
                       Signaler un problème
@@ -729,7 +729,7 @@ export function Help() {
                       href="/docs/UNATTENDED_INSTALL.md"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 px-4 py-2 bg-dark-600 hover:bg-dark-500 text-white rounded-lg text-sm transition-colors"
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 dark:bg-dark-600 hover:bg-gray-200 dark:hover:bg-dark-500 text-gray-900 dark:text-white rounded-lg text-sm transition-colors"
                     >
                       <Book size={16} />
                       Guide technique

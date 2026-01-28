@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MainLayout } from './components/layout';
 import { ToastProvider } from './components/ui';
 import { AuthProvider } from './contexts/AuthContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
 import {
   Dashboard,
@@ -31,9 +32,10 @@ const queryClient = new QueryClient({
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <ToastProvider>
-          <BrowserRouter>
+      <ThemeProvider>
+        <AuthProvider>
+          <ToastProvider>
+            <BrowserRouter>
             <Routes>
               {/* Route publique */}
               <Route path="/login" element={<Login />} />
@@ -57,9 +59,10 @@ function App() {
                 <Route path="/help" element={<Help />} />
               </Route>
             </Routes>
-          </BrowserRouter>
-        </ToastProvider>
-      </AuthProvider>
+            </BrowserRouter>
+          </ToastProvider>
+        </AuthProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   );
 }

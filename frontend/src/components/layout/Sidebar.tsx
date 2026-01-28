@@ -11,7 +11,7 @@ import {
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useSidebar } from '../../contexts/SidebarContext';
 
 // Composant Logo OTO
 function OTOLogo({ collapsed }: { collapsed: boolean }) {
@@ -56,7 +56,7 @@ const bottomNavItems: NavItem[] = [
 ];
 
 export function Sidebar() {
-  const [collapsed, setCollapsed] = useState(false);
+  const { collapsed, toggleCollapsed } = useSidebar();
 
   return (
     <aside
@@ -117,7 +117,7 @@ export function Sidebar() {
 
       {/* Toggle collapse */}
       <button
-        onClick={() => setCollapsed(!collapsed)}
+        onClick={toggleCollapsed}
         className="absolute -right-3 top-20 w-6 h-6 bg-white dark:bg-dark-700 border border-light-300 dark:border-dark-600 rounded-full flex items-center justify-center text-gray-500 dark:text-dark-300 hover:text-gray-900 dark:hover:text-white hover:bg-light-100 dark:hover:bg-dark-600 transition-colors shadow-sm"
       >
         {collapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}

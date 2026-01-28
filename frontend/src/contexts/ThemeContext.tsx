@@ -17,7 +17,7 @@ function getSystemTheme(): 'light' | 'dark' {
   if (typeof window !== 'undefined' && window.matchMedia) {
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   }
-  return 'dark';
+  return 'light';
 }
 
 function getStoredTheme(): Theme {
@@ -27,7 +27,7 @@ function getStoredTheme(): Theme {
       return stored;
     }
   }
-  return 'dark'; // Défaut: dark mode
+  return 'light'; // Défaut: light mode
 }
 
 interface ThemeProviderProps {

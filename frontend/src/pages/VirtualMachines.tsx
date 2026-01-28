@@ -261,7 +261,7 @@ export function VirtualMachines() {
                 ? 'bg-green-500/20'
                 : vm.state === 'paused'
                 ? 'bg-yellow-500/20'
-                : 'bg-dark-600'
+                : 'bg-light-200 dark:bg-dark-600'
             }`}
           >
             <Monitor
@@ -271,14 +271,14 @@ export function VirtualMachines() {
                   ? 'text-green-500'
                   : vm.state === 'paused'
                   ? 'text-yellow-500'
-                  : 'text-dark-400'
+                  : 'text-gray-400 dark:text-dark-400'
               }
             />
           </div>
           <div>
-            <span className="font-medium text-white">{vm.name}</span>
+            <span className="font-medium text-gray-900 dark:text-white">{vm.name}</span>
             {vm.os_type && (
-              <p className="text-xs text-dark-400">{vm.os_type}</p>
+              <p className="text-xs text-gray-500 dark:text-dark-400">{vm.os_type}</p>
             )}
           </div>
         </div>
@@ -295,15 +295,15 @@ export function VirtualMachines() {
       header: 'Ressources',
       render: (vm) => (
         <div className="flex items-center gap-4 text-sm">
-          <div className="flex items-center gap-1.5 text-dark-300">
+          <div className="flex items-center gap-1.5 text-gray-600 dark:text-dark-300">
             <Cpu size={14} />
             <span>{vm.cpu_count} vCPU</span>
           </div>
-          <div className="flex items-center gap-1.5 text-dark-300">
+          <div className="flex items-center gap-1.5 text-gray-600 dark:text-dark-300">
             <MemoryStick size={14} />
             <span>{vm.ram_gb} Go</span>
           </div>
-          <div className="flex items-center gap-1.5 text-dark-300">
+          <div className="flex items-center gap-1.5 text-gray-600 dark:text-dark-300">
             <HardDrive size={14} />
             <span>{vm.disk_gb} GB</span>
           </div>
@@ -314,7 +314,7 @@ export function VirtualMachines() {
       key: 'ip_address',
       header: 'Réseau',
       render: (vm) => (
-        <div className="flex items-center gap-1.5 text-dark-300">
+        <div className="flex items-center gap-1.5 text-gray-600 dark:text-dark-300">
           <Network size={14} />
           <span className="font-mono text-sm">{vm.ip_address || '-'}</span>
         </div>
@@ -325,7 +325,7 @@ export function VirtualMachines() {
       header: 'VLAN',
       sortable: true,
       render: (vm) => (
-        <div className="flex items-center gap-1.5 text-dark-300">
+        <div className="flex items-center gap-1.5 text-gray-600 dark:text-dark-300">
           <Tag size={14} />
           <span className="font-mono text-sm">
             {vm.vlan_id ? `VLAN ${vm.vlan_id}` : '-'}
@@ -434,36 +434,36 @@ export function VirtualMachines() {
   const stoppedCount = vms.filter((vm) => vm.state === 'stopped').length;
 
   return (
-    <div className="min-h-screen bg-dark-900">
+    <div className="min-h-screen bg-light-100 dark:bg-dark-900">
       <Header title="Machines Virtuelles" />
       <div className="p-6">
         {/* Stats summary */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <div className="card p-4 flex items-center gap-4">
-            <div className="w-12 h-12 bg-primary-600/20 rounded-lg flex items-center justify-center">
-              <Monitor size={24} className="text-primary-500" />
+            <div className="w-12 h-12 bg-oto-100 dark:bg-primary-600/20 rounded-lg flex items-center justify-center">
+              <Monitor size={24} className="text-oto-500 dark:text-primary-500" />
             </div>
             <div>
-              <p className="text-2xl font-bold text-white">{vms.length}</p>
-              <p className="text-sm text-dark-400">Total VMs</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">{vms.length}</p>
+              <p className="text-sm text-gray-500 dark:text-dark-400">Total VMs</p>
             </div>
           </div>
           <div className="card p-4 flex items-center gap-4">
-            <div className="w-12 h-12 bg-green-500/20 rounded-lg flex items-center justify-center">
-              <Play size={24} className="text-green-500" />
+            <div className="w-12 h-12 bg-green-100 dark:bg-green-500/20 rounded-lg flex items-center justify-center">
+              <Play size={24} className="text-green-600 dark:text-green-500" />
             </div>
             <div>
-              <p className="text-2xl font-bold text-white">{runningCount}</p>
-              <p className="text-sm text-dark-400">En cours d'exécution</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">{runningCount}</p>
+              <p className="text-sm text-gray-500 dark:text-dark-400">En cours d'exécution</p>
             </div>
           </div>
           <div className="card p-4 flex items-center gap-4">
-            <div className="w-12 h-12 bg-dark-600 rounded-lg flex items-center justify-center">
-              <Square size={24} className="text-dark-400" />
+            <div className="w-12 h-12 bg-gray-100 dark:bg-dark-600 rounded-lg flex items-center justify-center">
+              <Square size={24} className="text-gray-400 dark:text-dark-400" />
             </div>
             <div>
-              <p className="text-2xl font-bold text-white">{stoppedCount}</p>
-              <p className="text-sm text-dark-400">Arrêtées</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">{stoppedCount}</p>
+              <p className="text-sm text-gray-500 dark:text-dark-400">Arrêtées</p>
             </div>
           </div>
         </div>
@@ -471,11 +471,11 @@ export function VirtualMachines() {
         {/* Filters and actions */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
           <div className="flex items-center gap-2">
-            <Server size={18} className="text-dark-400 hidden sm:block" />
+            <Server size={18} className="text-gray-400 dark:text-dark-400 hidden sm:block" />
             <select
               value={selectedHypervisor}
               onChange={(e) => setSelectedHypervisor(e.target.value)}
-              className="flex-1 sm:flex-none bg-dark-700 border border-dark-600 rounded-lg px-3 py-2 text-dark-100 text-sm focus:outline-none focus:border-primary-500"
+              className="flex-1 sm:flex-none bg-white dark:bg-dark-700 border border-light-300 dark:border-dark-600 rounded-lg px-3 py-2 text-gray-900 dark:text-dark-100 text-sm focus:outline-none focus:ring-2 focus:ring-oto-500"
             >
               <option value="all">Tous les hyperviseurs</option>
               {hypervisors.map((h) => (
@@ -542,7 +542,7 @@ export function VirtualMachines() {
             searchKeys={['name', 'ip_address', 'os_type']}
             actions={renderActions}
             emptyMessage="Aucune VM trouvée"
-            emptyIcon={<Monitor size={40} className="text-dark-500" />}
+            emptyIcon={<Monitor size={40} className="text-gray-400 dark:text-dark-500" />}
           />
         )}
 
@@ -570,7 +570,7 @@ export function VirtualMachines() {
           <div className="space-y-4">
             {/* Toolbar */}
             <div className="flex items-center justify-between">
-              <p className="text-sm text-dark-400">
+              <p className="text-sm text-gray-500 dark:text-dark-400">
                 Capture d'écran en temps réel de la VM
               </p>
               <div className="flex gap-2">
@@ -597,9 +597,9 @@ export function VirtualMachines() {
             </div>
             
             {/* Screenshot display */}
-            <div className="bg-black rounded-lg overflow-hidden min-h-[400px] flex items-center justify-center">
+            <div className="bg-gray-900 dark:bg-black rounded-lg overflow-hidden min-h-[400px] flex items-center justify-center">
               {screenshotLoading ? (
-                <div className="flex flex-col items-center gap-3 text-dark-400">
+                <div className="flex flex-col items-center gap-3 text-gray-400 dark:text-dark-400">
                   <RefreshCw size={32} className="animate-spin" />
                   <span>Capture en cours...</span>
                 </div>
@@ -618,12 +618,12 @@ export function VirtualMachines() {
                   className="max-w-full max-h-[600px] object-contain"
                 />
               ) : (
-                <span className="text-dark-400">Aucune image</span>
+                <span className="text-gray-400 dark:text-dark-400">Aucune image</span>
               )}
             </div>
             
             {/* Info */}
-            <p className="text-xs text-dark-500 text-center">
+            <p className="text-xs text-gray-400 dark:text-dark-500 text-center">
               Cliquez sur "Actualiser" pour mettre à jour l'image
             </p>
           </div>
@@ -638,105 +638,105 @@ export function VirtualMachines() {
         >
           {detailsLoading ? (
             <div className="flex items-center justify-center py-12">
-              <RefreshCw size={32} className="animate-spin text-primary-500" />
-              <span className="ml-3 text-dark-300">Chargement des détails...</span>
+              <RefreshCw size={32} className="animate-spin text-oto-500" />
+              <span className="ml-3 text-gray-600 dark:text-dark-300">Chargement des détails...</span>
             </div>
           ) : vmDetails ? (
             <div className="space-y-6 max-h-[70vh] overflow-y-auto">
               {/* État et ressources en temps réel */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="bg-dark-700 rounded-lg p-4">
-                  <div className="flex items-center gap-2 text-dark-400 mb-1">
+                <div className="bg-light-100 dark:bg-dark-700 rounded-lg p-4">
+                  <div className="flex items-center gap-2 text-gray-500 dark:text-dark-400 mb-1">
                     <Activity size={16} />
                     <span className="text-sm">État</span>
                   </div>
                   <StatusBadge status={vmDetails.general.state.toLowerCase() as VirtualMachine['state']} />
                 </div>
-                <div className="bg-dark-700 rounded-lg p-4">
-                  <div className="flex items-center gap-2 text-dark-400 mb-1">
+                <div className="bg-light-100 dark:bg-dark-700 rounded-lg p-4">
+                  <div className="flex items-center gap-2 text-gray-500 dark:text-dark-400 mb-1">
                     <Cpu size={16} />
                     <span className="text-sm">CPU</span>
                   </div>
-                  <p className="text-xl font-bold text-white">{vmDetails.resources.cpu_usage_percent}%</p>
-                  <p className="text-xs text-dark-400">{vmDetails.configuration.cpu_count} vCPU</p>
+                  <p className="text-xl font-bold text-gray-900 dark:text-white">{vmDetails.resources.cpu_usage_percent}%</p>
+                  <p className="text-xs text-gray-500 dark:text-dark-400">{vmDetails.configuration.cpu_count} vCPU</p>
                 </div>
-                <div className="bg-dark-700 rounded-lg p-4">
-                  <div className="flex items-center gap-2 text-dark-400 mb-1">
+                <div className="bg-light-100 dark:bg-dark-700 rounded-lg p-4">
+                  <div className="flex items-center gap-2 text-gray-500 dark:text-dark-400 mb-1">
                     <MemoryStick size={16} />
                     <span className="text-sm">RAM</span>
                   </div>
-                  <p className="text-xl font-bold text-white">{vmDetails.resources.ram_assigned_gb} GB</p>
-                  <p className="text-xs text-dark-400">
+                  <p className="text-xl font-bold text-gray-900 dark:text-white">{vmDetails.resources.ram_assigned_gb} GB</p>
+                  <p className="text-xs text-gray-500 dark:text-dark-400">
                     {vmDetails.configuration.dynamic_memory 
                       ? `Dynamique (${vmDetails.configuration.ram_minimum_gb}-${vmDetails.configuration.ram_maximum_gb} GB)`
                       : 'Statique'
                     }
                   </p>
                 </div>
-                <div className="bg-dark-700 rounded-lg p-4">
-                  <div className="flex items-center gap-2 text-dark-400 mb-1">
+                <div className="bg-light-100 dark:bg-dark-700 rounded-lg p-4">
+                  <div className="flex items-center gap-2 text-gray-500 dark:text-dark-400 mb-1">
                     <Clock size={16} />
                     <span className="text-sm">Uptime</span>
                   </div>
-                  <p className="text-lg font-medium text-white">{vmDetails.general.uptime || '-'}</p>
+                  <p className="text-lg font-medium text-gray-900 dark:text-white">{vmDetails.general.uptime || '-'}</p>
                 </div>
               </div>
 
               {/* Configuration */}
               <div>
-                <h4 className="text-sm font-medium text-dark-300 mb-3 flex items-center gap-2">
+                <h4 className="text-sm font-medium text-gray-600 dark:text-dark-300 mb-3 flex items-center gap-2">
                   <Server size={16} />
                   Configuration
                 </h4>
-                <div className="bg-dark-700 rounded-lg p-4 grid grid-cols-2 gap-3 text-sm">
+                <div className="bg-light-100 dark:bg-dark-700 rounded-lg p-4 grid grid-cols-2 gap-3 text-sm">
                   <div>
-                    <span className="text-dark-400">Génération:</span>
-                    <span className="ml-2 text-white">Gen {vmDetails.general.generation}</span>
+                    <span className="text-gray-500 dark:text-dark-400">Génération:</span>
+                    <span className="ml-2 text-gray-900 dark:text-white">Gen {vmDetails.general.generation}</span>
                   </div>
                   <div>
-                    <span className="text-dark-400">Version:</span>
-                    <span className="ml-2 text-white">{vmDetails.general.version}</span>
+                    <span className="text-gray-500 dark:text-dark-400">Version:</span>
+                    <span className="ml-2 text-gray-900 dark:text-white">{vmDetails.general.version}</span>
                   </div>
                   <div>
-                    <span className="text-dark-400">Secure Boot:</span>
-                    <span className="ml-2 text-white">{vmDetails.configuration.secure_boot ? 'Activé' : 'Désactivé'}</span>
+                    <span className="text-gray-500 dark:text-dark-400">Secure Boot:</span>
+                    <span className="ml-2 text-gray-900 dark:text-white">{vmDetails.configuration.secure_boot ? 'Activé' : 'Désactivé'}</span>
                   </div>
                   <div>
-                    <span className="text-dark-400">TPM:</span>
-                    <span className="ml-2 text-white">{vmDetails.configuration.tpm_enabled ? 'Activé' : 'Non'}</span>
+                    <span className="text-gray-500 dark:text-dark-400">TPM:</span>
+                    <span className="ml-2 text-gray-900 dark:text-white">{vmDetails.configuration.tpm_enabled ? 'Activé' : 'Non'}</span>
                   </div>
                   <div className="col-span-2">
-                    <span className="text-dark-400">Chemin:</span>
-                    <span className="ml-2 text-white font-mono text-xs">{vmDetails.general.path}</span>
+                    <span className="text-gray-500 dark:text-dark-400">Chemin:</span>
+                    <span className="ml-2 text-gray-900 dark:text-white font-mono text-xs">{vmDetails.general.path}</span>
                   </div>
                 </div>
               </div>
 
               {/* Disques */}
               <div>
-                <h4 className="text-sm font-medium text-dark-300 mb-3 flex items-center gap-2">
+                <h4 className="text-sm font-medium text-gray-600 dark:text-dark-300 mb-3 flex items-center gap-2">
                   <HardDrive size={16} />
                   Disques ({vmDetails.disks.length})
                 </h4>
                 <div className="space-y-2">
                   {vmDetails.disks.map((disk, idx) => (
-                    <div key={idx} className="bg-dark-700 rounded-lg p-3">
+                    <div key={idx} className="bg-light-100 dark:bg-dark-700 rounded-lg p-3">
                       <div className="flex items-center justify-between">
                         <div>
-                          <span className="text-white font-medium">{disk.type || 'Disque'}</span>
+                          <span className="text-gray-900 dark:text-white font-medium">{disk.type || 'Disque'}</span>
                           {disk.size_gb && (
-                            <span className="ml-2 text-dark-400">
+                            <span className="ml-2 text-gray-500 dark:text-dark-400">
                               {disk.size_used_gb ? `${disk.size_used_gb}/${disk.size_gb} GB` : `${disk.size_gb} GB`}
                             </span>
                           )}
                         </div>
-                        <span className="text-xs text-dark-400">{disk.format}</span>
+                        <span className="text-xs text-gray-500 dark:text-dark-400">{disk.format}</span>
                       </div>
-                      <p className="text-xs text-dark-500 font-mono mt-1 truncate">{disk.path}</p>
+                      <p className="text-xs text-gray-400 dark:text-dark-500 font-mono mt-1 truncate">{disk.path}</p>
                       {disk.size_gb && disk.size_used_gb && (
-                        <div className="mt-2 h-1.5 bg-dark-600 rounded-full overflow-hidden">
+                        <div className="mt-2 h-1.5 bg-light-200 dark:bg-dark-600 rounded-full overflow-hidden">
                           <div 
-                            className="h-full bg-primary-500 rounded-full"
+                            className="h-full bg-oto-500 rounded-full"
                             style={{ width: `${(disk.size_used_gb / disk.size_gb) * 100}%` }}
                           />
                         </div>
@@ -748,33 +748,33 @@ export function VirtualMachines() {
 
               {/* Réseau */}
               <div>
-                <h4 className="text-sm font-medium text-dark-300 mb-3 flex items-center gap-2">
+                <h4 className="text-sm font-medium text-gray-600 dark:text-dark-300 mb-3 flex items-center gap-2">
                   <Network size={16} />
                   Adaptateurs réseau ({vmDetails.network_adapters.length})
                 </h4>
                 <div className="space-y-2">
                   {vmDetails.network_adapters.map((nic, idx) => (
-                    <div key={idx} className="bg-dark-700 rounded-lg p-3">
+                    <div key={idx} className="bg-light-100 dark:bg-dark-700 rounded-lg p-3">
                       <div className="flex items-center justify-between">
-                        <span className="text-white font-medium">{nic.name}</span>
+                        <span className="text-gray-900 dark:text-white font-medium">{nic.name}</span>
                         <StatusBadge status={nic.status.toLowerCase() === 'ok' ? 'running' : 'stopped'} />
                       </div>
                       <div className="grid grid-cols-2 gap-2 mt-2 text-sm">
                         <div>
-                          <span className="text-dark-400">Switch:</span>
-                          <span className="ml-2 text-white">{nic.switch_name || '-'}</span>
+                          <span className="text-gray-500 dark:text-dark-400">Switch:</span>
+                          <span className="ml-2 text-gray-900 dark:text-white">{nic.switch_name || '-'}</span>
                         </div>
                         <div>
-                          <span className="text-dark-400">VLAN:</span>
-                          <span className="ml-2 text-white">{nic.vlan_id || 'Aucun'}</span>
+                          <span className="text-gray-500 dark:text-dark-400">VLAN:</span>
+                          <span className="ml-2 text-gray-900 dark:text-white">{nic.vlan_id || 'Aucun'}</span>
                         </div>
                         <div>
-                          <span className="text-dark-400">MAC:</span>
-                          <span className="ml-2 text-white font-mono text-xs">{nic.mac_address || '-'}</span>
+                          <span className="text-gray-500 dark:text-dark-400">MAC:</span>
+                          <span className="ml-2 text-gray-900 dark:text-white font-mono text-xs">{nic.mac_address || '-'}</span>
                         </div>
                         <div>
-                          <span className="text-dark-400">IP:</span>
-                          <span className="ml-2 text-white font-mono">
+                          <span className="text-gray-500 dark:text-dark-400">IP:</span>
+                          <span className="ml-2 text-gray-900 dark:text-white font-mono">
                             {nic.ip_addresses?.length > 0 ? nic.ip_addresses.join(', ') : '-'}
                           </span>
                         </div>
@@ -786,11 +786,11 @@ export function VirtualMachines() {
 
               {/* Services d'intégration */}
               <div>
-                <h4 className="text-sm font-medium text-dark-300 mb-3 flex items-center gap-2">
+                <h4 className="text-sm font-medium text-gray-600 dark:text-dark-300 mb-3 flex items-center gap-2">
                   <CheckCircle size={16} />
                   Services d'intégration
                 </h4>
-                <div className="bg-dark-700 rounded-lg p-3">
+                <div className="bg-light-100 dark:bg-dark-700 rounded-lg p-3">
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                     {vmDetails.integration_services.map((svc, idx) => (
                       <div key={idx} className="flex items-center gap-2 text-sm">
@@ -799,9 +799,9 @@ export function VirtualMachines() {
                         ) : svc.enabled ? (
                           <XCircle size={14} className="text-yellow-500" />
                         ) : (
-                          <XCircle size={14} className="text-dark-500" />
+                          <XCircle size={14} className="text-gray-400 dark:text-dark-500" />
                         )}
-                        <span className={svc.enabled ? 'text-white' : 'text-dark-400'}>{svc.name}</span>
+                        <span className={svc.enabled ? 'text-gray-900 dark:text-white' : 'text-gray-500 dark:text-dark-400'}>{svc.name}</span>
                       </div>
                     ))}
                   </div>
@@ -811,14 +811,14 @@ export function VirtualMachines() {
               {/* Checkpoints */}
               {vmDetails.checkpoints.length > 0 && (
                 <div>
-                  <h4 className="text-sm font-medium text-dark-300 mb-3">
+                  <h4 className="text-sm font-medium text-gray-600 dark:text-dark-300 mb-3">
                     Checkpoints ({vmDetails.checkpoints.length})
                   </h4>
-                  <div className="bg-dark-700 rounded-lg p-3 space-y-2">
+                  <div className="bg-light-100 dark:bg-dark-700 rounded-lg p-3 space-y-2">
                     {vmDetails.checkpoints.map((cp) => (
                       <div key={cp.id} className="flex items-center justify-between text-sm">
-                        <span className="text-white">{cp.name}</span>
-                        <span className="text-dark-400">{new Date(cp.creation_time).toLocaleString()}</span>
+                        <span className="text-gray-900 dark:text-white">{cp.name}</span>
+                        <span className="text-gray-500 dark:text-dark-400">{new Date(cp.creation_time).toLocaleString()}</span>
                       </div>
                     ))}
                   </div>
@@ -826,7 +826,7 @@ export function VirtualMachines() {
               )}
             </div>
           ) : (
-            <div className="text-center py-8 text-dark-400">
+            <div className="text-center py-8 text-gray-500 dark:text-dark-400">
               Impossible de charger les détails
             </div>
           )}

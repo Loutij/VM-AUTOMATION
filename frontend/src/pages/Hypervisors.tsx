@@ -246,12 +246,12 @@ export function Hypervisors() {
   );
 
   return (
-    <div className="min-h-screen bg-dark-900">
+    <div className="min-h-screen bg-light-100 dark:bg-dark-900">
       <Header title="Hyperviseurs" />
       <div className="p-4 sm:p-6">
         {/* Header actions */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-          <p className="text-dark-400 text-sm sm:text-base">
+          <p className="text-gray-500 dark:text-dark-400 text-sm sm:text-base">
             Gérez vos connexions aux serveurs Hyper-V et VMware
           </p>
           <div className="flex items-center gap-2 sm:gap-3">
@@ -301,7 +301,7 @@ export function Hypervisors() {
             searchKeys={['name', 'host']}
             actions={renderActions}
             emptyMessage="Aucun hyperviseur trouvé"
-            emptyIcon={<Server size={40} className="text-dark-500" />}
+            emptyIcon={<Server size={40} className="text-gray-400 dark:text-dark-500" />}
           />
         )}
 

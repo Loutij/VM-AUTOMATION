@@ -231,19 +231,19 @@ export function Templates() {
   }; void formatMemory;
 
   return (
-    <div className="min-h-screen bg-dark-900">
+    <div className="min-h-screen bg-light-100 dark:bg-dark-900">
       <Header title="Templates OS" />
       <div className="p-6">
         {/* Header actions */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-4">
-            <div className="flex items-center bg-dark-800 rounded-lg p-1">
+            <div className="flex items-center bg-white dark:bg-dark-800 rounded-lg p-1 border border-light-200 dark:border-transparent">
               <button
                 onClick={() => setFilterFamily('all')}
                 className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
                   filterFamily === 'all'
-                    ? 'bg-primary-600 text-white'
-                    : 'text-dark-300 hover:text-white'
+                    ? 'bg-oto-600 text-white'
+                    : 'text-gray-600 dark:text-dark-300 hover:text-gray-900 dark:hover:text-white'
                 }`}
               >
                 Tous
@@ -252,8 +252,8 @@ export function Templates() {
                 onClick={() => setFilterFamily('windows')}
                 className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
                   filterFamily === 'windows'
-                    ? 'bg-primary-600 text-white'
-                    : 'text-dark-300 hover:text-white'
+                    ? 'bg-oto-600 text-white'
+                    : 'text-gray-600 dark:text-dark-300 hover:text-gray-900 dark:hover:text-white'
                 }`}
               >
                 Windows
@@ -262,8 +262,8 @@ export function Templates() {
                 onClick={() => setFilterFamily('linux')}
                 className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
                   filterFamily === 'linux'
-                    ? 'bg-primary-600 text-white'
-                    : 'text-dark-300 hover:text-white'
+                    ? 'bg-oto-600 text-white'
+                    : 'text-gray-600 dark:text-dark-300 hover:text-gray-900 dark:hover:text-white'
                 }`}
               >
                 Linux
@@ -290,9 +290,9 @@ export function Templates() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className="card p-6 animate-pulse">
-                <div className="h-6 bg-dark-700 rounded w-3/4 mb-4" />
-                <div className="h-4 bg-dark-700 rounded w-1/2 mb-2" />
-                <div className="h-4 bg-dark-700 rounded w-2/3" />
+                <div className="h-6 bg-light-200 dark:bg-dark-700 rounded w-3/4 mb-4" />
+                <div className="h-4 bg-light-200 dark:bg-dark-700 rounded w-1/2 mb-2" />
+                <div className="h-4 bg-light-200 dark:bg-dark-700 rounded w-2/3" />
               </div>
             ))}
           </div>
@@ -314,7 +314,7 @@ export function Templates() {
             {filteredTemplates.map((template) => (
               <div
                 key={template.id}
-                className="card p-6 hover:border-dark-600 transition-colors relative group"
+                className="card p-6 hover:border-oto-300 dark:hover:border-dark-600 transition-colors relative group"
               >
                 {/* Actions dropdown */}
                 <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -350,28 +350,28 @@ export function Templates() {
                     {getOSIcon(template.os_family)}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h3 className="font-semibold text-white pr-8 break-words" title={template.name}>
+                    <h3 className="font-semibold text-gray-900 dark:text-white pr-8 break-words" title={template.name}>
                       {template.name}
                     </h3>
-                    <p className="text-sm text-dark-400">{template.os_type}</p>
+                    <p className="text-sm text-gray-500 dark:text-dark-400">{template.os_type}</p>
                   </div>
                 </div>
 
                 {template.description && (
-                  <p className="mt-3 text-sm text-dark-300 line-clamp-2">
+                  <p className="mt-3 text-sm text-gray-600 dark:text-dark-300 line-clamp-2">
                     {template.description}
                   </p>
                 )}
 
                 {/* Default specs */}
-                <div className="mt-4 pt-4 border-t border-dark-700 flex items-center justify-between text-xs text-dark-400">
+                <div className="mt-4 pt-4 border-t border-light-200 dark:border-dark-700 flex items-center justify-between text-xs text-gray-500 dark:text-dark-400">
                   <div className="flex items-center gap-4">
                     <span>{template.min_cpu} vCPU</span>
                     <span>{template.min_ram_gb} Go</span>
                     <span>{template.min_disk_gb} GB</span>
                   </div>
                   {template.install_locale && (
-                    <div className="flex items-center gap-1.5 text-dark-300">
+                    <div className="flex items-center gap-1.5 text-gray-600 dark:text-dark-300">
                       <Languages size={12} />
                       <span>{template.install_locale}</span>
                     </div>
@@ -451,7 +451,7 @@ export function Templates() {
             />
 
             <div>
-              <label className="block text-sm font-medium text-dark-200 mb-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-dark-200 mb-2">
                 Chemin ISO
               </label>
               <div className="flex gap-2">
@@ -475,7 +475,7 @@ export function Templates() {
                   Parcourir
                 </Button>
               </div>
-              <p className="mt-1 text-xs text-dark-400">
+              <p className="mt-1 text-xs text-gray-500 dark:text-dark-400">
                 Chemin vers le fichier ISO sur l'hyperviseur
               </p>
             </div>
@@ -554,23 +554,23 @@ export function Templates() {
 
             {/* Liste des ISOs */}
             {selectedHypervisorForIso && (
-              <div className="border border-dark-600 rounded-lg overflow-hidden">
-                <div className="bg-dark-700 px-4 py-2 text-sm font-medium text-dark-300 flex items-center gap-2">
+              <div className="border border-light-300 dark:border-dark-600 rounded-lg overflow-hidden">
+                <div className="bg-light-100 dark:bg-dark-700 px-4 py-2 text-sm font-medium text-gray-600 dark:text-dark-300 flex items-center gap-2">
                   <HardDrive size={16} />
                   Fichiers ISO disponibles
                 </div>
                 
                 {isosLoading ? (
-                  <div className="p-8 text-center text-dark-400">
+                  <div className="p-8 text-center text-gray-500 dark:text-dark-400">
                     <Loader2 size={24} className="animate-spin mx-auto mb-2" />
                     Chargement des ISOs...
                   </div>
                 ) : isos.length === 0 ? (
-                  <div className="p-8 text-center text-dark-400">
+                  <div className="p-8 text-center text-gray-500 dark:text-dark-400">
                     Aucun fichier ISO trouvé sur cet hyperviseur
                   </div>
                 ) : (
-                  <div className="max-h-80 overflow-y-auto divide-y divide-dark-700">
+                  <div className="max-h-80 overflow-y-auto divide-y divide-light-200 dark:divide-dark-700">
                     {isos.map((iso: ISOInfo) => (
                       <button
                         key={iso.full_path}
@@ -579,13 +579,13 @@ export function Templates() {
                           setFormData({ ...formData, iso_path: iso.full_path });
                           setIsIsoPickerOpen(false);
                         }}
-                        className="w-full px-4 py-3 text-left hover:bg-dark-700/50 transition-colors flex items-center justify-between gap-4"
+                        className="w-full px-4 py-3 text-left hover:bg-light-100 dark:hover:bg-dark-700/50 transition-colors flex items-center justify-between gap-4"
                       >
                         <div className="min-w-0 flex-1">
-                          <p className="font-medium text-white truncate">{iso.name}</p>
-                          <p className="text-xs text-dark-400 truncate">{iso.full_path}</p>
+                          <p className="font-medium text-gray-900 dark:text-white truncate">{iso.name}</p>
+                          <p className="text-xs text-gray-500 dark:text-dark-400 truncate">{iso.full_path}</p>
                         </div>
-                        <div className="text-right text-sm text-dark-400 flex-shrink-0">
+                        <div className="text-right text-sm text-gray-500 dark:text-dark-400 flex-shrink-0">
                           <p>{iso.size_gb} Go</p>
                           <p className="text-xs">{iso.last_modified}</p>
                         </div>

@@ -265,69 +265,69 @@ export function Deployments() {
   };
 
   return (
-    <div className="min-h-screen bg-dark-900">
+    <div className="min-h-screen bg-light-100 dark:bg-dark-900">
       <Header title="Déploiements" />
       <div className="p-6">
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
           <div className="card p-4 flex items-center gap-4">
-            <div className="w-12 h-12 bg-primary-600/20 rounded-lg flex items-center justify-center">
-              <Rocket size={24} className="text-primary-500" />
+            <div className="w-12 h-12 bg-oto-100 dark:bg-primary-600/20 rounded-lg flex items-center justify-center">
+              <Rocket size={24} className="text-oto-500" />
             </div>
             <div>
-              <p className="text-2xl font-bold text-white">{deployments.length}</p>
-              <p className="text-sm text-dark-400">Total</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">{deployments.length}</p>
+              <p className="text-sm text-gray-500 dark:text-dark-400">Total</p>
             </div>
           </div>
           <div className="card p-4 flex items-center gap-4">
-            <div className="w-12 h-12 bg-blue-500/20 rounded-lg flex items-center justify-center">
+            <div className="w-12 h-12 bg-blue-100 dark:bg-blue-500/20 rounded-lg flex items-center justify-center">
               <Loader2 size={24} className={`text-blue-500 ${activeCount > 0 ? 'animate-spin' : ''}`} />
             </div>
             <div>
-              <p className="text-2xl font-bold text-white">{activeCount}</p>
-              <p className="text-sm text-dark-400">En cours</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">{activeCount}</p>
+              <p className="text-sm text-gray-500 dark:text-dark-400">En cours</p>
             </div>
           </div>
           <div className="card p-4 flex items-center gap-4">
-            <div className="w-12 h-12 bg-green-500/20 rounded-lg flex items-center justify-center">
+            <div className="w-12 h-12 bg-green-100 dark:bg-green-500/20 rounded-lg flex items-center justify-center">
               <CheckCircle size={24} className="text-green-500" />
             </div>
             <div>
-              <p className="text-2xl font-bold text-white">{completedCount}</p>
-              <p className="text-sm text-dark-400">Terminés</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">{completedCount}</p>
+              <p className="text-sm text-gray-500 dark:text-dark-400">Terminés</p>
             </div>
           </div>
           <div className="card p-4 flex items-center gap-4">
-            <div className="w-12 h-12 bg-red-500/20 rounded-lg flex items-center justify-center">
+            <div className="w-12 h-12 bg-red-100 dark:bg-red-500/20 rounded-lg flex items-center justify-center">
               <XCircle size={24} className="text-red-500" />
             </div>
             <div>
-              <p className="text-2xl font-bold text-white">{failedCount}</p>
-              <p className="text-sm text-dark-400">Échoués</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">{failedCount}</p>
+              <p className="text-sm text-gray-500 dark:text-dark-400">Échoués</p>
             </div>
           </div>
           <div className="card p-4 flex items-center gap-4">
-            <div className="w-12 h-12 bg-yellow-500/20 rounded-lg flex items-center justify-center">
+            <div className="w-12 h-12 bg-yellow-100 dark:bg-yellow-500/20 rounded-lg flex items-center justify-center">
               <X size={24} className="text-yellow-500" />
             </div>
             <div>
-              <p className="text-2xl font-bold text-white">{cancelledCount}</p>
-              <p className="text-sm text-dark-400">Annulés</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">{cancelledCount}</p>
+              <p className="text-sm text-gray-500 dark:text-dark-400">Annulés</p>
             </div>
           </div>
         </div>
 
         {/* Filters and actions */}
         <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center bg-dark-800 rounded-lg p-1 flex-wrap gap-1">
+          <div className="flex items-center bg-white dark:bg-dark-800 rounded-lg p-1 flex-wrap gap-1 border border-light-200 dark:border-transparent">
             {(['all', 'active', 'completed', 'failed', 'cancelled'] as const).map((status) => (
               <button
                 key={status}
                 onClick={() => setFilterStatus(status)}
                 className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
                   filterStatus === status
-                    ? 'bg-primary-600 text-white'
-                    : 'text-dark-300 hover:text-white'
+                    ? 'bg-oto-600 text-white'
+                    : 'text-gray-600 dark:text-dark-300 hover:text-gray-900 dark:hover:text-white'
                 }`}
               >
                 {status === 'all' && `Tous (${deployments.length})`}
@@ -343,8 +343,8 @@ export function Deployments() {
             <div 
               className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs ${
                 wsConnected 
-                  ? 'bg-green-500/20 text-green-400' 
-                  : 'bg-dark-600 text-dark-400'
+                  ? 'bg-green-100 dark:bg-green-500/20 text-green-600 dark:text-green-400' 
+                  : 'bg-light-200 dark:bg-dark-600 text-gray-500 dark:text-dark-400'
               }`}
               title={wsConnected ? 'Mises à jour en temps réel actives' : 'Mises à jour par polling'}
             >
@@ -370,8 +370,8 @@ export function Deployments() {
           <div className="space-y-4">
             {Array.from({ length: 3 }).map((_, i) => (
               <div key={i} className="card p-6 animate-pulse">
-                <div className="h-6 bg-dark-700 rounded w-1/4 mb-4" />
-                <div className="h-4 bg-dark-700 rounded w-1/2" />
+                <div className="h-6 bg-light-200 dark:bg-dark-700 rounded w-1/4 mb-4" />
+                <div className="h-4 bg-light-200 dark:bg-dark-700 rounded w-1/2" />
               </div>
             ))}
           </div>
@@ -403,10 +403,10 @@ export function Deployments() {
                 <div className="flex items-start justify-between mb-4">
                   <div>
                     <div className="flex items-center gap-3">
-                      <h3 className="text-lg font-semibold text-white">{deployment.name}</h3>
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{deployment.name}</h3>
                       <StatusBadge status={deployment.status} />
                     </div>
-                    <div className="flex items-center gap-4 mt-2 text-sm text-dark-400">
+                    <div className="flex items-center gap-4 mt-2 text-sm text-gray-500 dark:text-dark-400">
                       <span className="flex items-center gap-1">
                         <Clock size={14} />
                         {formatDate(deployment.created_at)}
@@ -464,10 +464,10 @@ export function Deployments() {
                 {/* Progress bar */}
                 <div className="mb-4">
                   <div className="flex items-center justify-between text-sm mb-2">
-                    <span className="text-dark-400">Progression</span>
-                    <span className="text-white font-medium">{deployment.progress}%</span>
+                    <span className="text-gray-500 dark:text-dark-400">Progression</span>
+                    <span className="text-gray-900 dark:text-white font-medium">{deployment.progress}%</span>
                   </div>
-                  <div className="h-2 bg-dark-700 rounded-full overflow-hidden">
+                  <div className="h-2 bg-light-200 dark:bg-dark-700 rounded-full overflow-hidden">
                     <div
                       className={`h-full transition-all duration-500 ${
                         deployment.status === 'failed'
@@ -485,9 +485,9 @@ export function Deployments() {
                 <div className="flex items-center gap-2 overflow-x-auto pb-2">
                   {displaySteps.slice(0, -1).map((step, index) => (
                     <div key={step} className="flex items-center">
-                      <div className="flex items-center gap-2 px-3 py-1.5 bg-dark-700/50 rounded-lg whitespace-nowrap">
+                      <div className="flex items-center gap-2 px-3 py-1.5 bg-light-100 dark:bg-dark-700/50 rounded-lg whitespace-nowrap">
                         {getStepIcon(step, deployment)}
-                        <span className="text-sm text-dark-300">
+                        <span className="text-sm text-gray-600 dark:text-dark-300">
                           {step === 'pending' && 'En attente'}
                           {step === 'creating_vm' && 'Création VM'}
                           {step === 'installing_os' && 'Installation OS'}
@@ -496,7 +496,7 @@ export function Deployments() {
                         </span>
                       </div>
                       {index < displaySteps.length - 2 && (
-                        <ChevronRight size={16} className="text-dark-600 mx-1" />
+                        <ChevronRight size={16} className="text-gray-300 dark:text-dark-600 mx-1" />
                       )}
                     </div>
                   ))}
