@@ -122,7 +122,7 @@ class DeploymentService:
         current_step: str | None = None,
         error_message: str | None = None,
     ) -> None:
-        """Met à jour le statut du déploiement et commit immédiatement."""
+        """Met à jour le statut du déploiement, commit et notifie via WebSocket."""
         deployment.status = status
         if current_step:
             deployment.current_step = current_step
@@ -133,6 +133,37 @@ class DeploymentService:
         
         # Commit immédiat pour que les mises à jour soient visibles dans l'interface
         await self.db.commit()
+        
+        # Notification WebSocket temps réel
+        try:
+            from src.api.websocket import emit_deployment_event, EventType
+            
+            event_map = {
+                DeploymentStatus.PENDING: EventType.DEPLOYMENT_CREATED,
+                DeploymentStatus.IN_PROGRESS: EventType.DEPLOYMENT_PROGRESS,
+                DeploymentStatus.COMPLETED: EventType.DEPLOYMENT_COMPLETED,
+                DeploymentStatus.FAILED: EventType.DEPLOYMENT_FAILED,
+                DeploymentStatus.CANCELLED: EventType.DEPLOYMENT_CANCELLED,
+            }
+            
+            await emit_deployment_event(
+                str(deployment.id),
+                event_map.get(status, EventType.DEPLOYMENT_PROGRESS),
+                {
+                    "status": status.value,
+                    "step": current_step or deployment.current_step,
+                    "progress": deployment.progress,
+                    "error": error_message,
+                    "vm_name": deployment.vm_name,
+                }
+            )
+        except Exception as e:
+            # Ne pas bloquer le déploiement si WebSocket échoue
+            logger.warning(
+                "deployment_websocket_notification_failed",
+                deployment_id=str(deployment.id),
+                error=str(e),
+            )
 
     async def create_deployment(
         self,
@@ -379,21 +410,23 @@ class DeploymentService:
         vm_ready = await self._wait_for_vm_ready(deployment, vm)
         
         if not vm_ready:
+            error_msg = "VM not accessible via PowerShell Direct after all retries. Post-install configuration failed."
             await self._log_step(
                 deployment, DeploymentStep.WAITING_VM_READY,
-                "VM not accessible via PowerShell Direct. Skipping post-install configuration.",
-                "warning"
+                error_msg,
+                "error"
             )
-            # Terminer quand même le déploiement
+            # Passer en FAILED au lieu de COMPLETED
             await self._update_deployment_status(
                 deployment,
-                DeploymentStatus.COMPLETED,
-                DeploymentStep.COMPLETED,
+                DeploymentStatus.FAILED,
+                DeploymentStep.WAITING_VM_READY,
+                error_msg,
             )
-            await self._log_step(
-                deployment,
-                DeploymentStep.COMPLETED,
-                "Deployment completed (VM running but post-install skipped).",
+            logger.error(
+                "deployment_failed_vm_not_ready",
+                deployment_id=str(deployment.id),
+                vm_name=deployment.vm_name,
             )
             return
         
@@ -767,8 +800,8 @@ class DeploymentService:
             flag_check_interval = 15
             flag_found = False
             fallback_attempted = False
+            dir_checked = False
             checks_count = 0
-            max_checks_before_fallback = 6  # ~90 secondes avant de tenter le fallback
             
             while (time.time() - start_time) < timeout and not flag_found:
                 checks_count += 1
@@ -789,13 +822,52 @@ class DeploymentService:
                             "VM-Automation setup completed - ready.flag found", "info"
                         )
                         break
-                    elif result.success and not fallback_attempted and checks_count >= max_checks_before_fallback:
-                        # PowerShell Direct fonctionne mais le flag n'existe pas
-                        # Tenter d'exécuter le script de setup manuellement (fallback)
+                    elif result.success and not fallback_attempted and not dir_checked:
+                        # PowerShell Direct fonctionne - vérifier si le dossier VM-Automation existe
+                        dir_checked = True
+                        dir_result = await client.execute_in_vm(
+                            vm_identifier,
+                            'if (Test-Path "C:\\VM-Automation") { "DIR_EXISTS" } else { "DIR_MISSING" }',
+                            credentials,
+                            timeout=30,
+                        )
+                        
+                        if dir_result.success and "DIR_MISSING" in str(dir_result.output):
+                            # Le dossier n'existe pas - exécuter le fallback IMMÉDIATEMENT
+                            fallback_attempted = True
+                            await self._log_step(
+                                deployment, DeploymentStep.WAITING_VM_READY,
+                                "VM-Automation folder missing - executing fallback setup IMMEDIATELY", "warning"
+                            )
+                            
+                            fallback_result = await self._execute_fallback_setup(
+                                client, vm_identifier, credentials, admin_password
+                            )
+                            
+                            if fallback_result:
+                                await self._log_step(
+                                    deployment, DeploymentStep.WAITING_VM_READY,
+                                    "Fallback setup executed successfully - flag created", "info"
+                                )
+                                flag_found = True
+                                break
+                            else:
+                                await self._log_step(
+                                    deployment, DeploymentStep.WAITING_VM_READY,
+                                    "Fallback setup failed - will retry", "error"
+                                )
+                        else:
+                            # Le dossier existe mais pas le flag - le script est peut-être en cours
+                            logger.debug(
+                                "deployment_dir_exists_waiting_flag",
+                                deployment_id=str(deployment.id),
+                            )
+                    elif result.success and not fallback_attempted and checks_count >= 4:
+                        # Après ~60s, si le flag n'existe toujours pas, tenter le fallback
                         fallback_attempted = True
                         await self._log_step(
                             deployment, DeploymentStep.WAITING_VM_READY,
-                            "Flag not found - attempting fallback: manual setup execution...", "warning"
+                            "Flag not found after waiting - attempting fallback setup...", "warning"
                         )
                         
                         # Tenter d'exécuter le script setup.ps1 manuellement
@@ -808,6 +880,8 @@ class DeploymentService:
                                 deployment, DeploymentStep.WAITING_VM_READY,
                                 "Fallback setup executed successfully", "info"
                             )
+                            flag_found = True
+                            break
                         else:
                             await self._log_step(
                                 deployment, DeploymentStep.WAITING_VM_READY,

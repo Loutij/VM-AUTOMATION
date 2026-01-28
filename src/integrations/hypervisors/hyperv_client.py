@@ -1838,8 +1838,29 @@ Start-Sleep -Seconds 3
         Write-Output "VM-Automation setup.ps1 created"
         """
         
-        await self._execute(script_create_setup, timeout=60)
-        logger.debug("hyperv_dism_vm_automation_setup_created", vm_id=vm_id)
+        result = await self._execute(script_create_setup, timeout=60)
+        
+        # Vérifier que le script a bien été créé
+        if result.success and "setup.ps1 created" in str(result.stdout or ""):
+            logger.info(
+                "hyperv_dism_vm_automation_setup_created",
+                vm_id=vm_id,
+                file="C:\\VM-Automation\\setup.ps1",
+            )
+        else:
+            logger.warning(
+                "hyperv_dism_vm_automation_setup_warning",
+                vm_id=vm_id,
+                stdout=str(result.stdout)[:200] if result.stdout else None,
+                stderr=str(result.stderr)[:200] if result.stderr else None,
+            )
+        
+        # Vérifier également que RunOnce a été configuré
+        logger.info(
+            "hyperv_dism_runonce_configured",
+            vm_id=vm_id,
+            key="HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce\\VM-Automation-Setup",
+        )
         
         # Garder aussi SetupComplete.cmd comme backup (au cas où)
         setup_complete_content = f"""@echo off
@@ -1865,8 +1886,19 @@ echo [%date% %time%] SetupComplete finished >> C:\\VM-Automation\\setup.log
         Write-Output "SetupComplete.cmd created (backup)"
         """
         
-        await self._execute(script_setup_complete, timeout=30)
-        logger.debug("hyperv_dism_setup_complete_created", vm_id=vm_id)
+        result = await self._execute(script_setup_complete, timeout=30)
+        if result.success:
+            logger.info(
+                "hyperv_dism_setup_complete_created",
+                vm_id=vm_id,
+                file="C:\\Windows\\Setup\\Scripts\\SetupComplete.cmd",
+            )
+        else:
+            logger.warning(
+                "hyperv_dism_setup_complete_warning",
+                vm_id=vm_id,
+                error=str(result.stderr)[:200] if result.stderr else None,
+            )
         
         # Étape 4: Configurer le bootloader
         script_boot = f"""
