@@ -16,6 +16,42 @@ from src.common.logging import get_logger
 
 logger = get_logger(__name__)
 
+
+def _decode_powershell_output(raw_bytes: bytes) -> str:
+    """
+    Décode la sortie PowerShell avec plusieurs encodages possibles.
+    
+    Windows PowerShell peut utiliser différents encodages selon la configuration :
+    - UTF-8 (moderne)
+    - UTF-16 (Windows natif)
+    - cp1252 (Windows Western Europe)
+    - cp850 (DOS/Console)
+    - latin-1 (fallback)
+    
+    Args:
+        raw_bytes: Bytes bruts de la sortie PowerShell
+        
+    Returns:
+        Chaîne décodée correctement
+    """
+    if not raw_bytes:
+        return ""
+    
+    # Liste des encodages à essayer dans l'ordre de priorité
+    encodings = ['utf-8', 'utf-16', 'utf-16-le', 'cp1252', 'cp850', 'latin-1']
+    
+    for encoding in encodings:
+        try:
+            decoded = raw_bytes.decode(encoding)
+            # Vérifier que le décodage n'a pas produit de caractères de remplacement
+            if '\ufffd' not in decoded:
+                return decoded.strip()
+        except (UnicodeDecodeError, LookupError):
+            continue
+    
+    # Fallback final avec remplacement des caractères invalides
+    return raw_bytes.decode('utf-8', errors='replace').strip()
+
 # Essayer d'importer winrm (optionnel pour le développement sur Linux)
 try:
     import winrm
@@ -154,8 +190,8 @@ class PowerShellExecutor:
             result = session.run_ps(script)
             
             ps_result = PowerShellResult(
-                stdout=result.std_out.decode("utf-8", errors="replace").strip(),
-                stderr=result.std_err.decode("utf-8", errors="replace").strip(),
+                stdout=_decode_powershell_output(result.std_out),
+                stderr=_decode_powershell_output(result.std_err),
                 exit_code=result.status_code,
                 success=result.status_code == 0,
             )

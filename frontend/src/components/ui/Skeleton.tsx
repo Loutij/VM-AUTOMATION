@@ -53,7 +53,7 @@ export const Skeleton = forwardRef<HTMLDivElement, SkeletonProps>(
     return (
       <div
         ref={ref}
-        className={`bg-dark-700 ${variantClasses[variant]} ${animationClasses[animation]} ${className}`}
+        className={`bg-light-200 dark:bg-dark-700 ${variantClasses[variant]} ${animationClasses[animation]} ${className}`}
         style={style}
         aria-label="Chargement..."
         role="status"
@@ -104,7 +104,7 @@ export const SkeletonTable = forwardRef<HTMLDivElement, SkeletonTableProps>(
       <div ref={ref} className={`overflow-hidden ${className}`}>
         <div className="card overflow-hidden">
           {hasHeader && (
-            <div className="flex items-center gap-4 p-4 border-b border-dark-700 bg-dark-800/50">
+            <div className="flex items-center gap-4 p-4 border-b border-light-200 dark:border-dark-700 bg-light-100 dark:bg-dark-800/50">
               {Array.from({ length: columns }).map((_, index) => (
                 <Skeleton
                   key={`header-${index}`}
@@ -116,7 +116,7 @@ export const SkeletonTable = forwardRef<HTMLDivElement, SkeletonTableProps>(
               ))}
             </div>
           )}
-          <div className="divide-y divide-dark-700">
+          <div className="divide-y divide-light-200 dark:divide-dark-700">
             {Array.from({ length: rows }).map((_, rowIndex) => (
               <div
                 key={`row-${rowIndex}`}
@@ -183,7 +183,7 @@ export function SkeletonList({ items = 5 }: { items?: number }) {
   return (
     <div className="space-y-3">
       {Array.from({ length: items }).map((_, index) => (
-        <div key={index} className="flex items-center gap-4 p-4 bg-dark-800/50 rounded-lg">
+        <div key={index} className="flex items-center gap-4 p-4 bg-light-100 dark:bg-dark-800/50 rounded-lg">
           <Skeleton variant="circular" width={40} height={40} />
           <div className="flex-1 space-y-2">
             <Skeleton variant="text" width="40%" height={16} />

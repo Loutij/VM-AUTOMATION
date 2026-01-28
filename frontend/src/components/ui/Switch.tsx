@@ -24,13 +24,13 @@ export const Switch = forwardRef<HTMLInputElement, SwitchProps>(
             {label && (
               <label
                 htmlFor={switchId}
-                className={`block text-sm font-medium ${disabled ? 'text-dark-500' : 'text-dark-100'} cursor-pointer`}
+                className={`block text-sm font-medium ${disabled ? 'text-gray-400 dark:text-dark-500' : 'text-gray-900 dark:text-dark-100'} cursor-pointer`}
               >
                 {label}
               </label>
             )}
             {description && (
-              <p className={`text-sm ${disabled ? 'text-dark-600' : 'text-dark-400'} mt-0.5`}>
+              <p className={`text-sm ${disabled ? 'text-gray-400 dark:text-dark-600' : 'text-gray-500 dark:text-dark-400'} mt-0.5`}>
                 {description}
               </p>
             )}
@@ -45,9 +45,9 @@ export const Switch = forwardRef<HTMLInputElement, SwitchProps>(
           className={`
             relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent
             transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 
-            focus:ring-primary-500 focus:ring-offset-2 focus:ring-offset-dark-900
+            focus:ring-primary-500 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-dark-900
             ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}
-            ${checked ? 'bg-primary-600' : 'bg-dark-600'}
+            ${checked ? 'bg-primary-600' : 'bg-gray-300 dark:bg-dark-600'}
           `}
         >
           <span

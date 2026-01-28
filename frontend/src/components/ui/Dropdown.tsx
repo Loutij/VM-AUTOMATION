@@ -109,7 +109,7 @@ export function Dropdown({ items, trigger }: DropdownProps) {
         createPortal(
           <div
             ref={menuRef}
-            className="fixed w-48 bg-dark-700 border border-dark-600 rounded-lg shadow-xl py-1 animate-in fade-in zoom-in-95 duration-100"
+            className="fixed w-48 bg-white dark:bg-dark-700 border border-light-300 dark:border-dark-600 rounded-lg shadow-xl py-1 animate-in fade-in zoom-in-95 duration-100"
             style={{
               top: position.top,
               left: position.left,
@@ -123,8 +123,8 @@ export function Dropdown({ items, trigger }: DropdownProps) {
                 disabled={item.disabled}
                 className={`w-full flex items-center gap-2 px-4 py-2 text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                   item.variant === 'danger'
-                    ? 'text-red-500 hover:bg-dark-600'
-                    : 'text-dark-200 hover:bg-dark-600'
+                    ? 'text-red-500 hover:bg-red-50 dark:hover:bg-dark-600'
+                    : 'text-gray-700 dark:text-dark-200 hover:bg-light-100 dark:hover:bg-dark-600'
                 }`}
               >
                 {item.icon}
