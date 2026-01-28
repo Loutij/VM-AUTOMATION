@@ -241,10 +241,12 @@ export function VirtualMachines() {
     }
   };
 
+  // Fonction utilitaire pour formater la mémoire
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const formatMemory = (mb: number) => {
     if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
     return `${mb} MB`;
-  };
+  }; void formatMemory;
 
   const columns: Column<VirtualMachine>[] = [
     {

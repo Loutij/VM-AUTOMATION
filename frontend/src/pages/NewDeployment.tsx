@@ -455,10 +455,12 @@ export function NewDeployment() {
     }));
   };
 
+  // Fonction utilitaire pour formater la mémoire (utilisée dans le rendu)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const formatMemory = (mb: number) => {
     if (mb >= 1024) return `${mb / 1024} GB`;
     return `${mb} MB`;
-  };
+  }; void formatMemory;
 
   // Gérer la fermeture du modal Marketplace et détecter les packages nécessitant configuration
   const handleMarketplaceClose = () => {
@@ -469,8 +471,8 @@ export function NewDeployment() {
       .map(pkgName => allSoftware.find(s => s.name === pkgName))
       .filter((pkg): pkg is SoftwarePackage => 
         pkg !== undefined && 
-        pkg.config_schema?.fields && 
-        pkg.config_schema.fields.length > 0 &&
+        Boolean(pkg.config_schema?.fields) && 
+        (pkg.config_schema?.fields?.length ?? 0) > 0 &&
         !packageConfigs[pkg.name] // Pas encore configuré
       );
     

@@ -223,10 +223,12 @@ export function Templates() {
     );
   };
 
+  // Fonction utilitaire pour formater la mémoire
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const formatMemory = (mb: number) => {
     if (mb >= 1024) return `${mb / 1024} GB`;
     return `${mb} MB`;
-  };
+  }; void formatMemory;
 
   return (
     <div className="min-h-screen bg-dark-900">

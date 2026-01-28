@@ -191,7 +191,7 @@ export function Settings() {
       addToast({
         type: health.status === 'healthy' ? 'success' : 'warning',
         title: health.status === 'healthy' ? 'API disponible' : 'API partiellement disponible',
-        message: `Base de données: ${health.database ? 'OK' : 'Erreur'}, Redis: ${health.redis ? 'OK' : 'Erreur'}`,
+        message: `Base de données: ${health.checks?.database?.status === 'healthy' ? 'OK' : 'Erreur'}, Redis: ${health.checks?.redis?.status === 'healthy' ? 'OK' : 'Erreur'}`,
       });
     } catch {
       setHealthStatus(null);
@@ -662,9 +662,9 @@ export function Settings() {
                   </p>
                   {healthStatus && (
                     <p className="text-sm text-dark-400">
-                      DB: {healthStatus.database ? '✓' : '✗'} | 
-                      Redis: {healthStatus.redis ? '✓' : '✗'} | 
-                      Hyperviseurs: {healthStatus.hypervisors?.length || 0}
+                      DB: {healthStatus.checks?.database?.status === 'healthy' ? '✓' : '✗'} | 
+                      Redis: {healthStatus.checks?.redis?.status === 'healthy' ? '✓' : '✗'} | 
+                      Celery: {healthStatus.checks?.celery?.status === 'healthy' ? '✓' : '✗'}
                     </p>
                   )}
                 </div>

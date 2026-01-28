@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   Search,
-  Filter,
   LayoutGrid,
   List,
   Star,
@@ -13,7 +12,7 @@ import {
 } from 'lucide-react';
 import { softwareApi } from '../services/api';
 import type { SoftwarePackage, SoftwareCategory_Info, SoftwareProfile } from '../types';
-import { Button, Input, Modal, Skeleton, StatusBadge } from '../components/ui';
+import { Button, Input, Modal, Skeleton } from '../components/ui';
 
 // Mapping des icônes par catégorie
 const CATEGORY_ICONS: Record<string, string> = {
@@ -459,7 +458,7 @@ function SoftwareListItem({
   isSelected,
   onToggle,
   onDetails,
-  selectionMode,
+  selectionMode: _selectionMode,
 }: SoftwareCardProps) {
   return (
     <div
