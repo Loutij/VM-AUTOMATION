@@ -2157,6 +2157,87 @@ echo [%date% %time%] SetupComplete finished >> C:\\VM-Automation\\setup.log
         
         return list(data) if data else []
 
+    async def execute_via_winrm_direct(
+        self,
+        vm_ip: str,
+        script: str,
+        credentials: tuple[str, str],
+        timeout: int = 60,
+    ) -> PowerShellDirectResult:
+        """
+        Exécute un script PowerShell directement sur une VM via WinRM (connexion directe).
+        
+        Cette méthode se connecte directement à l'IP de la VM au lieu de passer
+        par PowerShell Direct via l'hyperviseur. Plus rapide et plus fiable.
+        
+        Args:
+            vm_ip: Adresse IP de la VM
+            script: Script PowerShell à exécuter
+            credentials: Tuple (username, password) pour la VM
+            timeout: Timeout en secondes
+            
+        Returns:
+            PowerShellDirectResult avec le résultat de l'exécution
+        """
+        import winrm
+        
+        username, password = credentials
+        
+        logger.info(
+            "winrm_direct_executing",
+            vm_ip=vm_ip,
+            script_length=len(script),
+            timeout=timeout,
+        )
+        
+        try:
+            # Connexion WinRM directe à la VM (HTTP port 5985)
+            session = winrm.Session(
+                f"http://{vm_ip}:5985/wsman",
+                auth=(username, password),
+                transport="ntlm",
+                server_cert_validation="ignore",
+            )
+            
+            # Exécuter le script PowerShell
+            result = session.run_ps(script)
+            
+            success = result.status_code == 0
+            stdout = result.std_out.decode("utf-8", errors="replace") if result.std_out else ""
+            stderr = result.std_err.decode("utf-8", errors="replace") if result.std_err else ""
+            
+            if success:
+                logger.info(
+                    "winrm_direct_success",
+                    vm_ip=vm_ip,
+                    output_length=len(stdout),
+                )
+            else:
+                logger.warning(
+                    "winrm_direct_failed",
+                    vm_ip=vm_ip,
+                    exit_code=result.status_code,
+                    stderr=stderr[:200] if stderr else None,
+                )
+            
+            return PowerShellDirectResult(
+                success=success,
+                output=stdout if success else None,
+                error=stderr if not success else None,
+            )
+            
+        except Exception as e:
+            logger.warning(
+                "winrm_direct_error",
+                vm_ip=vm_ip,
+                error=str(e),
+            )
+            return PowerShellDirectResult(
+                success=False,
+                output=None,
+                error=str(e),
+            )
+
     async def execute_in_vm(
         self,
         vm_id: str,

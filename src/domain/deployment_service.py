@@ -791,13 +791,73 @@ class DeploymentService:
                 "Windows heartbeat OK - VM is running", "info"
             )
             
-            # Phase 2: Attendre le fichier flag ready.flag
+            # Phase 2: Récupérer l'IP de la VM et tenter WinRM direct
             await self._log_step(
                 deployment, DeploymentStep.WAITING_VM_READY,
-                "Phase 2/3: Waiting for VM-Automation setup to complete...", "info"
+                "Phase 2/4: Getting VM IP address...", "info"
             )
             
-            flag_check_interval = 15
+            vm_ip = None
+            use_winrm_direct = False
+            
+            # Attendre que la VM obtienne une IP (max 60s)
+            ip_wait_start = time.time()
+            while (time.time() - ip_wait_start) < 60:
+                try:
+                    vm_ips = await client.get_vm_ip_addresses(vm_identifier)
+                    # Filtrer les IPs link-local (169.254.x.x)
+                    valid_ips = [ip for ip in vm_ips if ip and not ip.startswith("169.254.") and not ip.startswith("fe80:")]
+                    if valid_ips:
+                        vm_ip = valid_ips[0]
+                        await self._log_step(
+                            deployment, DeploymentStep.WAITING_VM_READY,
+                            f"VM IP obtained: {vm_ip}", "info"
+                        )
+                        break
+                except Exception as e:
+                    logger.debug("deployment_get_ip_error", error=str(e))
+                
+                await asyncio.sleep(5)
+            
+            if vm_ip:
+                # Tenter une connexion WinRM directe
+                await self._log_step(
+                    deployment, DeploymentStep.WAITING_VM_READY,
+                    f"Phase 3/4: Testing WinRM direct connection to {vm_ip}...", "info"
+                )
+                
+                try:
+                    result = await client.execute_via_winrm_direct(
+                        vm_ip,
+                        "$env:COMPUTERNAME",
+                        credentials,
+                        timeout=30,
+                    )
+                    if result.success:
+                        use_winrm_direct = True
+                        await self._log_step(
+                            deployment, DeploymentStep.WAITING_VM_READY,
+                            f"WinRM direct connection OK - using fast direct connection", "info"
+                        )
+                except Exception as e:
+                    logger.debug("deployment_winrm_direct_failed", error=str(e))
+                    await self._log_step(
+                        deployment, DeploymentStep.WAITING_VM_READY,
+                        f"WinRM direct failed, falling back to PowerShell Direct", "warning"
+                    )
+            else:
+                await self._log_step(
+                    deployment, DeploymentStep.WAITING_VM_READY,
+                    "Could not get VM IP, using PowerShell Direct", "warning"
+                )
+            
+            # Phase 3: Attendre le fichier flag ready.flag
+            await self._log_step(
+                deployment, DeploymentStep.WAITING_VM_READY,
+                "Phase 4/4: Waiting for VM-Automation setup to complete...", "info"
+            )
+            
+            flag_check_interval = 10 if use_winrm_direct else 15
             flag_found = False
             fallback_attempted = False
             dir_checked = False
@@ -807,11 +867,19 @@ class DeploymentService:
                 checks_count += 1
                 
                 try:
-                    # Vérifier si le fichier flag existe via PowerShell Direct
-                    result = await client.execute_in_vm(
-                        vm_identifier,
-                        'if (Test-Path "C:\\VM-Automation\\ready.flag") { "FLAG_FOUND" } else { "FLAG_NOT_FOUND" }',
-                        credentials,
+                    # Vérifier si le fichier flag existe
+                    if use_winrm_direct and vm_ip:
+                        result = await client.execute_via_winrm_direct(
+                            vm_ip,
+                            'if (Test-Path "C:\\VM-Automation\\ready.flag") { "FLAG_FOUND" } else { "FLAG_NOT_FOUND" }',
+                            credentials,
+                            timeout=30,
+                        )
+                    else:
+                        result = await client.execute_in_vm(
+                            vm_identifier,
+                            'if (Test-Path "C:\\VM-Automation\\ready.flag") { "FLAG_FOUND" } else { "FLAG_NOT_FOUND" }',
+                            credentials,
                         timeout=30,
                     )
                     
@@ -823,25 +891,35 @@ class DeploymentService:
                         )
                         break
                     elif result.success and not fallback_attempted and not dir_checked:
-                        # PowerShell Direct fonctionne - vérifier si le dossier VM-Automation existe
+                        # Connexion fonctionne - vérifier si le dossier VM-Automation existe
                         dir_checked = True
-                        dir_result = await client.execute_in_vm(
-                            vm_identifier,
-                            'if (Test-Path "C:\\VM-Automation") { "DIR_EXISTS" } else { "DIR_MISSING" }',
-                            credentials,
-                            timeout=30,
-                        )
+                        if use_winrm_direct and vm_ip:
+                            dir_result = await client.execute_via_winrm_direct(
+                                vm_ip,
+                                'if (Test-Path "C:\\VM-Automation") { "DIR_EXISTS" } else { "DIR_MISSING" }',
+                                credentials,
+                                timeout=30,
+                            )
+                        else:
+                            dir_result = await client.execute_in_vm(
+                                vm_identifier,
+                                'if (Test-Path "C:\\VM-Automation") { "DIR_EXISTS" } else { "DIR_MISSING" }',
+                                credentials,
+                                timeout=30,
+                            )
                         
                         if dir_result.success and "DIR_MISSING" in str(dir_result.output):
                             # Le dossier n'existe pas - exécuter le fallback IMMÉDIATEMENT
                             fallback_attempted = True
+                            method_msg = "via WinRM direct" if use_winrm_direct else "via PowerShell Direct"
                             await self._log_step(
                                 deployment, DeploymentStep.WAITING_VM_READY,
-                                "VM-Automation folder missing - executing fallback setup IMMEDIATELY", "warning"
+                                f"VM-Automation folder missing - executing fallback setup IMMEDIATELY {method_msg}", "warning"
                             )
                             
                             fallback_result = await self._execute_fallback_setup(
-                                client, vm_identifier, credentials, admin_password
+                                client, vm_identifier, credentials, admin_password,
+                                vm_ip=vm_ip, use_winrm_direct=use_winrm_direct
                             )
                             
                             if fallback_result:
@@ -863,16 +941,18 @@ class DeploymentService:
                                 deployment_id=str(deployment.id),
                             )
                     elif result.success and not fallback_attempted and checks_count >= 4:
-                        # Après ~60s, si le flag n'existe toujours pas, tenter le fallback
+                        # Après ~40-60s, si le flag n'existe toujours pas, tenter le fallback
                         fallback_attempted = True
+                        method_msg = "via WinRM direct" if use_winrm_direct else "via PowerShell Direct"
                         await self._log_step(
                             deployment, DeploymentStep.WAITING_VM_READY,
-                            "Flag not found after waiting - attempting fallback setup...", "warning"
+                            f"Flag not found after waiting - attempting fallback setup {method_msg}...", "warning"
                         )
                         
                         # Tenter d'exécuter le script setup.ps1 manuellement
                         fallback_result = await self._execute_fallback_setup(
-                            client, vm_identifier, credentials, admin_password
+                            client, vm_identifier, credentials, admin_password,
+                            vm_ip=vm_ip, use_winrm_direct=use_winrm_direct
                         )
                         
                         if fallback_result:
@@ -912,43 +992,54 @@ class DeploymentService:
                 )
                 # On continue quand même car le setup peut avoir fonctionné
             
-            # Phase 3: Vérifier que PowerShell Direct fonctionne
+            # Phase finale: Vérifier que la connexion fonctionne
+            connection_method = "WinRM direct" if use_winrm_direct else "PowerShell Direct"
             await self._log_step(
                 deployment, DeploymentStep.WAITING_VM_READY,
-                "Phase 3/3: Verifying PowerShell Direct connection...", "info"
+                f"Final verification: Testing {connection_method} connection...", "info"
             )
             
-            # Tester la connexion PowerShell Direct
+            # Tester la connexion
             max_retries = 3
             for attempt in range(max_retries):
                 try:
-                    result = await client.execute_in_vm(
-                        vm_identifier,
-                        "$env:COMPUTERNAME",
-                        credentials,
-                        timeout=30,
-                    )
+                    if use_winrm_direct and vm_ip:
+                        result = await client.execute_via_winrm_direct(
+                            vm_ip,
+                            "$env:COMPUTERNAME",
+                            credentials,
+                            timeout=30,
+                        )
+                    else:
+                        result = await client.execute_in_vm(
+                            vm_identifier,
+                            "$env:COMPUTERNAME",
+                            credentials,
+                            timeout=30,
+                        )
                     
                     if result.success:
                         hostname = str(result.output).strip() if result.output else "unknown"
                         await self._log_step(
                             deployment, DeploymentStep.WAITING_VM_READY,
-                            f"PowerShell Direct connected - hostname: {hostname}", "info"
+                            f"{connection_method} connected - hostname: {hostname}", "info"
                         )
                         return True
                     else:
                         logger.debug(
-                            "deployment_ps_direct_failed",
+                            "deployment_connection_failed",
                             deployment_id=str(deployment.id),
                             attempt=attempt + 1,
+                            method=connection_method,
                             error=result.error,
                         )
                         
                 except Exception as e:
                     logger.debug(
-                        "deployment_ps_direct_error",
+                        "deployment_connection_error",
                         deployment_id=str(deployment.id),
                         attempt=attempt + 1,
+                        method=connection_method,
                         error=str(e),
                     )
                 
@@ -957,7 +1048,7 @@ class DeploymentService:
             
             await self._log_step(
                 deployment, DeploymentStep.WAITING_VM_READY,
-                "PowerShell Direct connection failed after retries", "warning"
+                f"{connection_method} connection failed after retries", "warning"
             )
             return False
             
@@ -975,24 +1066,31 @@ class DeploymentService:
         vm_identifier: str,
         credentials: tuple[str, str],
         admin_password: str,
+        vm_ip: str | None = None,
+        use_winrm_direct: bool = False,
     ) -> bool:
         """
-        Exécute la configuration de setup manuellement via PowerShell Direct.
+        Exécute la configuration de setup manuellement.
         
-        C'est un fallback si le script RunOnce n'a pas fonctionné.
+        Utilise WinRM direct si vm_ip est fourni, sinon PowerShell Direct.
         
         Args:
             client: Client Hyper-V
             vm_identifier: ID ou nom de la VM
-            credentials: Credentials pour PowerShell Direct
+            credentials: Credentials pour la connexion
             admin_password: Mot de passe admin à configurer
+            vm_ip: IP de la VM pour WinRM direct (optionnel)
+            use_winrm_direct: Utiliser WinRM direct au lieu de PowerShell Direct
             
         Returns:
             True si la configuration a réussi
         """
+        method = "WinRM direct" if (use_winrm_direct and vm_ip) else "PowerShell Direct"
         logger.info(
             "deployment_fallback_setup_starting",
             vm_id=vm_identifier,
+            method=method,
+            vm_ip=vm_ip if use_winrm_direct else None,
         )
         
         # Script de configuration minimal
@@ -1039,23 +1137,34 @@ try {{
 '''
         
         try:
-            result = await client.execute_in_vm(
-                vm_identifier,
-                fallback_script,
-                credentials,
-                timeout=120,
-            )
+            # Utiliser WinRM direct si disponible (plus rapide et plus fiable)
+            if use_winrm_direct and vm_ip:
+                result = await client.execute_via_winrm_direct(
+                    vm_ip,
+                    fallback_script,
+                    credentials,
+                    timeout=120,
+                )
+            else:
+                result = await client.execute_in_vm(
+                    vm_identifier,
+                    fallback_script,
+                    credentials,
+                    timeout=120,
+                )
             
             if result.success and "FALLBACK_SUCCESS" in str(result.output):
                 logger.info(
                     "deployment_fallback_setup_success",
                     vm_id=vm_identifier,
+                    method=method,
                 )
                 return True
             else:
                 logger.warning(
                     "deployment_fallback_setup_failed",
                     vm_id=vm_identifier,
+                    method=method,
                     output=str(result.output)[:200] if result.output else "no output",
                     error=result.error,
                 )
