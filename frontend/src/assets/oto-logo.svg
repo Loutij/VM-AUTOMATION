@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40" fill="none">
+  <!-- Logo OTO dans un cadre arrondi -->
+  <rect x="1" y="1" width="118" height="38" rx="19" stroke="currentColor" stroke-width="2" fill="none"/>
+  <text x="60" y="27" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-weight="900" font-size="20" fill="currentColor">OTO</text>
+</svg>

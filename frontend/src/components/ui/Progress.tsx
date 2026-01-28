@@ -40,35 +40,35 @@ interface ProgressCircleProps {
   className?: string;
 }
 
-// Couleurs par statut
+// Couleurs par statut - OTO style
 const statusColors = {
-  pending: 'bg-dark-600 text-dark-400 border-dark-600',
-  active: 'bg-primary-600 text-white border-primary-600 animate-pulse',
-  completed: 'bg-green-600 text-white border-green-600',
-  error: 'bg-red-600 text-white border-red-600',
-  warning: 'bg-yellow-600 text-white border-yellow-600',
+  pending: 'bg-gray-200 dark:bg-dark-600 text-gray-500 dark:text-dark-400 border-gray-300 dark:border-dark-600',
+  active: 'bg-oto-500 text-white border-oto-500 animate-pulse',
+  completed: 'bg-green-500 text-white border-green-500',
+  error: 'bg-red-500 text-white border-red-500',
+  warning: 'bg-yellow-500 text-white border-yellow-500',
 };
 
 const statusLineColors = {
-  pending: 'bg-dark-600',
-  active: 'bg-primary-600',
-  completed: 'bg-green-600',
-  error: 'bg-red-600',
-  warning: 'bg-yellow-600',
+  pending: 'bg-gray-200 dark:bg-dark-600',
+  active: 'bg-oto-500',
+  completed: 'bg-green-500',
+  error: 'bg-red-500',
+  warning: 'bg-yellow-500',
 };
 
 const progressColors = {
-  primary: 'bg-primary-600',
-  success: 'bg-green-600',
-  warning: 'bg-yellow-600',
-  error: 'bg-red-600',
+  primary: 'bg-oto-500',
+  success: 'bg-green-500',
+  warning: 'bg-yellow-500',
+  error: 'bg-red-500',
 };
 
 const progressBgColors = {
-  primary: 'bg-primary-600/20',
-  success: 'bg-green-600/20',
-  warning: 'bg-yellow-600/20',
-  error: 'bg-red-600/20',
+  primary: 'bg-oto-100 dark:bg-oto-500/20',
+  success: 'bg-green-100 dark:bg-green-500/20',
+  warning: 'bg-yellow-100 dark:bg-yellow-500/20',
+  error: 'bg-red-100 dark:bg-red-500/20',
 };
 
 // Icônes par statut
@@ -113,8 +113,8 @@ export const ProgressBar = forwardRef<HTMLDivElement, ProgressBarProps>(
       <div ref={ref} className={`w-full ${className}`}>
         {showLabel && (
           <div className="flex justify-between mb-1">
-            <span className="text-sm text-dark-300">Progression</span>
-            <span className="text-sm text-white font-medium">{Math.round(percentage)}%</span>
+            <span className="text-sm text-gray-500 dark:text-dark-300">Progression</span>
+            <span className="text-sm text-gray-900 dark:text-white font-medium">{Math.round(percentage)}%</span>
           </div>
         )}
         <div className={`w-full ${progressBgColors[color]} rounded-full overflow-hidden ${sizeClasses[size]}`}>
@@ -184,25 +184,25 @@ export const ProgressTimeline = forwardRef<HTMLDivElement, ProgressTimelineProps
                     <span
                       className={`font-medium ${
                         isActive
-                          ? 'text-primary-500'
+                          ? 'text-oto-500'
                           : isCompleted
-                          ? 'text-green-500'
+                          ? 'text-green-600 dark:text-green-400'
                           : step.status === 'error'
-                          ? 'text-red-500'
-                          : 'text-dark-300'
+                          ? 'text-red-600 dark:text-red-400'
+                          : 'text-gray-500 dark:text-dark-300'
                       }`}
                     >
                       {step.label}
                     </span>
                     {step.timestamp && (
-                      <span className="text-xs text-dark-500">{step.timestamp}</span>
+                      <span className="text-xs text-gray-400 dark:text-dark-500">{step.timestamp}</span>
                     )}
                   </div>
                   {step.description && (
-                    <p className="text-sm text-dark-400 mt-0.5">{step.description}</p>
+                    <p className="text-sm text-gray-500 dark:text-dark-400 mt-0.5">{step.description}</p>
                   )}
                   {step.error && (
-                    <p className="text-sm text-red-400 mt-1 p-2 bg-red-500/10 rounded">
+                    <p className="text-sm text-red-600 dark:text-red-400 mt-1 p-2 bg-red-100 dark:bg-red-500/10 rounded">
                       {step.error}
                     </p>
                   )}
@@ -236,10 +236,10 @@ export const ProgressTimeline = forwardRef<HTMLDivElement, ProgressTimelineProps
                 <span
                   className={`mt-2 text-xs text-center max-w-[80px] ${
                     isActive
-                      ? 'text-primary-500 font-medium'
+                      ? 'text-oto-500 font-medium'
                       : isCompleted
-                      ? 'text-green-500'
-                      : 'text-dark-400'
+                      ? 'text-green-600 dark:text-green-400'
+                      : 'text-gray-500 dark:text-dark-400'
                   }`}
                 >
                   {step.label}
@@ -285,10 +285,10 @@ export const ProgressCircle = forwardRef<HTMLDivElement, ProgressCircleProps>(
     const offset = circumference - (percentage / 100) * circumference;
 
     const strokeColors = {
-      primary: 'stroke-primary-600',
-      success: 'stroke-green-600',
-      warning: 'stroke-yellow-600',
-      error: 'stroke-red-600',
+      primary: 'stroke-oto-500',
+      success: 'stroke-green-500',
+      warning: 'stroke-yellow-500',
+      error: 'stroke-red-500',
     };
 
     return (
@@ -302,7 +302,7 @@ export const ProgressCircle = forwardRef<HTMLDivElement, ProgressCircleProps>(
             fill="transparent"
             stroke="currentColor"
             strokeWidth={strokeWidth}
-            className="text-dark-700"
+            className="text-gray-200 dark:text-dark-700"
           />
           {/* Cercle de progression */}
           <circle
@@ -319,7 +319,7 @@ export const ProgressCircle = forwardRef<HTMLDivElement, ProgressCircleProps>(
         </svg>
         {showLabel && (
           <div className="absolute inset-0 flex items-center justify-center">
-            <span className="text-lg font-bold text-white">{Math.round(percentage)}%</span>
+            <span className="text-lg font-bold text-gray-900 dark:text-white">{Math.round(percentage)}%</span>
           </div>
         )}
       </div>

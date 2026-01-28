@@ -100,9 +100,9 @@ export function DataTable<T extends object>({
   };
 
   const getSortIcon = (key: string) => {
-    if (sortKey !== key) return <ChevronsUpDown size={14} className="text-dark-500" />;
-    if (sortDirection === 'asc') return <ChevronUp size={14} className="text-primary-500" />;
-    return <ChevronDown size={14} className="text-primary-500" />;
+    if (sortKey !== key) return <ChevronsUpDown size={14} className="text-gray-400 dark:text-dark-500" />;
+    if (sortDirection === 'asc') return <ChevronUp size={14} className="text-oto-500" />;
+    return <ChevronDown size={14} className="text-oto-500" />;
   };
 
   // Reset to page 1 when search changes
@@ -115,18 +115,18 @@ export function DataTable<T extends object>({
     <div className="card">
       {/* Search bar */}
       {searchable && (
-        <div className="p-4 border-b border-dark-700">
+        <div className="p-4 border-b border-light-200 dark:border-dark-700">
           <div className="relative max-w-sm">
             <Search
               size={18}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-dark-400"
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-dark-400"
             />
             <input
               type="text"
               value={search}
               onChange={(e) => handleSearch(e.target.value)}
               placeholder={searchPlaceholder}
-              className="w-full pl-10 pr-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-dark-100 placeholder-dark-400 focus:outline-none focus:border-primary-500 transition-colors"
+              className="w-full pl-10 pr-4 py-2 bg-light-100 dark:bg-dark-700 border border-light-300 dark:border-dark-600 rounded-lg text-gray-900 dark:text-dark-100 placeholder-gray-400 dark:placeholder-dark-400 focus:outline-none focus:ring-2 focus:ring-oto-500 focus:border-transparent transition-all"
             />
           </div>
         </div>
@@ -136,7 +136,7 @@ export function DataTable<T extends object>({
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
-            <tr className="text-left text-dark-400 text-sm border-b border-dark-700 bg-dark-800/50">
+            <tr className="text-left text-oto-700 dark:text-dark-400 text-sm border-b border-light-200 dark:border-dark-700 bg-oto-50 dark:bg-dark-800/50">
               {columns.map((column) => (
                 <th
                   key={String(column.key)}
@@ -146,13 +146,13 @@ export function DataTable<T extends object>({
                   {column.sortable ? (
                     <button
                       onClick={() => handleSort(String(column.key))}
-                      className="flex items-center gap-1 hover:text-white transition-colors"
+                      className="flex items-center gap-1 hover:text-oto-600 dark:hover:text-white transition-colors uppercase tracking-wide"
                     >
                       {column.header}
                       {getSortIcon(String(column.key))}
                     </button>
                   ) : (
-                    column.header
+                    <span className="uppercase tracking-wide">{column.header}</span>
                   )}
                 </th>
               ))}
@@ -163,15 +163,15 @@ export function DataTable<T extends object>({
             {isLoading ? (
               // Loading skeleton
               Array.from({ length: 5 }).map((_, i) => (
-                <tr key={i} className="border-b border-dark-700/50">
+                <tr key={i} className="border-b border-light-200 dark:border-dark-700/50">
                   {columns.map((column) => (
                     <td key={String(column.key)} className="px-4 py-3">
-                      <div className="h-5 bg-dark-700 rounded animate-pulse" />
+                      <div className="h-5 bg-light-200 dark:bg-dark-700 rounded animate-pulse" />
                     </td>
                   ))}
                   {actions && (
                     <td className="px-4 py-3">
-                      <div className="h-5 w-16 bg-dark-700 rounded animate-pulse" />
+                      <div className="h-5 w-16 bg-light-200 dark:bg-dark-700 rounded animate-pulse" />
                     </td>
                   )}
                 </tr>
@@ -182,23 +182,23 @@ export function DataTable<T extends object>({
                   colSpan={columns.length + (actions ? 1 : 0)}
                   className="px-4 py-12 text-center"
                 >
-                  <div className="flex flex-col items-center text-dark-400">
+                  <div className="flex flex-col items-center text-gray-400 dark:text-dark-400">
                     {emptyIcon}
                     <p className="mt-2">{emptyMessage}</p>
                   </div>
                 </td>
               </tr>
             ) : (
-              paginatedData.map((item) => (
+              paginatedData.map((item, index) => (
                 <tr
                   key={keyExtractor(item)}
                   onClick={() => onRowClick?.(item)}
-                  className={`border-b border-dark-700/50 hover:bg-dark-800/50 transition-colors ${
+                  className={`border-b border-light-200 dark:border-dark-700/50 hover:bg-oto-50 dark:hover:bg-dark-800/50 transition-colors ${
                     onRowClick ? 'cursor-pointer' : ''
-                  }`}
+                  } ${index % 2 === 1 ? 'bg-light-50 dark:bg-dark-800/20' : ''}`}
                 >
                   {columns.map((column) => (
-                    <td key={String(column.key)} className="px-4 py-3 text-dark-200">
+                    <td key={String(column.key)} className="px-4 py-3 text-gray-700 dark:text-dark-200">
                       {column.render
                         ? column.render(item)
                         : String(item[column.key as keyof T] ?? '-')}
@@ -218,8 +218,8 @@ export function DataTable<T extends object>({
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between px-4 py-3 border-t border-dark-700">
-          <p className="text-sm text-dark-400">
+        <div className="flex items-center justify-between px-4 py-3 border-t border-light-200 dark:border-dark-700">
+          <p className="text-sm text-gray-500 dark:text-dark-400">
             Affichage {(currentPage - 1) * pageSize + 1} -{' '}
             {Math.min(currentPage * pageSize, sortedData.length)} sur {sortedData.length}
           </p>
@@ -232,7 +232,7 @@ export function DataTable<T extends object>({
             >
               <ChevronLeft size={16} />
             </Button>
-            <span className="text-sm text-dark-300">
+            <span className="text-sm text-gray-600 dark:text-dark-300 font-medium">
               Page {currentPage} / {totalPages}
             </span>
             <Button

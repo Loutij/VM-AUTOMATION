@@ -12,11 +12,11 @@ interface StatCardProps {
 }
 
 const colorClasses = {
-  blue: 'bg-blue-500/10 text-blue-500',
-  green: 'bg-green-500/10 text-green-500',
-  red: 'bg-red-500/10 text-red-500',
-  yellow: 'bg-yellow-500/10 text-yellow-500',
-  purple: 'bg-purple-500/10 text-purple-500',
+  blue: 'bg-oto-100 dark:bg-oto-500/10 text-oto-600 dark:text-oto-400',
+  green: 'bg-green-100 dark:bg-green-500/10 text-green-600 dark:text-green-400',
+  red: 'bg-red-100 dark:bg-red-500/10 text-red-600 dark:text-red-400',
+  yellow: 'bg-yellow-100 dark:bg-yellow-500/10 text-yellow-600 dark:text-yellow-400',
+  purple: 'bg-purple-100 dark:bg-purple-500/10 text-purple-600 dark:text-purple-400',
 };
 
 export function StatCard({
@@ -30,17 +30,17 @@ export function StatCard({
     <div className="card p-6">
       <div className="flex items-start justify-between">
         <div>
-          <p className="text-sm text-dark-400 font-medium">{title}</p>
-          <p className="mt-2 text-3xl font-bold text-white">{value}</p>
+          <p className="text-sm text-gray-500 dark:text-dark-400 font-medium uppercase tracking-wide">{title}</p>
+          <p className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{value}</p>
           {trend && (
             <p
-              className={`mt-2 text-sm ${
-                trend.isPositive ? 'text-green-500' : 'text-red-500'
+              className={`mt-2 text-sm font-medium ${
+                trend.isPositive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
               }`}
             >
               {trend.isPositive ? '+' : '-'}
               {Math.abs(trend.value)}%
-              <span className="text-dark-400 ml-1">vs hier</span>
+              <span className="text-gray-400 dark:text-dark-400 ml-1 font-normal">vs hier</span>
             </p>
           )}
         </div>

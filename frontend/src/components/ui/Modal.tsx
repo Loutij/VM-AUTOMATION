@@ -54,14 +54,14 @@ export function Modal({
     <div
       ref={overlayRef}
       onClick={handleOverlayClick}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 dark:bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
     >
       <div
-        className={`w-full ${sizeClasses[size]} bg-dark-800 border border-dark-700 rounded-xl shadow-2xl animate-in zoom-in-95 duration-200`}
+        className={`w-full ${sizeClasses[size]} bg-white dark:bg-dark-800 border border-light-200 dark:border-dark-700 rounded-xl shadow-2xl animate-in zoom-in-95 duration-200`}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-dark-700">
-          <h2 className="text-lg font-semibold text-white">{title}</h2>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-light-200 dark:border-dark-700">
+          <h2 className="text-lg font-bold uppercase tracking-tight text-gray-900 dark:text-white">{title}</h2>
           <Button variant="ghost" size="sm" onClick={onClose} className="!p-1.5">
             <X size={18} />
           </Button>
@@ -72,7 +72,7 @@ export function Modal({
 
         {/* Footer */}
         {footer && (
-          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-dark-700">
+          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-light-200 dark:border-dark-700 bg-light-50 dark:bg-dark-800/50">
             {footer}
           </div>
         )}
@@ -125,7 +125,7 @@ export function ConfirmModal({
         </>
       }
     >
-      <p className="text-dark-300">{message}</p>
+      <p className="text-gray-600 dark:text-dark-300">{message}</p>
     </Modal>
   );
 }
