@@ -706,6 +706,11 @@ class DeploymentService:
         """
         Attend que la VM soit prête et accessible via PowerShell Direct.
         
+        Le processus en 3 phases :
+        1. Attendre le heartbeat (Windows a démarré)
+        2. Attendre le fichier flag C:\\VM-Automation\\ready.flag (setup terminé)
+        3. Vérifier que PowerShell Direct fonctionne avec les credentials
+        
         Args:
             deployment: Le déploiement en cours
             vm: La VM créée
@@ -714,6 +719,8 @@ class DeploymentService:
         Returns:
             True si la VM est accessible, False sinon
         """
+        import time
+        
         config = deployment.config
         admin_password = config.get("admin_password", "")
         
@@ -721,22 +728,269 @@ class DeploymentService:
             client = await self.vm_service._get_hypervisor_client(deployment.hypervisor_id)
             
             vm_identifier = vm.hypervisor_vm_id or vm.name
-            credentials = ("Administrator", admin_password)
+            credentials = ("Administrateur", admin_password)  # Windows FR
             
-            # Attendre que la VM soit prête
-            is_ready = await client.wait_for_vm_ready(
-                vm_id=vm_identifier,
-                vm_credentials=credentials,
-                timeout=timeout,
-                check_interval=15,
+            start_time = time.time()
+            
+            # Phase 1: Attendre le heartbeat (Windows boot) - timeout réduit
+            await self._log_step(
+                deployment, DeploymentStep.WAITING_VM_READY,
+                "Phase 1/3: Waiting for Windows heartbeat...", "info"
             )
             
-            return is_ready
+            heartbeat_timeout = min(timeout // 2, 300)  # Max 5 min pour le heartbeat
+            heartbeat_ok = await client.wait_for_vm_ready(
+                vm_id=vm_identifier,
+                vm_credentials=None,  # Pas de test credentials, juste heartbeat
+                timeout=heartbeat_timeout,
+                check_interval=10,
+            )
+            
+            if not heartbeat_ok:
+                await self._log_step(
+                    deployment, DeploymentStep.WAITING_VM_READY,
+                    "Windows heartbeat timeout - VM may not be running properly", "warning"
+                )
+                return False
+            
+            await self._log_step(
+                deployment, DeploymentStep.WAITING_VM_READY,
+                "Windows heartbeat OK - VM is running", "info"
+            )
+            
+            # Phase 2: Attendre le fichier flag ready.flag
+            await self._log_step(
+                deployment, DeploymentStep.WAITING_VM_READY,
+                "Phase 2/3: Waiting for VM-Automation setup to complete...", "info"
+            )
+            
+            flag_check_interval = 15
+            flag_found = False
+            fallback_attempted = False
+            checks_count = 0
+            max_checks_before_fallback = 6  # ~90 secondes avant de tenter le fallback
+            
+            while (time.time() - start_time) < timeout and not flag_found:
+                checks_count += 1
+                
+                try:
+                    # Vérifier si le fichier flag existe via PowerShell Direct
+                    result = await client.execute_in_vm(
+                        vm_identifier,
+                        'if (Test-Path "C:\\VM-Automation\\ready.flag") { "FLAG_FOUND" } else { "FLAG_NOT_FOUND" }',
+                        credentials,
+                        timeout=30,
+                    )
+                    
+                    if result.success and "FLAG_FOUND" in str(result.output):
+                        flag_found = True
+                        await self._log_step(
+                            deployment, DeploymentStep.WAITING_VM_READY,
+                            "VM-Automation setup completed - ready.flag found", "info"
+                        )
+                        break
+                    elif result.success and not fallback_attempted and checks_count >= max_checks_before_fallback:
+                        # PowerShell Direct fonctionne mais le flag n'existe pas
+                        # Tenter d'exécuter le script de setup manuellement (fallback)
+                        fallback_attempted = True
+                        await self._log_step(
+                            deployment, DeploymentStep.WAITING_VM_READY,
+                            "Flag not found - attempting fallback: manual setup execution...", "warning"
+                        )
+                        
+                        # Tenter d'exécuter le script setup.ps1 manuellement
+                        fallback_result = await self._execute_fallback_setup(
+                            client, vm_identifier, credentials, admin_password
+                        )
+                        
+                        if fallback_result:
+                            await self._log_step(
+                                deployment, DeploymentStep.WAITING_VM_READY,
+                                "Fallback setup executed successfully", "info"
+                            )
+                        else:
+                            await self._log_step(
+                                deployment, DeploymentStep.WAITING_VM_READY,
+                                "Fallback setup failed - continuing checks...", "warning"
+                            )
+                    else:
+                        logger.debug(
+                            "deployment_waiting_for_flag",
+                            deployment_id=str(deployment.id),
+                            result=str(result.output)[:100] if result.output else "no output",
+                            checks_count=checks_count,
+                        )
+                        
+                except Exception as e:
+                    # PowerShell Direct peut échouer si le setup n'est pas encore terminé
+                    logger.debug(
+                        "deployment_flag_check_error",
+                        deployment_id=str(deployment.id),
+                        error=str(e),
+                    )
+                
+                await asyncio.sleep(flag_check_interval)
+            
+            if not flag_found:
+                await self._log_step(
+                    deployment, DeploymentStep.WAITING_VM_READY,
+                    "Timeout waiting for VM-Automation setup - continuing anyway", "warning"
+                )
+                # On continue quand même car le setup peut avoir fonctionné
+            
+            # Phase 3: Vérifier que PowerShell Direct fonctionne
+            await self._log_step(
+                deployment, DeploymentStep.WAITING_VM_READY,
+                "Phase 3/3: Verifying PowerShell Direct connection...", "info"
+            )
+            
+            # Tester la connexion PowerShell Direct
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    result = await client.execute_in_vm(
+                        vm_identifier,
+                        "$env:COMPUTERNAME",
+                        credentials,
+                        timeout=30,
+                    )
+                    
+                    if result.success:
+                        hostname = str(result.output).strip() if result.output else "unknown"
+                        await self._log_step(
+                            deployment, DeploymentStep.WAITING_VM_READY,
+                            f"PowerShell Direct connected - hostname: {hostname}", "info"
+                        )
+                        return True
+                    else:
+                        logger.debug(
+                            "deployment_ps_direct_failed",
+                            deployment_id=str(deployment.id),
+                            attempt=attempt + 1,
+                            error=result.error,
+                        )
+                        
+                except Exception as e:
+                    logger.debug(
+                        "deployment_ps_direct_error",
+                        deployment_id=str(deployment.id),
+                        attempt=attempt + 1,
+                        error=str(e),
+                    )
+                
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(10)
+            
+            await self._log_step(
+                deployment, DeploymentStep.WAITING_VM_READY,
+                "PowerShell Direct connection failed after retries", "warning"
+            )
+            return False
             
         except Exception as e:
             logger.warning(
                 "deployment_wait_vm_ready_failed",
                 deployment_id=str(deployment.id),
+                error=str(e),
+            )
+            return False
+
+    async def _execute_fallback_setup(
+        self,
+        client: Any,
+        vm_identifier: str,
+        credentials: tuple[str, str],
+        admin_password: str,
+    ) -> bool:
+        """
+        Exécute la configuration de setup manuellement via PowerShell Direct.
+        
+        C'est un fallback si le script RunOnce n'a pas fonctionné.
+        
+        Args:
+            client: Client Hyper-V
+            vm_identifier: ID ou nom de la VM
+            credentials: Credentials pour PowerShell Direct
+            admin_password: Mot de passe admin à configurer
+            
+        Returns:
+            True si la configuration a réussi
+        """
+        logger.info(
+            "deployment_fallback_setup_starting",
+            vm_id=vm_identifier,
+        )
+        
+        # Script de configuration minimal
+        fallback_script = f'''
+$ErrorActionPreference = 'Continue'
+$logFile = "C:\\VM-Automation\\setup.log"
+
+# Créer le dossier si nécessaire
+if (-not (Test-Path "C:\\VM-Automation")) {{
+    New-Item -ItemType Directory -Path "C:\\VM-Automation" -Force | Out-Null
+}}
+
+"$(Get-Date) - Fallback setup starting..." | Out-File $logFile -Append
+
+try {{
+    # 1. Configurer le mot de passe Administrateur
+    net user Administrateur "{admin_password}" /active:yes 2>&1 | Out-Null
+    "$(Get-Date) - Administrateur configured" | Out-File $logFile -Append
+    
+    # 2. Configurer WinRM
+    Enable-PSRemoting -Force -SkipNetworkProfileCheck -ErrorAction SilentlyContinue
+    Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value '*' -Force -ErrorAction SilentlyContinue
+    "$(Get-Date) - WinRM configured" | Out-File $logFile -Append
+    
+    # 3. Activer RDP
+    Set-ItemProperty -Path 'HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server' -Name "fDenyTSConnections" -Value 0 -ErrorAction SilentlyContinue
+    Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
+    Enable-NetFirewallRule -DisplayGroup "Bureau à distance" -ErrorAction SilentlyContinue
+    "$(Get-Date) - RDP enabled" | Out-File $logFile -Append
+    
+    # 4. Configurer le réseau en Privé
+    Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private -ErrorAction SilentlyContinue
+    "$(Get-Date) - Network configured" | Out-File $logFile -Append
+    
+    # 5. Créer le flag de succès
+    "READY" | Out-File "C:\\VM-Automation\\ready.flag"
+    "$(Get-Date) - Fallback setup complete!" | Out-File $logFile -Append
+    
+    "FALLBACK_SUCCESS"
+}} catch {{
+    "$(Get-Date) - ERROR: $($_.Exception.Message)" | Out-File $logFile -Append
+    "FALLBACK_FAILED"
+}}
+'''
+        
+        try:
+            result = await client.execute_in_vm(
+                vm_identifier,
+                fallback_script,
+                credentials,
+                timeout=120,
+            )
+            
+            if result.success and "FALLBACK_SUCCESS" in str(result.output):
+                logger.info(
+                    "deployment_fallback_setup_success",
+                    vm_id=vm_identifier,
+                )
+                return True
+            else:
+                logger.warning(
+                    "deployment_fallback_setup_failed",
+                    vm_id=vm_identifier,
+                    output=str(result.output)[:200] if result.output else "no output",
+                    error=result.error,
+                )
+                return False
+                
+        except Exception as e:
+            logger.warning(
+                "deployment_fallback_setup_error",
+                vm_id=vm_identifier,
                 error=str(e),
             )
             return False
@@ -757,7 +1011,7 @@ class DeploymentService:
         
         config = deployment.config
         admin_password = config.get("admin_password", "")
-        credentials = ("Administrator", admin_password)
+        credentials = ("Administrateur", admin_password)  # Windows FR
         
         try:
             client = await self.vm_service._get_hypervisor_client(deployment.hypervisor_id)
@@ -887,7 +1141,7 @@ class DeploymentService:
         
         config = deployment.config
         admin_password = config.get("admin_password", "")
-        credentials = ("Administrator", admin_password)
+        credentials = ("Administrateur", admin_password)  # Windows FR
         
         try:
             client = await self.vm_service._get_hypervisor_client(deployment.hypervisor_id)

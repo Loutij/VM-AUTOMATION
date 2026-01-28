@@ -1656,7 +1656,7 @@ class HyperVClient(BaseHypervisor):
             await self._execute(script_unattend, timeout=60)
             logger.debug("hyperv_dism_unattend_written", vm_id=vm_id)
         
-        # Étape 3b: Configurer le registre offline pour bypass OOBE
+        # Étape 3b: Configurer le registre offline pour bypass OOBE + RunOnce pour setup
         script_registry = f"""
         $winDrive = '{win_drive}:'
         $softwareHive = "$winDrive\\Windows\\System32\\config\\SOFTWARE"
@@ -1686,9 +1686,14 @@ class HyperVClient(BaseHypervisor):
         # AutoLogon configuration
         $winlogonKey = "HKLM\\OFFLINE_SW\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon"
         reg add $winlogonKey /v AutoAdminLogon /t REG_SZ /d "1" /f
-        reg add $winlogonKey /v DefaultUserName /t REG_SZ /d "Administrator" /f
+        reg add $winlogonKey /v DefaultUserName /t REG_SZ /d "Administrateur" /f
         reg add $winlogonKey /v DefaultPassword /t REG_SZ /d "{admin_password}" /f
         reg add $winlogonKey /v AutoLogonCount /t REG_DWORD /d 5 /f
+        
+        # RunOnce - Exécuter le script de configuration VM-Automation au premier boot
+        # Cette clé s'exécute automatiquement après le logon de l'utilisateur
+        $runOnceKey = "HKLM\\OFFLINE_SW\\Microsoft\\Windows\\CurrentVersion\\RunOnce"
+        reg add $runOnceKey /v "VM-Automation-Setup" /t REG_SZ /d "powershell.exe -ExecutionPolicy Bypass -File C:\\VM-Automation\\setup.ps1" /f
         
         # Décharger les ruches
         [gc]::Collect()
@@ -1709,51 +1714,155 @@ class HyperVClient(BaseHypervisor):
                 error=result.stderr,
             )
         
-        # Étape 3c: Créer SetupComplete.cmd pour finaliser la configuration au premier boot
-        setup_complete_content = f"""@echo off
-REM ============================================
-REM SetupComplete.cmd - Post-OOBE Configuration
-REM ============================================
-echo [%date% %time%] SetupComplete starting >> C:\\Windows\\Setup\\Scripts\\setup.log
+        # Étape 3c: Créer le script VM-Automation pour configurer Windows au premier boot
+        # Ce script est exécuté par RunOnce après le logon automatique
+        setup_ps1_content = f"""# =============================================================================
+# VM-Automation Setup Script
+# Exécuté automatiquement au premier boot via RunOnce
+# =============================================================================
+$ErrorActionPreference = 'Continue'
+$logFile = "C:\\VM-Automation\\setup.log"
 
-REM Activer le compte Administrator et définir le mot de passe
-net user Administrator "{admin_password}" /active:yes >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
+# Créer le dossier de log s'il n'existe pas
+if (-not (Test-Path "C:\\VM-Automation")) {{
+    New-Item -ItemType Directory -Path "C:\\VM-Automation" -Force | Out-Null
+}}
 
-REM Configurer le profil réseau sur Privé (pour activer la découverte)
-powershell -Command "Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private" >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
+function Write-Log {{
+    param([string]$Message)
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    "$timestamp - $Message" | Out-File -FilePath $logFile -Append -Encoding UTF8
+    Write-Host $Message
+}}
 
-REM Activer la découverte réseau et le partage
-netsh advfirewall firewall set rule group="Network Discovery" new enable=Yes >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
-netsh advfirewall firewall set rule group="File and Printer Sharing" new enable=Yes >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
+Write-Log "=========================================="
+Write-Log "VM-Automation Setup Starting..."
+Write-Log "=========================================="
 
-REM Configurer WinRM
-powershell -Command "Enable-PSRemoting -Force -SkipNetworkProfileCheck" >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
-powershell -Command "Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value '*' -Force" >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
-powershell -Command "winrm quickconfig -quiet" >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
-powershell -Command "Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False" >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
+try {{
+    # 1. Activer et configurer le compte Administrateur (Windows FR)
+    Write-Log "Configuring Administrateur account..."
+    $result = net user Administrateur "{admin_password}" /active:yes 2>&1
+    Write-Log "Administrateur account result: $result"
+    
+    # 2. Configurer le profil réseau en Privé
+    Write-Log "Setting network profile to Private..."
+    Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private -ErrorAction SilentlyContinue
+    Write-Log "Network profile configured"
+    
+    # 3. Configurer WinRM pour PowerShell Direct
+    Write-Log "Configuring WinRM..."
+    Enable-PSRemoting -Force -SkipNetworkProfileCheck -ErrorAction SilentlyContinue
+    Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value '*' -Force -ErrorAction SilentlyContinue
+    winrm quickconfig -quiet 2>&1 | Out-Null
+    Write-Log "WinRM configured"
+    
+    # 4. Activer RDP
+    Write-Log "Enabling Remote Desktop..."
+    Set-ItemProperty -Path 'HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server' -Name "fDenyTSConnections" -Value 0 -ErrorAction SilentlyContinue
+    Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
+    # Aussi avec le nom français
+    Enable-NetFirewallRule -DisplayGroup "Bureau à distance" -ErrorAction SilentlyContinue
+    Write-Log "Remote Desktop enabled"
+    
+    # 5. Activer la découverte réseau et le partage
+    Write-Log "Enabling Network Discovery..."
+    netsh advfirewall firewall set rule group="Network Discovery" new enable=Yes 2>&1 | Out-Null
+    netsh advfirewall firewall set rule group="File and Printer Sharing" new enable=Yes 2>&1 | Out-Null
+    # Aussi avec les noms français
+    netsh advfirewall firewall set rule group="Découverte de réseau" new enable=Yes 2>&1 | Out-Null
+    netsh advfirewall firewall set rule group="Partage de fichiers et d'imprimantes" new enable=Yes 2>&1 | Out-Null
+    Write-Log "Network Discovery enabled"
+    
+    # 6. Configurer le pare-feu pour autoriser les connexions
+    Write-Log "Configuring firewall..."
+    # Ne pas désactiver complètement le pare-feu, juste autoriser les règles nécessaires
+    New-NetFirewallRule -DisplayName "WinRM HTTP" -Direction Inbound -Protocol TCP -LocalPort 5985 -Action Allow -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "WinRM HTTPS" -Direction Inbound -Protocol TCP -LocalPort 5986 -Action Allow -ErrorAction SilentlyContinue
+    Write-Log "Firewall configured"
+    
+    # 7. Créer le fichier flag de succès
+    Write-Log "Creating success flag..."
+    "READY" | Out-File -FilePath "C:\\VM-Automation\\ready.flag" -Encoding UTF8
+    Write-Log "Success flag created at C:\\VM-Automation\\ready.flag"
+    
+    Write-Log "=========================================="
+    Write-Log "VM-Automation Setup Complete!"
+    Write-Log "=========================================="
+    
+}} catch {{
+    Write-Log "ERROR: $($_.Exception.Message)"
+    Write-Log "Stack: $($_.ScriptStackTrace)"
+}}
 
-REM Activer RDP
-reg add "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
-netsh advfirewall firewall set rule group="remote desktop" new enable=Yes >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
-
-REM Marquer la configuration comme terminée
-echo SETUP_COMPLETE > C:\\Windows\\Setup\\Scripts\\setup_done.flag
-
-echo [%date% %time%] SetupComplete finished >> C:\\Windows\\Setup\\Scripts\\setup.log
+# Garder la fenêtre ouverte quelques secondes pour voir les logs
+Start-Sleep -Seconds 3
 """
         
-        # Encoder et écrire SetupComplete.cmd
+        # Encoder et écrire setup.ps1 dans C:\VM-Automation
         import base64
-        setup_b64 = base64.b64encode(setup_complete_content.encode('utf-8')).decode('ascii')
+        setup_b64 = base64.b64encode(setup_ps1_content.encode('utf-8')).decode('ascii')
+        
+        # Découper en chunks pour éviter les limites de ligne de commande
+        chunks = [setup_b64[i:i+2000] for i in range(0, len(setup_b64), 2000)]
+        
+        # Créer le dossier et écrire le script
+        script_create_setup = f"""
+        $vmAutomationDir = '{win_drive}:\\VM-Automation'
+        New-Item -ItemType Directory -Path $vmAutomationDir -Force -ErrorAction SilentlyContinue | Out-Null
+        
+        # Écrire le fichier en chunks pour éviter les limites de taille
+        $tempB64 = "$vmAutomationDir\\setup.b64"
+        """
+        
+        for i, chunk in enumerate(chunks):
+            if i == 0:
+                script_create_setup += f"""
+        [System.IO.File]::WriteAllText($tempB64, '{chunk}')
+        """
+            else:
+                script_create_setup += f"""
+        [System.IO.File]::AppendAllText($tempB64, '{chunk}')
+        """
+        
+        script_create_setup += f"""
+        # Décoder et écrire le script PowerShell
+        $b64Content = [System.IO.File]::ReadAllText($tempB64)
+        $bytes = [System.Convert]::FromBase64String($b64Content)
+        $scriptContent = [System.Text.Encoding]::UTF8.GetString($bytes)
+        [System.IO.File]::WriteAllText("$vmAutomationDir\\setup.ps1", $scriptContent)
+        
+        # Nettoyer le fichier temporaire
+        Remove-Item $tempB64 -Force -ErrorAction SilentlyContinue
+        
+        Write-Output "VM-Automation setup.ps1 created"
+        """
+        
+        await self._execute(script_create_setup, timeout=60)
+        logger.debug("hyperv_dism_vm_automation_setup_created", vm_id=vm_id)
+        
+        # Garder aussi SetupComplete.cmd comme backup (au cas où)
+        setup_complete_content = f"""@echo off
+REM ============================================
+REM SetupComplete.cmd - Backup configuration
+REM Exécuté uniquement si RunOnce échoue
+REM ============================================
+if exist "C:\\VM-Automation\\ready.flag" goto :EOF
+echo [%date% %time%] SetupComplete starting (backup) >> C:\\VM-Automation\\setup.log
+powershell.exe -ExecutionPolicy Bypass -File "C:\\VM-Automation\\setup.ps1"
+echo [%date% %time%] SetupComplete finished >> C:\\VM-Automation\\setup.log
+"""
+        
+        setup_cmd_b64 = base64.b64encode(setup_complete_content.encode('utf-8')).decode('ascii')
         
         script_setup_complete = f"""
         $setupDir = '{win_drive}:\\Windows\\Setup\\Scripts'
         New-Item -ItemType Directory -Path $setupDir -Force -ErrorAction SilentlyContinue | Out-Null
         
-        $content = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('{setup_b64}'))
+        $content = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('{setup_cmd_b64}'))
         [System.IO.File]::WriteAllText("$setupDir\\SetupComplete.cmd", $content)
         
-        Write-Output "SetupComplete.cmd created"
+        Write-Output "SetupComplete.cmd created (backup)"
         """
         
         await self._execute(script_setup_complete, timeout=30)

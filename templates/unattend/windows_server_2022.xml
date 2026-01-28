@@ -240,16 +240,16 @@
                 </Password>
                 <Enabled>true</Enabled>
                 <LogonCount>1</LogonCount>
-                <Username>Administrator</Username>
+                <Username>Administrateur</Username>
             </AutoLogon>
 
             <!-- Script de premier démarrage -->
             <FirstLogonCommands>
-                <!-- Définir le mot de passe Administrator explicitement -->
+                <!-- Définir le mot de passe Administrateur explicitement (Windows FR) -->
                 <SynchronousCommand wcm:action="add">
                     <Order>1</Order>
-                    <CommandLine>cmd /c net user Administrator "{{ admin_password | default('TempP@ss123!') }}" /active:yes</CommandLine>
-                    <Description>Set Administrator password</Description>
+                    <CommandLine>cmd /c net user Administrateur "{{ admin_password | default('TempP@ss123!') }}" /active:yes</CommandLine>
+                    <Description>Set Administrateur password</Description>
                 </SynchronousCommand>
                 <!-- Activer WinRM pour l'administration à distance -->
                 <SynchronousCommand wcm:action="add">

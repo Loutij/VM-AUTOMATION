@@ -43,7 +43,7 @@ Outil interne d'automatisation complète du déploiement de machines virtuelles.
 | Déploiement DISM | TERMINÉ | deploy_with_dism() - Déploie Windows directement sur VHD (~90s, évite "Press any key") |
 | Injection unattend | TERMINÉ | inject_unattend() - Injecte autounattend.xml via VHDX dédié |
 | Création ISO custom | TERMINÉ | create_custom_iso() - oscdimg.exe + efisys_noprompt.bin |
-| OOBE automatique | EN COURS | Windows OOBE reste manuel après DISM - voir docs/HANDOFF.md pour solutions |
+| OOBE automatique | TERMINÉ | RunOnce + setup.ps1 configure mot de passe et services au premier boot |
 
 ### Module 4 : Post-Installation
 | Fonctionnalité | Statut | Description |
@@ -303,6 +303,25 @@ docker-compose -f docker-compose.prod.yml up -d
 ---
 
 ## Changelog
+
+### v0.8.3 (2026-01-28) - Post-Installation Automatique DISM
+- **Correction majeure du workflow DISM** :
+  - Le mot de passe Administrateur est maintenant configuré automatiquement
+  - Utilisation de **RunOnce** dans le registre offline pour exécuter le setup au premier boot
+  - Script `C:\VM-Automation\setup.ps1` configure : mot de passe, WinRM, RDP, firewall
+  - Fichier flag `C:\VM-Automation\ready.flag` signale la fin du setup
+- **Windows FR** :
+  - Credentials corrigés : `Administrateur` au lieu de `Administrator`
+  - Templates unattend.xml mis à jour pour Windows français
+  - Commandes `net user Administrateur` dans tous les scripts
+- **Workflow amélioré** :
+  - `_wait_for_vm_ready()` vérifie le fichier flag en 3 phases (heartbeat, flag, PowerShell Direct)
+  - `_execute_fallback_setup()` : nouveau mécanisme de fallback si RunOnce échoue
+  - Retry automatique avec backoff exponentiel
+- **Fichiers modifiés** :
+  - `src/integrations/hypervisors/hyperv_client.py` : deploy_with_dism() avec RunOnce
+  - `src/domain/deployment_service.py` : wait logic améliorée + fallback
+  - `templates/unattend/windows_server_*.xml` : Username=Administrateur
 
 ### v0.8.2 (2026-01-27) - Catalogue Services d'Entreprise Enrichi
 - **Services Active Directory enrichis** :
