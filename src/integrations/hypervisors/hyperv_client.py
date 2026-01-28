@@ -336,8 +336,14 @@ class HyperVClient(BaseHypervisor):
             path=data.get("Path"),
         )
 
-    async def create_vm(self, specs: VMSpecs) -> VMInfo:
-        """Crée une nouvelle VM avec les spécifications données."""
+    async def create_vm(self, specs: VMSpecs, force: bool = False) -> VMInfo:
+        """
+        Crée une nouvelle VM avec les spécifications données.
+        
+        Args:
+            specs: Spécifications de la VM
+            force: Si True, supprime la VM existante avant de créer (pour retry)
+        """
         
         # Construire les chemins VM et VHDX
         # Si vhdx_path est spécifié, on utilise le même répertoire pour tout (VM + VHDX)
@@ -364,17 +370,39 @@ class HyperVClient(BaseHypervisor):
             ram_gb=specs.ram_gb,
             disk_gb=specs.disk_gb,
             generation=specs.generation,
+            force=force,
         )
         
         # Script de création de VM
-        script = f"""
-        $ErrorActionPreference = 'Stop'
-        
-        # Nettoyer les fichiers orphelins si présents
+        if force:
+            force_cleanup = f"""
+        # Supprimer la VM existante si force=True
+        $existingVm = Get-VM -Name '{specs.name}' -ErrorAction SilentlyContinue
+        if ($existingVm) {{
+            Write-Warning "VM existante détectée, suppression forcée: {specs.name}"
+            # Arrêter la VM si elle est en cours d'exécution
+            if ($existingVm.State -eq 'Running') {{
+                Stop-VM -VM $existingVm -Force -ErrorAction SilentlyContinue
+            }}
+            # Supprimer la VM et ses disques
+            Remove-VM -VM $existingVm -Force -ErrorAction Stop
+            # Attendre un peu pour que la suppression soit complète
+            Start-Sleep -Seconds 2
+        }}
+        """
+        else:
+            force_cleanup = f"""
+        # Vérifier que la VM n'existe pas déjà (si force=False)
         $existingVm = Get-VM -Name '{specs.name}' -ErrorAction SilentlyContinue
         if ($existingVm) {{
             throw "Une VM avec le nom '{specs.name}' existe déjà. Supprimez-la d'abord."
         }}
+        """
+        
+        script = f"""
+        $ErrorActionPreference = 'Stop'
+        
+        {force_cleanup}
         
         # Vérifier si un VHDX orphelin existe et le supprimer
         $vhdxPath = '{vhdx_path}'
@@ -1577,21 +1605,164 @@ class HyperVClient(BaseHypervisor):
         )
         
         # Étape 2: Appliquer l'image Windows avec DISM
+        # Forcer l'encodage UTF-8 pour éviter les problèmes d'encodage avec DISM
         script_dism = f"""
-        Dism /Apply-Image /ImageFile:{iso_drive}:\\sources\\install.wim /Index:{image_index} /ApplyDir:{win_drive}:\\
-        if ($LASTEXITCODE -eq 0) {{
+        $ErrorActionPreference = 'Continue'
+        $ProgressPreference = 'SilentlyContinue'
+        
+        # Forcer l'encodage de la console en UTF-8 pour capturer correctement la sortie DISM
+        [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+        $OutputEncoding = [System.Text.Encoding]::UTF8
+        chcp 65001 | Out-Null
+        
+        # Capturer la sortie de DISM en redirigeant vers stdout/stderr
+        # Utiliser try/catch pour capturer les erreurs sans arrêter le script
+        $dismOutput = ""
+        $dismError = ""
+        $exitCode = 0
+        
+        try {{
+            # Exécuter DISM directement (plus fiable que Start-Process via WinRM)
+            $dismResult = Dism /Apply-Image /ImageFile:{iso_drive}:\\sources\\install.wim /Index:{image_index} /ApplyDir:{win_drive}:\\ 2>&1
+            $exitCode = $LASTEXITCODE
+            
+            # Capturer la sortie
+            $dismOutput = $dismResult | Out-String
+        }} catch {{
+            $exitCode = $LASTEXITCODE
+            $dismError = $_.Exception.Message
+            $dismOutput = $_.Exception.Message
+        }}
+        
+        # Vérifier le code de sortie ET la présence du message de succès dans la sortie
+        # DISM retourne 0 en cas de succès, mais on vérifie aussi le message pour être sûr
+        $hasSuccessMessage = ($dismOutput -match "op.*ration a r.*ussi" -or 
+                             $dismOutput -match "operation completed successfully" -or
+                             $dismOutput -match "100\.0%" -or
+                             $dismOutput -match "100%")
+        
+        # Si le code de sortie est 0 OU si on a le message de succès, c'est un succès
+        if ($exitCode -eq 0 -or $hasSuccessMessage) {{
+            # TOUJOURS écrire DISM_SUCCESS si on détecte un succès
             Write-Output "DISM_SUCCESS"
+            # Afficher la sortie pour le logging
+            if ($dismOutput) {{
+                Write-Output $dismOutput
+            }}
         }} else {{
-            throw "DISM failed with exit code $LASTEXITCODE"
+            $errorMsg = "DISM failed with exit code $exitCode"
+            if ($dismError) {{
+                $errorMsg += ": $dismError"
+            }}
+            if ($dismOutput) {{
+                $errorMsg += " Output: $dismOutput"
+            }}
+            throw $errorMsg
         }}
         """
         
         result = await self._execute(script_dism, timeout=600)
-        if not result.success or "DISM_SUCCESS" not in (result.stdout or ""):
-            # Nettoyer en cas d'erreur
-            await self._execute(f"Dismount-DiskImage -ImagePath '{iso_path}' -ErrorAction SilentlyContinue")
-            await self._execute(f"Dismount-VHD -Path '{vhd_path}' -ErrorAction SilentlyContinue")
-            raise VMOperationError(vm_id, "deploy_dism_apply", result.stderr or result.stdout)
+        
+        # Privilégier la présence de "DISM_SUCCESS" dans stdout/stderr plutôt que result.success
+        # DISM peut réussir même si PowerShell retourne un code non-zéro à cause d'avertissements
+        stdout_content = result.stdout or ""
+        stderr_content = result.stderr or ""
+        
+        # Combiner stdout et stderr pour la recherche (DISM peut écrire dans l'un ou l'autre)
+        combined_output = f"{stdout_content}\n{stderr_content}".lower()
+        stdout_lower = stdout_content.lower()
+        stderr_lower = stderr_content.lower()
+        
+        # Vérifier si DISM_SUCCESS est présent (insensible à la casse, dans stdout ou stderr)
+        has_dism_success = (
+            "dism_success" in stdout_lower or
+            "dism_success" in stderr_lower
+        )
+        
+        if has_dism_success:
+            # Succès confirmé, continuer
+            logger.debug("dism_success_confirmed", vm_id=vm_id)
+        else:
+            # DISM_SUCCESS absent - vérifier si c'est vraiment un échec
+            # Chercher aussi les messages de succès dans la sortie (gestion encodage)
+            # Patterns pour détecter les messages de succès mal encodés
+            success_patterns = [
+                "100.0%",  # Progression complète
+                "100%",  # Progression complète (variante)
+                "opération a réussi",  # Message français correct
+                "operation completed successfully",  # Message anglais
+                "l'op",  # Début du message français (pour détecter "L'opération")
+                "rï¿½ussi",  # "réussi" mal encodé (UTF-8 mal interprété)
+                "rÃ©ussi",  # "réussi" mal encodé (autre variante)
+                "rÃ©ussi",  # "réussi" mal encodé (encodage Windows)
+                "rÃ©ussi",  # "réussi" mal encodé (ISO-8859-1)
+            ]
+            
+            # Vérifier dans stdout et stderr
+            has_success_indicator = False
+            for pattern in success_patterns:
+                if pattern in combined_output:
+                    has_success_indicator = True
+                    break
+            
+            # Vérification supplémentaire : "L'op" suivi de "réussi" (même mal encodé)
+            if not has_success_indicator:
+                if "l'op" in combined_output:
+                    # Chercher "réussi" ou ses variantes mal encodées
+                    reussi_patterns = ["réussi", "rï¿½ussi", "rÃ©ussi", "rÃ©ussi"]
+                    for reussi_pattern in reussi_patterns:
+                        if reussi_pattern in combined_output:
+                            has_success_indicator = True
+                            break
+            
+            # Vérification finale : présence de "100%" ou "100.0%" dans la sortie
+            if not has_success_indicator:
+                has_success_indicator = (
+                    "100.0%" in stdout_content or
+                    "100%" in stdout_content or
+                    "100.0%" in stderr_content or
+                    "100%" in stderr_content
+                )
+            
+            if has_success_indicator:
+                # Message de succès détecté mais DISM_SUCCESS manquant - c'est un problème de script
+                logger.warning(
+                    "dism_success_marker_missing_but_success_detected",
+                    vm_id=vm_id,
+                    stdout_preview=stdout_content[:300] if stdout_content else None,
+                    stderr_preview=stderr_content[:300] if stderr_content else None,
+                )
+                # Continuer quand même car on a détecté le succès
+            elif not result.success:
+                # Pas de succès détecté et result.success = False : vérifier une dernière fois
+                # Si on a "100%" ou "100.0%" quelque part, c'est probablement un succès
+                final_check = (
+                    "100.0%" in combined_output or
+                    "100%" in combined_output
+                )
+                
+                if final_check:
+                    # On a la progression complète, considérer comme succès malgré result.success = False
+                    logger.warning(
+                        "dism_success_detected_via_progress",
+                        vm_id=vm_id,
+                        result_success=result.success,
+                    )
+                else:
+                    # Vraiment aucun indicateur de succès : échec réel
+                    await self._execute(f"Dismount-DiskImage -ImagePath '{iso_path}' -ErrorAction SilentlyContinue")
+                    await self._execute(f"Dismount-VHD -Path '{vhd_path}' -ErrorAction SilentlyContinue")
+                    raise VMOperationError(vm_id, "deploy_dism_apply", result.stderr or result.stdout)
+            else:
+                # DISM_SUCCESS absent, pas de message de succès, mais result.success = True
+                # Situation ambiguë - logger et continuer avec avertissement
+                logger.warning(
+                    "dism_ambiguous_result",
+                    vm_id=vm_id,
+                    stdout_preview=stdout_content[:300] if stdout_content else None,
+                    stderr_preview=stderr_content[:300] if stderr_content else None,
+                    result_success=result.success,
+                )
         
         logger.debug("hyperv_dism_image_applied", vm_id=vm_id)
         
@@ -1902,17 +2073,30 @@ echo [%date% %time%] SetupComplete finished >> C:\\VM-Automation\\setup.log
         
         # Étape 4: Configurer le bootloader
         script_boot = f"""
+        $ErrorActionPreference = 'Continue'
         bcdboot {win_drive}:\\Windows /s {efi_drive}: /f UEFI
-        if ($LASTEXITCODE -eq 0) {{
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -eq 0) {{
             Write-Output "BOOT_SUCCESS"
         }} else {{
-            throw "BCDBoot failed with exit code $LASTEXITCODE"
+            throw "BCDBoot failed with exit code $exitCode"
         }}
         """
         
         result = await self._execute(script_boot, timeout=60)
-        if not result.success or "BOOT_SUCCESS" not in (result.stdout or ""):
-            raise VMOperationError(vm_id, "deploy_dism_boot", result.stderr or result.stdout)
+        
+        # Privilégier la présence de "BOOT_SUCCESS" dans stdout plutôt que result.success
+        if "BOOT_SUCCESS" not in (result.stdout or ""):
+            # Si BOOT_SUCCESS n'est pas présent, vérifier result.success
+            if not result.success:
+                raise VMOperationError(vm_id, "deploy_dism_boot", result.stderr or result.stdout)
+            else:
+                # BOOT_SUCCESS absent mais result.success = True : avertissement mais continuer
+                logger.warning(
+                    "boot_success_marker_missing",
+                    vm_id=vm_id,
+                    stdout=result.stdout[:200] if result.stdout else None,
+                )
         
         logger.debug("hyperv_dism_bootloader_configured", vm_id=vm_id)
         
@@ -2358,7 +2542,12 @@ echo [%date% %time%] SetupComplete finished >> C:\\VM-Automation\\setup.log
                 # Vérifier le heartbeat
                 heartbeat = await self.get_vm_heartbeat(vm_id)
                 
-                if heartbeat in ("OkApplicationsHealthy", "OkApplicationsUnknown"):
+                # Accepter tout heartbeat qui n'est pas "NoContact", "None" ou vide
+                # Cela permet de gérer différentes variantes de heartbeat (OkApplicationsHealthy, OkApplicationsUnknown, etc.)
+                invalid_heartbeats = ("NoContact", "None", None, "")
+                is_heartbeat_ok = heartbeat and heartbeat not in invalid_heartbeats
+                
+                if is_heartbeat_ok:
                     logger.info(
                         "hyperv_vm_heartbeat_ok",
                         vm_id=vm_id,

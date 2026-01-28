@@ -23,7 +23,7 @@ def _decode_powershell_output(raw_bytes: bytes) -> str:
     
     Windows PowerShell peut utiliser différents encodages selon la configuration :
     - UTF-8 (moderne)
-    - UTF-16 (Windows natif)
+    - UTF-16 (Windows natif, avec ou sans BOM)
     - cp1252 (Windows Western Europe)
     - cp850 (DOS/Console)
     - latin-1 (fallback)
@@ -37,15 +37,56 @@ def _decode_powershell_output(raw_bytes: bytes) -> str:
     if not raw_bytes:
         return ""
     
+    # Détecter le BOM UTF-16 (FE FF pour BE ou FF FE pour LE)
+    if len(raw_bytes) >= 2:
+        bom = raw_bytes[:2]
+        if bom == b'\xff\xfe':  # UTF-16 LE BOM
+            try:
+                return raw_bytes[2:].decode('utf-16-le').strip()
+            except UnicodeDecodeError:
+                pass
+        elif bom == b'\xfe\xff':  # UTF-16 BE BOM
+            try:
+                return raw_bytes[2:].decode('utf-16-be').strip()
+            except UnicodeDecodeError:
+                pass
+    
+    # Détecter le BOM UTF-8 (EF BB BF)
+    if len(raw_bytes) >= 3 and raw_bytes[:3] == b'\xef\xbb\xbf':
+        try:
+            return raw_bytes[3:].decode('utf-8').strip()
+        except UnicodeDecodeError:
+            pass
+    
+    # Détecter UTF-16 sans BOM (caractères alternés avec null bytes)
+    # Si la longueur est paire et qu'on a beaucoup de null bytes, c'est probablement UTF-16
+    if len(raw_bytes) >= 4 and len(raw_bytes) % 2 == 0:
+        null_count = raw_bytes.count(b'\x00')
+        null_ratio = null_count / len(raw_bytes)
+        # Si plus de 20% de null bytes, c'est probablement UTF-16
+        if null_ratio > 0.2:
+            try:
+                decoded = raw_bytes.decode('utf-16-le')
+                # Vérifier que ça ressemble à du texte valide
+                if any(word in decoded.lower() for word in ['error', 'failed', 'success', 'dism', 'windows', 'image', 'applying', 'deployment']):
+                    return decoded.strip()
+            except UnicodeDecodeError:
+                pass
+    
     # Liste des encodages à essayer dans l'ordre de priorité
-    encodings = ['utf-8', 'utf-16', 'utf-16-le', 'cp1252', 'cp850', 'latin-1']
+    encodings = ['utf-8', 'utf-16-le', 'utf-16', 'cp1252', 'cp850', 'latin-1']
     
     for encoding in encodings:
         try:
             decoded = raw_bytes.decode(encoding)
             # Vérifier que le décodage n'a pas produit de caractères de remplacement
+            # et qu'il ne contient pas trop de caractères non-ASCII suspects (comme des caractères chinois mal décodés)
             if '\ufffd' not in decoded:
-                return decoded.strip()
+                # Vérifier si le texte semble être du texte mal décodé (beaucoup de caractères non-ASCII isolés)
+                ascii_ratio = sum(1 for c in decoded if ord(c) < 128) / len(decoded) if decoded else 0
+                # Si c'est principalement de l'ASCII ou du texte français/anglais normal, c'est bon
+                if ascii_ratio > 0.7 or any(word in decoded.lower() for word in ['error', 'failed', 'success', 'dism', 'windows', 'image', 'applying', 'deployment']):
+                    return decoded.strip()
         except (UnicodeDecodeError, LookupError):
             continue
     

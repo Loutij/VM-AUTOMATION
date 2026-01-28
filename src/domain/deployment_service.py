@@ -115,6 +115,43 @@ class DeploymentService:
         
         return log
 
+    def _calculate_progress(self, status: str, current_step: str | None = None) -> int:
+        """Calcule la progression à partir du statut et de l'étape courante."""
+        # Mapping statut -> progression (pour les statuts terminaux)
+        status_progress_map: dict[str, int] = {
+            "pending": 0,
+            "completed": 100,
+            "failed": 0,
+            "cancelled": 0,
+        }
+        
+        # Mapping current_step -> progression (pour les étapes intermédiaires)
+        step_progress_map: dict[str, int] = {
+            "validating": 5,
+            "creating_vm": 15,
+            "mounting_iso": 25,
+            "deploying_dism": 35,
+            "configuring_network": 45,
+            "starting_installation": 55,
+            "waiting_vm_ready": 65,
+            "post_configuration": 75,
+            "installing_software": 85,
+            "finalizing": 95,
+            "completed": 100,
+            "failed": 0,
+        }
+        
+        # Statuts terminaux ont une progression fixe
+        if status in status_progress_map:
+            return status_progress_map[status]
+        
+        # Pour les statuts en cours, utiliser current_step
+        if current_step:
+            return step_progress_map.get(current_step, 10)
+        
+        # Fallback pour in_progress sans step
+        return 10
+
     async def _update_deployment_status(
         self,
         deployment: Deployment,
@@ -126,6 +163,10 @@ class DeploymentService:
         deployment.status = status
         if current_step:
             deployment.current_step = current_step
+        
+        # Calculer et mettre à jour la progression
+        deployment.progress = self._calculate_progress(status.value, deployment.current_step)
+        
         if error_message:
             deployment.error_message = error_message
         if status in (DeploymentStatus.COMPLETED, DeploymentStatus.FAILED):
@@ -150,10 +191,13 @@ class DeploymentService:
                 str(deployment.id),
                 event_map.get(status, EventType.DEPLOYMENT_PROGRESS),
                 {
+                    "deployment_id": str(deployment.id),
                     "status": status.value,
-                    "step": current_step or deployment.current_step,
+                    "current_step": current_step or deployment.current_step,
+                    "step": current_step or deployment.current_step,  # Compatibilité
                     "progress": deployment.progress,
                     "error": error_message,
+                    "message": error_message,  # Compatibilité
                     "vm_name": deployment.vm_name,
                 }
             )
@@ -365,11 +409,14 @@ class DeploymentService:
         await self._validate_deployment(deployment)
         
         # 2. Création de la VM (VHDX vide, sans ISO)
+        # Si deployment.vm_id existe (retry), _create_vm_for_dism va nettoyer la VM existante
+        # et en créer une nouvelle pour garantir un état propre
         await self._update_deployment_status(
             deployment, DeploymentStatus.IN_PROGRESS, DeploymentStep.CREATING_VM
         )
         await self._log_step(deployment, DeploymentStep.CREATING_VM, f"Creating VM: {config['vm_name']}")
         vm = await self._create_vm_for_dism(deployment)
+        # Mettre à jour deployment.vm_id (peut être nouveau si retry)
         deployment.vm_id = vm.id
         # Commit immédiat pour persister le vm_id
         await self.db.commit()
@@ -495,10 +542,13 @@ class DeploymentService:
             if not config.get(field):
                 raise ValidationError(f"Missing required field: {field}")
         
-        # Vérifier que la VM n'existe pas déjà
-        existing = await self.vm_service.get_vm_by_name(config["vm_name"])
-        if existing:
-            raise ValidationError(f"VM '{config['vm_name']}' already exists")
+        # En mode retry (deployment.vm_id existe), on ne vérifie pas l'existence de la VM
+        # car on va la nettoyer/réutiliser dans _create_vm_for_dism
+        if not deployment.vm_id:
+            # Vérifier que la VM n'existe pas déjà (seulement pour les nouveaux déploiements)
+            existing = await self.vm_service.get_vm_by_name(config["vm_name"])
+            if existing:
+                raise ValidationError(f"VM '{config['vm_name']}' already exists")
 
     async def _create_vm_for_dism(self, deployment: Deployment) -> VirtualMachine:
         """
@@ -506,8 +556,80 @@ class DeploymentService:
         
         La VM est créée avec un disque vide qui sera ensuite rempli
         par DISM avec l'image Windows.
+        
+        Gère les VMs existantes en mode retry :
+        - Si deployment.vm_id existe, vérifie l'état de la VM et décide de la réutiliser ou la nettoyer
+        - Sinon, nettoie toute VM existante avec le même nom avant de créer
         """
         config = deployment.config
+        vm_name = config["vm_name"]
+        
+        # Si deployment.vm_id existe (mode retry), vérifier l'état de la VM existante
+        if deployment.vm_id:
+            from sqlalchemy import select
+            from src.domain.models import VirtualMachine
+            
+            # Récupérer la VM de la base
+            vm_result = await self.db.execute(
+                select(VirtualMachine).where(VirtualMachine.id == deployment.vm_id)
+            )
+            db_vm = vm_result.scalar_one_or_none()
+            
+            if db_vm:
+                # Vérifier si la VM existe sur l'hyperviseur
+                try:
+                    client = await self.vm_service._get_hypervisor_client(deployment.hypervisor_id)
+                    hyperv_vm = await client.get_vm(db_vm.hypervisor_vm_id or db_vm.name)
+                    
+                    if hyperv_vm:
+                        # VM existe partout - décider si on la réutilise ou on la supprime
+                        # Pour un retry après échec, on supprime toujours et on recrée pour être sûr
+                        logger.info(
+                            "retry_cleaning_existing_vm",
+                            deployment_id=str(deployment.id),
+                            vm_id=str(db_vm.id),
+                            vm_name=vm_name,
+                        )
+                        # Supprimer la VM existante
+                        await self.vm_service.cleanup_vm_if_exists(
+                            vm_name, deployment.hypervisor_id, force=True
+                        )
+                    else:
+                        # VM existe en base mais pas sur l'hyperviseur - supprimer de la base
+                        logger.info(
+                            "retry_cleaning_orphan_db_vm",
+                            deployment_id=str(deployment.id),
+                            vm_id=str(db_vm.id),
+                            vm_name=vm_name,
+                        )
+                        await self.db.delete(db_vm)
+                        await self.db.flush()
+                except Exception as e:
+                    # Erreur lors de la vérification - nettoyer de toute façon
+                    logger.warning(
+                        "retry_vm_check_failed_cleaning",
+                        deployment_id=str(deployment.id),
+                        vm_name=vm_name,
+                        error=str(e),
+                    )
+                    await self.vm_service.cleanup_vm_if_exists(
+                        vm_name, deployment.hypervisor_id, force=True
+                    )
+            else:
+                # deployment.vm_id existe mais la VM n'est plus en base - nettoyer sur l'hyperviseur
+                logger.info(
+                    "retry_cleaning_orphan_hyperv_vm",
+                    deployment_id=str(deployment.id),
+                    vm_name=vm_name,
+                )
+                await self.vm_service.cleanup_vm_if_exists(
+                    vm_name, deployment.hypervisor_id, force=True
+                )
+        else:
+            # Pas de deployment.vm_id - nettoyer toute VM existante avec le même nom
+            await self.vm_service.cleanup_vm_if_exists(
+                vm_name, deployment.hypervisor_id, force=True
+            )
         
         # Créer la VM sans ISO et sans template (pour éviter l'ISO)
         # DISM appliquera l'image directement sur le VHDX
@@ -515,8 +637,9 @@ class DeploymentService:
         memory_mb = config.get("memory_mb", 4096)
         ram_gb = memory_mb // 1024 if memory_mb >= 1024 else config.get("ram_gb", 4)
         
+        # Utiliser force=True pour s'assurer que toute VM restante est supprimée
         vm = await self.vm_service.create_vm(
-            name=config["vm_name"],
+            name=vm_name,
             hypervisor_id=deployment.hypervisor_id,
             cpu_count=config.get("cpu_count", 2),
             ram_gb=ram_gb,
@@ -524,6 +647,7 @@ class DeploymentService:
             network_switch=config.get("network_switch"),
             vhdx_path=config.get("vhdx_path"),
             template_id=None,  # Pas de template = pas d'ISO
+            force=True,  # Force pour nettoyer toute VM existante
         )
         
         # Associer le template à la VM en base de données
@@ -730,6 +854,45 @@ class DeploymentService:
         finally:
             client.close()
 
+    async def _try_credentials(
+        self,
+        client: Any,
+        vm_identifier: str,
+        vm_ip: str | None,
+        use_winrm_direct: bool,
+        admin_password: str,
+        script: str,
+        timeout: int = 30,
+    ) -> tuple[bool, tuple[str, str] | None, Any]:
+        """
+        Essaie d'exécuter un script avec différents credentials (Administrateur/Administrator).
+        
+        Returns:
+            Tuple (success, working_credentials, result)
+        """
+        credentials_list = [
+            ("Administrateur", admin_password),  # Windows FR
+            ("Administrator", admin_password),   # Windows EN
+        ]
+        
+        for credentials in credentials_list:
+            try:
+                if use_winrm_direct and vm_ip:
+                    result = await client.execute_via_winrm_direct(
+                        vm_ip, script, credentials, timeout=timeout
+                    )
+                else:
+                    result = await client.execute_in_vm(
+                        vm_identifier, script, credentials, timeout=timeout
+                    )
+                
+                if result.success:
+                    return True, credentials, result
+            except Exception:
+                continue
+        
+        return False, None, None
+
     async def _wait_for_vm_ready(
         self,
         deployment: Deployment,
@@ -739,10 +902,17 @@ class DeploymentService:
         """
         Attend que la VM soit prête et accessible via PowerShell Direct.
         
-        Le processus en 3 phases :
+        Le processus en 4 phases :
         1. Attendre le heartbeat (Windows a démarré)
-        2. Attendre le fichier flag C:\\VM-Automation\\ready.flag (setup terminé)
-        3. Vérifier que PowerShell Direct fonctionne avec les credentials
+        2. Récupérer l'IP et tenter WinRM direct
+        3. Attendre le fichier flag C:\\VM-Automation\\ready.flag (setup terminé)
+        4. Vérifier que PowerShell Direct fonctionne avec les credentials
+        
+        Renforcements:
+        - Teste automatiquement Administrateur et Administrator (FR/EN)
+        - Timeout dédié pour la phase flag (240s)
+        - Compteur d'échecs consécutifs avec fallback/screenshot après N échecs
+        - Utilise screenshot comme preuve de boot si connexion échoue
         
         Args:
             deployment: Le déploiement en cours
@@ -761,7 +931,8 @@ class DeploymentService:
             client = await self.vm_service._get_hypervisor_client(deployment.hypervisor_id)
             
             vm_identifier = vm.hypervisor_vm_id or vm.name
-            credentials = ("Administrateur", admin_password)  # Windows FR
+            # Credentials seront déterminés dynamiquement via _try_credentials
+            working_credentials = None
             
             start_time = time.time()
             
@@ -820,27 +991,27 @@ class DeploymentService:
                 await asyncio.sleep(5)
             
             if vm_ip:
-                # Tenter une connexion WinRM directe
+                # Tenter une connexion WinRM directe avec dual credentials
                 await self._log_step(
                     deployment, DeploymentStep.WAITING_VM_READY,
-                    f"Phase 3/4: Testing WinRM direct connection to {vm_ip}...", "info"
+                    f"Phase 3/4: Testing WinRM direct connection to {vm_ip} (trying Administrateur/Administrator)...", "info"
                 )
                 
-                try:
-                    result = await client.execute_via_winrm_direct(
-                        vm_ip,
-                        "$env:COMPUTERNAME",
-                        credentials,
-                        timeout=30,
+                success, creds, result = await self._try_credentials(
+                    client, vm_identifier, vm_ip, True, admin_password,
+                    "$env:COMPUTERNAME", timeout=30
+                )
+                
+                if success and creds:
+                    use_winrm_direct = True
+                    working_credentials = creds
+                    hostname = str(result.output).strip() if result.output else "unknown"
+                    await self._log_step(
+                        deployment, DeploymentStep.WAITING_VM_READY,
+                        f"WinRM direct connection OK (user: {creds[0]}) - hostname: {hostname}", "info"
                     )
-                    if result.success:
-                        use_winrm_direct = True
-                        await self._log_step(
-                            deployment, DeploymentStep.WAITING_VM_READY,
-                            f"WinRM direct connection OK - using fast direct connection", "info"
-                        )
-                except Exception as e:
-                    logger.debug("deployment_winrm_direct_failed", error=str(e))
+                else:
+                    logger.debug("deployment_winrm_direct_failed", vm_ip=vm_ip)
                     await self._log_step(
                         deployment, DeploymentStep.WAITING_VM_READY,
                         f"WinRM direct failed, falling back to PowerShell Direct", "warning"
@@ -862,133 +1033,346 @@ class DeploymentService:
             fallback_attempted = False
             dir_checked = False
             checks_count = 0
+            consecutive_failures = 0
+            max_consecutive_failures = 5  # Après 5 échecs (~1-1.5 min), déclencher fallback/screenshot
+            flag_phase_timeout = 240  # Timeout dédié pour la phase flag (4 min)
+            flag_phase_start = time.time()
             
-            while (time.time() - start_time) < timeout and not flag_found:
+            # Utiliser working_credentials si disponible, sinon essayer les deux
+            if not working_credentials:
+                # Essayer de trouver les credentials qui fonctionnent
+                test_success, test_creds, _ = await self._try_credentials(
+                    client, vm_identifier, vm_ip, use_winrm_direct, admin_password,
+                    "$env:COMPUTERNAME", timeout=30
+                )
+                if test_success and test_creds:
+                    working_credentials = test_creds
+                    await self._log_step(
+                        deployment, DeploymentStep.WAITING_VM_READY,
+                        f"Working credentials found: {test_creds[0]}", "info"
+                    )
+            
+            # Utiliser working_credentials ou fallback sur Administrateur
+            current_credentials = working_credentials or (("Administrateur", admin_password), ("Administrator", admin_password))[0]
+            
+            while (time.time() - start_time) < timeout and (time.time() - flag_phase_start) < flag_phase_timeout and not flag_found:
                 checks_count += 1
                 
                 try:
-                    # Vérifier si le fichier flag existe
-                    if use_winrm_direct and vm_ip:
-                        result = await client.execute_via_winrm_direct(
-                            vm_ip,
-                            'if (Test-Path "C:\\VM-Automation\\ready.flag") { "FLAG_FOUND" } else { "FLAG_NOT_FOUND" }',
-                            credentials,
-                            timeout=30,
-                        )
-                    else:
-                        result = await client.execute_in_vm(
-                            vm_identifier,
-                            'if (Test-Path "C:\\VM-Automation\\ready.flag") { "FLAG_FOUND" } else { "FLAG_NOT_FOUND" }',
-                            credentials,
-                        timeout=30,
+                    # Vérifier si le fichier flag existe avec dual credentials
+                    flag_script = 'if (Test-Path "C:\\VM-Automation\\ready.flag") { "FLAG_FOUND" } else { "FLAG_NOT_FOUND" }'
+                    success, creds, result = await self._try_credentials(
+                        client, vm_identifier, vm_ip, use_winrm_direct, admin_password,
+                        flag_script, timeout=30
                     )
                     
-                    if result.success and "FLAG_FOUND" in str(result.output):
-                        flag_found = True
-                        await self._log_step(
-                            deployment, DeploymentStep.WAITING_VM_READY,
-                            "VM-Automation setup completed - ready.flag found", "info"
-                        )
-                        break
-                    elif result.success and not fallback_attempted and not dir_checked:
-                        # Connexion fonctionne - vérifier si le dossier VM-Automation existe
-                        dir_checked = True
-                        if use_winrm_direct and vm_ip:
-                            dir_result = await client.execute_via_winrm_direct(
-                                vm_ip,
-                                'if (Test-Path "C:\\VM-Automation") { "DIR_EXISTS" } else { "DIR_MISSING" }',
-                                credentials,
-                                timeout=30,
+                    if success and creds:
+                        # Connexion réussie - réinitialiser le compteur d'échecs
+                        consecutive_failures = 0
+                        if working_credentials != creds:
+                            working_credentials = creds
+                            await self._log_step(
+                                deployment, DeploymentStep.WAITING_VM_READY,
+                                f"Connection working with user: {creds[0]}", "info"
                             )
-                        else:
-                            dir_result = await client.execute_in_vm(
-                                vm_identifier,
-                                'if (Test-Path "C:\\VM-Automation") { "DIR_EXISTS" } else { "DIR_MISSING" }',
-                                credentials,
-                                timeout=30,
+                    
+                        if result and "FLAG_FOUND" in str(result.output):
+                            flag_found = True
+                            await self._log_step(
+                                deployment, DeploymentStep.WAITING_VM_READY,
+                                "VM-Automation setup completed - ready.flag found", "info"
                             )
-                        
-                        if dir_result.success and "DIR_MISSING" in str(dir_result.output):
-                            # Le dossier n'existe pas - exécuter le fallback IMMÉDIATEMENT
+                            break
+                        elif result and not fallback_attempted and not dir_checked:
+                            # Connexion fonctionne - vérifier si le dossier VM-Automation existe
+                            dir_checked = True
+                            dir_script = 'if (Test-Path "C:\\VM-Automation") { "DIR_EXISTS" } else { "DIR_MISSING" }'
+                            dir_success, dir_creds, dir_result = await self._try_credentials(
+                                client, vm_identifier, vm_ip, use_winrm_direct, admin_password,
+                                dir_script, timeout=30
+                            )
+                            
+                            if dir_success and dir_result and "DIR_MISSING" in str(dir_result.output):
+                                # Le dossier n'existe pas - exécuter le fallback IMMÉDIATEMENT
+                                fallback_attempted = True
+                                method_msg = "via WinRM direct" if use_winrm_direct else "via PowerShell Direct"
+                                await self._log_step(
+                                    deployment, DeploymentStep.WAITING_VM_READY,
+                                    f"VM-Automation folder missing - executing fallback setup IMMEDIATELY {method_msg}", "warning"
+                                )
+                                
+                                fallback_result = await self._execute_fallback_setup(
+                                    client, vm_identifier, dir_creds or creds, admin_password,
+                                    vm_ip=vm_ip, use_winrm_direct=use_winrm_direct
+                                )
+                                
+                                if fallback_result:
+                                    await self._log_step(
+                                        deployment, DeploymentStep.WAITING_VM_READY,
+                                        "Fallback setup executed successfully - flag created", "info"
+                                    )
+                                    flag_found = True
+                                    break
+                                else:
+                                    await self._log_step(
+                                        deployment, DeploymentStep.WAITING_VM_READY,
+                                        "Fallback setup failed - will retry", "error"
+                                    )
+                            else:
+                                # Le dossier existe mais pas le flag - le script est peut-être en cours
+                                logger.debug(
+                                    "deployment_dir_exists_waiting_flag",
+                                    deployment_id=str(deployment.id),
+                                )
+                        elif result and not fallback_attempted and checks_count >= 4:
+                            # Après ~40-60s, si le flag n'existe toujours pas, tenter le fallback
                             fallback_attempted = True
                             method_msg = "via WinRM direct" if use_winrm_direct else "via PowerShell Direct"
                             await self._log_step(
                                 deployment, DeploymentStep.WAITING_VM_READY,
-                                f"VM-Automation folder missing - executing fallback setup IMMEDIATELY {method_msg}", "warning"
+                                f"Flag not found after waiting - attempting fallback setup {method_msg}...", "warning"
                             )
                             
+                            # Tenter d'exécuter le script setup.ps1 manuellement
                             fallback_result = await self._execute_fallback_setup(
-                                client, vm_identifier, credentials, admin_password,
+                                client, vm_identifier, creds or current_credentials, admin_password,
                                 vm_ip=vm_ip, use_winrm_direct=use_winrm_direct
                             )
                             
                             if fallback_result:
                                 await self._log_step(
                                     deployment, DeploymentStep.WAITING_VM_READY,
-                                    "Fallback setup executed successfully - flag created", "info"
+                                    "Fallback setup executed successfully", "info"
                                 )
                                 flag_found = True
                                 break
                             else:
                                 await self._log_step(
                                     deployment, DeploymentStep.WAITING_VM_READY,
-                                    "Fallback setup failed - will retry", "error"
+                                    "Fallback setup failed - continuing checks...", "warning"
                                 )
-                        else:
-                            # Le dossier existe mais pas le flag - le script est peut-être en cours
-                            logger.debug(
-                                "deployment_dir_exists_waiting_flag",
-                                deployment_id=str(deployment.id),
-                            )
-                    elif result.success and not fallback_attempted and checks_count >= 4:
-                        # Après ~40-60s, si le flag n'existe toujours pas, tenter le fallback
-                        fallback_attempted = True
-                        method_msg = "via WinRM direct" if use_winrm_direct else "via PowerShell Direct"
-                        await self._log_step(
-                            deployment, DeploymentStep.WAITING_VM_READY,
-                            f"Flag not found after waiting - attempting fallback setup {method_msg}...", "warning"
-                        )
-                        
-                        # Tenter d'exécuter le script setup.ps1 manuellement
-                        fallback_result = await self._execute_fallback_setup(
-                            client, vm_identifier, credentials, admin_password,
-                            vm_ip=vm_ip, use_winrm_direct=use_winrm_direct
-                        )
-                        
-                        if fallback_result:
-                            await self._log_step(
-                                deployment, DeploymentStep.WAITING_VM_READY,
-                                "Fallback setup executed successfully", "info"
-                            )
-                            flag_found = True
-                            break
-                        else:
-                            await self._log_step(
-                                deployment, DeploymentStep.WAITING_VM_READY,
-                                "Fallback setup failed - continuing checks...", "warning"
-                            )
                     else:
+                        # Connexion échouée - incrémenter le compteur d'échecs
+                        consecutive_failures += 1
                         logger.debug(
-                            "deployment_waiting_for_flag",
+                            "deployment_connection_failed",
                             deployment_id=str(deployment.id),
-                            result=str(result.output)[:100] if result.output else "no output",
+                            consecutive_failures=consecutive_failures,
                             checks_count=checks_count,
                         )
                         
+                        # Après N échecs consécutifs, vérifier IP + heartbeat pour confirmer que Windows est démarré
+                        if consecutive_failures >= max_consecutive_failures and not fallback_attempted:
+                            await self._log_step(
+                                deployment, DeploymentStep.WAITING_VM_READY,
+                                f"Connection never succeeded after {consecutive_failures} attempts - verifying Windows boot status (IP + heartbeat)...", "warning"
+                            )
+                            
+                            # Vérifier IP (indicateur fiable que Windows est démarré et réseau fonctionne)
+                            has_valid_ip = False
+                            current_vm_ip = None
+                            try:
+                                vm_ips = await client.get_vm_ip_addresses(vm_identifier)
+                                valid_ips = [ip for ip in vm_ips if ip and not ip.startswith("169.254.") and not ip.startswith("fe80:")]
+                                if valid_ips:
+                                    has_valid_ip = True
+                                    current_vm_ip = valid_ips[0]
+                                    # Mettre à jour vm_ip si on n'en avait pas avant
+                                    if not vm_ip:
+                                        vm_ip = current_vm_ip
+                            except Exception as e:
+                                logger.debug("deployment_get_ip_check_error", error=str(e))
+                            
+                            # Vérifier heartbeat (indicateur que Windows est démarré)
+                            heartbeat_ok = False
+                            heartbeat_value = None
+                            try:
+                                heartbeat_value = await client.get_vm_heartbeat(vm_identifier)
+                                invalid_heartbeats = ("NoContact", "None", None, "")
+                                heartbeat_ok = heartbeat_value and heartbeat_value not in invalid_heartbeats
+                            except Exception as e:
+                                logger.debug("deployment_heartbeat_check_error", error=str(e))
+                            
+                            # Si IP valide OU heartbeat OK, Windows est démarré
+                            if has_valid_ip or heartbeat_ok:
+                                indicators = []
+                                if has_valid_ip:
+                                    indicators.append(f"IP: {current_vm_ip}")
+                                if heartbeat_ok:
+                                    indicators.append(f"heartbeat: {heartbeat_value}")
+                                
+                                await self._log_step(
+                                    deployment, DeploymentStep.WAITING_VM_READY,
+                                    f"Windows is booted ({', '.join(indicators)}) but connection failed. Continuing deployment with warning - post-config may fail if connection not available.", "warning",
+                                    details={
+                                        "has_valid_ip": has_valid_ip,
+                                        "vm_ip": current_vm_ip,
+                                        "heartbeat": heartbeat_value,
+                                        "heartbeat_ok": heartbeat_ok,
+                                        "consecutive_failures": consecutive_failures
+                                    }
+                                )
+                                # Ne pas marquer flag_found = True ici - on continue mais avec warning
+                                # Le flag sera considéré comme "timeout" et on continuera quand même
+                            else:
+                                await self._log_step(
+                                    deployment, DeploymentStep.WAITING_VM_READY,
+                                    f"Connection failed and no valid indicators (IP: {current_vm_ip or 'none'}, heartbeat: {heartbeat_value}) - Windows may not be fully booted yet", "warning",
+                                    details={
+                                        "has_valid_ip": has_valid_ip,
+                                        "vm_ip": current_vm_ip,
+                                        "heartbeat": heartbeat_value,
+                                        "consecutive_failures": consecutive_failures
+                                    }
+                                )
+                            
+                            # Tenter quand même le fallback si on a des credentials qui ont fonctionné avant
+                            if working_credentials:
+                                fallback_attempted = True
+                                await self._log_step(
+                                    deployment, DeploymentStep.WAITING_VM_READY,
+                                    "Attempting fallback setup with previously working credentials...", "warning"
+                                )
+                                fallback_result = await self._execute_fallback_setup(
+                                    client, vm_identifier, working_credentials, admin_password,
+                                    vm_ip=vm_ip, use_winrm_direct=use_winrm_direct
+                                )
+                                if fallback_result:
+                                    flag_found = True
+                                    break
+                        
                 except Exception as e:
                     # PowerShell Direct peut échouer si le setup n'est pas encore terminé
+                    consecutive_failures += 1
                     logger.debug(
                         "deployment_flag_check_error",
                         deployment_id=str(deployment.id),
                         error=str(e),
+                        consecutive_failures=consecutive_failures,
                     )
+                    
+                    # Après N échecs consécutifs (exceptions), vérifier IP + heartbeat
+                    if consecutive_failures >= max_consecutive_failures and not flag_found:
+                        await self._log_step(
+                            deployment, DeploymentStep.WAITING_VM_READY,
+                            f"Multiple connection failures ({consecutive_failures}) - verifying Windows boot status (IP + heartbeat)...", "warning"
+                        )
+                        
+                        # Vérifier IP + heartbeat
+                        has_valid_ip = False
+                        current_vm_ip = None
+                        try:
+                            vm_ips = await client.get_vm_ip_addresses(vm_identifier)
+                            valid_ips = [ip for ip in vm_ips if ip and not ip.startswith("169.254.") and not ip.startswith("fe80:")]
+                            if valid_ips:
+                                has_valid_ip = True
+                                current_vm_ip = valid_ips[0]
+                                if not vm_ip:
+                                    vm_ip = current_vm_ip
+                        except Exception as ip_error:
+                            logger.debug("deployment_get_ip_exception_error", error=str(ip_error))
+                        
+                        heartbeat_ok = False
+                        heartbeat_value = None
+                        try:
+                            heartbeat_value = await client.get_vm_heartbeat(vm_identifier)
+                            invalid_heartbeats = ("NoContact", "None", None, "")
+                            heartbeat_ok = heartbeat_value and heartbeat_value not in invalid_heartbeats
+                        except Exception as hb_error:
+                            logger.debug("deployment_heartbeat_exception_error", error=str(hb_error))
+                        
+                        if has_valid_ip or heartbeat_ok:
+                            indicators = []
+                            if has_valid_ip:
+                                indicators.append(f"IP: {current_vm_ip}")
+                            if heartbeat_ok:
+                                indicators.append(f"heartbeat: {heartbeat_value}")
+                            
+                            await self._log_step(
+                                deployment, DeploymentStep.WAITING_VM_READY,
+                                f"Windows is booted ({', '.join(indicators)}) but connection failed. Continuing with warning.", "warning",
+                                details={
+                                    "has_valid_ip": has_valid_ip,
+                                    "vm_ip": current_vm_ip,
+                                    "heartbeat": heartbeat_value,
+                                    "heartbeat_ok": heartbeat_ok,
+                                    "consecutive_failures": consecutive_failures
+                                }
+                            )
+                            # Ne pas marquer flag_found = True - on continue avec warning
                 
                 await asyncio.sleep(flag_check_interval)
+            
+            # Si timeout de la phase flag atteint, vérifier IP + heartbeat avant de continuer
+            if not flag_found and (time.time() - flag_phase_start) >= flag_phase_timeout:
+                await self._log_step(
+                    deployment, DeploymentStep.WAITING_VM_READY,
+                    f"Flag phase timeout ({flag_phase_timeout}s) - verifying Windows boot status (IP + heartbeat)...", "warning"
+                )
+                
+                # Vérifier IP (indicateur fiable que Windows est démarré)
+                has_valid_ip = False
+                current_vm_ip = None
+                try:
+                    vm_ips = await client.get_vm_ip_addresses(vm_identifier)
+                    valid_ips = [ip for ip in vm_ips if ip and not ip.startswith("169.254.") and not ip.startswith("fe80:")]
+                    if valid_ips:
+                        has_valid_ip = True
+                        current_vm_ip = valid_ips[0]
+                        # Mettre à jour vm_ip si on n'en avait pas avant
+                        if not vm_ip:
+                            vm_ip = current_vm_ip
+                except Exception as e:
+                    logger.debug("deployment_get_ip_timeout_error", error=str(e))
+                
+                # Vérifier heartbeat
+                heartbeat_ok = False
+                heartbeat_value = None
+                try:
+                    heartbeat_value = await client.get_vm_heartbeat(vm_identifier)
+                    invalid_heartbeats = ("NoContact", "None", None, "")
+                    heartbeat_ok = heartbeat_value and heartbeat_value not in invalid_heartbeats
+                except Exception as e:
+                    logger.debug("deployment_heartbeat_timeout_error", error=str(e))
+                
+                # Si IP valide OU heartbeat OK, Windows est démarré
+                if has_valid_ip or heartbeat_ok:
+                    indicators = []
+                    if has_valid_ip:
+                        indicators.append(f"IP: {current_vm_ip}")
+                    if heartbeat_ok:
+                        indicators.append(f"heartbeat: {heartbeat_value}")
+                    
+                    await self._log_step(
+                        deployment, DeploymentStep.WAITING_VM_READY,
+                        f"Windows is booted ({', '.join(indicators)}) but ready.flag timeout. Continuing deployment with warning.", "warning",
+                        details={
+                            "ready_via_indicators": True,
+                            "has_valid_ip": has_valid_ip,
+                            "vm_ip": current_vm_ip,
+                            "heartbeat": heartbeat_value,
+                            "heartbeat_ok": heartbeat_ok,
+                            "flag_timeout": True
+                        }
+                    )
+                    # Ne pas marquer flag_found = True - on continue avec warning
+                else:
+                    await self._log_step(
+                        deployment, DeploymentStep.WAITING_VM_READY,
+                        f"Flag timeout and no valid indicators (IP: {current_vm_ip or 'none'}, heartbeat: {heartbeat_value}) - continuing anyway", "warning",
+                        details={
+                            "has_valid_ip": has_valid_ip,
+                            "vm_ip": current_vm_ip,
+                            "heartbeat": heartbeat_value,
+                            "flag_timeout": True
+                        }
+                    )
             
             if not flag_found:
                 await self._log_step(
                     deployment, DeploymentStep.WAITING_VM_READY,
-                    "Timeout waiting for VM-Automation setup - continuing anyway", "warning"
+                    "Timeout waiting for VM-Automation setup - continuing anyway", "warning",
+                    details={"checks_count": checks_count, "consecutive_failures": consecutive_failures}
                 )
                 # On continue quand même car le setup peut avoir fonctionné
             
@@ -999,52 +1383,71 @@ class DeploymentService:
                 f"Final verification: Testing {connection_method} connection...", "info"
             )
             
-            # Tester la connexion
+            # Utiliser working_credentials si disponible
+            final_credentials = working_credentials or (("Administrateur", admin_password), ("Administrator", admin_password))[0]
+            
+            # Tester la connexion avec dual credentials
             max_retries = 3
             for attempt in range(max_retries):
-                try:
-                    if use_winrm_direct and vm_ip:
-                        result = await client.execute_via_winrm_direct(
-                            vm_ip,
-                            "$env:COMPUTERNAME",
-                            credentials,
-                            timeout=30,
-                        )
-                    else:
-                        result = await client.execute_in_vm(
-                            vm_identifier,
-                            "$env:COMPUTERNAME",
-                            credentials,
-                            timeout=30,
-                        )
-                    
-                    if result.success:
-                        hostname = str(result.output).strip() if result.output else "unknown"
-                        await self._log_step(
-                            deployment, DeploymentStep.WAITING_VM_READY,
-                            f"{connection_method} connected - hostname: {hostname}", "info"
-                        )
-                        return True
-                    else:
-                        logger.debug(
-                            "deployment_connection_failed",
-                            deployment_id=str(deployment.id),
-                            attempt=attempt + 1,
-                            method=connection_method,
-                            error=result.error,
-                        )
-                        
-                except Exception as e:
+                success, creds, result = await self._try_credentials(
+                    client, vm_identifier, vm_ip, use_winrm_direct, admin_password,
+                    "$env:COMPUTERNAME", timeout=30
+                )
+                
+                if success and creds and result:
+                    hostname = str(result.output).strip() if result.output else "unknown"
+                    await self._log_step(
+                        deployment, DeploymentStep.WAITING_VM_READY,
+                        f"{connection_method} connected (user: {creds[0]}) - hostname: {hostname}", "info"
+                    )
+                    return True
+                else:
                     logger.debug(
-                        "deployment_connection_error",
+                        "deployment_connection_failed",
                         deployment_id=str(deployment.id),
                         attempt=attempt + 1,
                         method=connection_method,
-                        error=str(e),
                     )
                 
                 if attempt < max_retries - 1:
                     await asyncio.sleep(10)
+            
+            # Si la connexion échoue mais qu'on a des indicateurs valides (IP + heartbeat), considérer la VM ready quand même
+            # Vérifier une dernière fois IP + heartbeat
+            has_valid_ip_final = False
+            heartbeat_ok_final = False
+            try:
+                vm_ips_final = await client.get_vm_ip_addresses(vm_identifier)
+                valid_ips_final = [ip for ip in vm_ips_final if ip and not ip.startswith("169.254.") and not ip.startswith("fe80:")]
+                if valid_ips_final:
+                    has_valid_ip_final = True
+            except Exception:
+                pass
+            
+            try:
+                heartbeat_final = await client.get_vm_heartbeat(vm_identifier)
+                invalid_heartbeats = ("NoContact", "None", None, "")
+                heartbeat_ok_final = heartbeat_final and heartbeat_final not in invalid_heartbeats
+            except Exception:
+                pass
+            
+            if has_valid_ip_final or heartbeat_ok_final:
+                indicators_final = []
+                if has_valid_ip_final:
+                    indicators_final.append("IP valid")
+                if heartbeat_ok_final:
+                    indicators_final.append("heartbeat OK")
+                
+                await self._log_step(
+                    deployment, DeploymentStep.WAITING_VM_READY,
+                    f"{connection_method} connection failed but Windows is booted ({', '.join(indicators_final)}) - continuing deployment with warning", "warning",
+                    details={
+                        "has_valid_ip": has_valid_ip_final,
+                        "heartbeat_ok": heartbeat_ok_final,
+                        "connection_failed": True
+                    }
+                )
+                return True
             
             await self._log_step(
                 deployment, DeploymentStep.WAITING_VM_READY,

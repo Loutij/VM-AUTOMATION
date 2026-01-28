@@ -182,6 +182,74 @@ class VMService:
         )
         return result.scalar_one_or_none()
 
+    async def cleanup_vm_if_exists(
+        self,
+        name: str,
+        hypervisor_id: UUID,
+        force: bool = False,
+    ) -> bool:
+        """
+        Nettoie une VM existante (base de données et hyperviseur).
+        
+        Args:
+            name: Nom de la VM à nettoyer
+            hypervisor_id: ID de l'hyperviseur
+            force: Forcer la suppression même si l'hyperviseur échoue
+            
+        Returns:
+            True si une VM a été nettoyée, False sinon
+        """
+        cleaned = False
+        
+        # 1. Vérifier et supprimer de la base de données
+        db_vm = await self.get_vm_by_name(name)
+        if db_vm:
+            try:
+                # Supprimer de l'hyperviseur d'abord si possible
+                if db_vm.hypervisor_vm_id:
+                    try:
+                        client = await self._get_hypervisor_client(hypervisor_id)
+                        await client.delete_vm(db_vm.hypervisor_vm_id, delete_disks=True)
+                    except Exception as e:
+                        logger.warning(
+                            "cleanup_vm_hypervisor_failed",
+                            vm_name=name,
+                            error=str(e),
+                        )
+                        if not force:
+                            # Si force=False et que la suppression sur l'hyperviseur échoue,
+                            # on continue quand même pour supprimer de la base
+                            pass
+                
+                # Supprimer de la base de données
+                await self.db.delete(db_vm)
+                await self.db.flush()
+                cleaned = True
+                logger.info("cleanup_vm_removed_from_db", vm_name=name)
+            except Exception as e:
+                logger.error("cleanup_vm_db_failed", vm_name=name, error=str(e))
+        
+        # 2. Vérifier et supprimer de l'hyperviseur (si pas déjà fait)
+        if not db_vm or not db_vm.hypervisor_vm_id:
+            try:
+                client = await self._get_hypervisor_client(hypervisor_id)
+                # Vérifier si la VM existe sur l'hyperviseur
+                # get_vm retourne None si la VM n'existe pas
+                vm_info = await client.get_vm(name)
+                if vm_info:
+                    # VM existe sur l'hyperviseur, la supprimer
+                    await client.delete_vm(vm_info.id, delete_disks=True)
+                    cleaned = True
+                    logger.info("cleanup_vm_removed_from_hypervisor", vm_name=name)
+            except Exception as e:
+                logger.warning(
+                    "cleanup_vm_hypervisor_check_failed",
+                    vm_name=name,
+                    error=str(e),
+                )
+        
+        return cleaned
+
     async def create_vm(
         self,
         name: str,
@@ -192,6 +260,7 @@ class VMService:
         network_switch: str | None = None,
         vhdx_path: str | None = None,
         template_id: UUID | None = None,
+        force: bool = False,
         **kwargs: Any,
     ) -> VirtualMachine:
         """
@@ -206,14 +275,19 @@ class VMService:
             network_switch: Switch réseau (optionnel)
             vhdx_path: Chemin du dossier pour le disque VHDX (optionnel)
             template_id: ID du template OS (optionnel)
+            force: Si True, supprime la VM existante avant de créer (pour retry)
             
         Returns:
             VM créée
         """
-        # Vérifier que la VM n'existe pas déjà
-        existing = await self.get_vm_by_name(name)
-        if existing:
-            raise AlreadyExistsError("VirtualMachine", name)
+        # Vérifier que la VM n'existe pas déjà (sauf si force=True)
+        if not force:
+            existing = await self.get_vm_by_name(name)
+            if existing:
+                raise AlreadyExistsError("VirtualMachine", name)
+        else:
+            # En mode force, nettoyer la VM existante
+            await self.cleanup_vm_if_exists(name, hypervisor_id, force=True)
         
         # Récupérer le client hyperviseur
         client = await self._get_hypervisor_client(hypervisor_id)
@@ -243,11 +317,12 @@ class VMService:
             name=name,
             hypervisor=hypervisor.name,
             specs=specs.__dict__,
+            force=force,
         )
         
         # Créer la VM sur l'hyperviseur
         try:
-            vm_info = await client.create_vm(specs)
+            vm_info = await client.create_vm(specs, force=force)
         except Exception as e:
             logger.error("vm_creation_failed", name=name, error=str(e))
             raise VMCreationError(name, str(e))

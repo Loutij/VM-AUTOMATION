@@ -59,20 +59,33 @@ class WebSocketEvent:
     event_id: str = field(default_factory=lambda: str(uuid4()))
     
     def to_json(self) -> str:
-        """Sérialise l'événement en JSON."""
+        """Sérialise l'événement en JSON avec format compatible frontend."""
+        # Format compatible frontend : {type, payload}
+        # On garde aussi event_type et data pour compatibilité backend
+        event_type_value = self.event_type.value
+        # Normaliser le type pour le frontend (deployment.progress -> deployment_progress)
+        frontend_type = event_type_value.replace(".", "_")
+        
         return json.dumps({
+            "type": frontend_type,  # Format frontend
+            "payload": self.data,   # Format frontend
+            "event_type": event_type_value,  # Format backend (compatibilité)
+            "data": self.data,       # Format backend (compatibilité)
             "event_id": self.event_id,
-            "event_type": self.event_type.value,
-            "data": self.data,
             "timestamp": self.timestamp,
         })
     
     def to_dict(self) -> dict[str, Any]:
-        """Convertit en dictionnaire."""
+        """Convertit en dictionnaire avec format compatible frontend."""
+        event_type_value = self.event_type.value
+        frontend_type = event_type_value.replace(".", "_")
+        
         return {
+            "type": frontend_type,  # Format frontend
+            "payload": self.data,   # Format frontend
+            "event_type": event_type_value,  # Format backend (compatibilité)
+            "data": self.data,       # Format backend (compatibilité)
             "event_id": self.event_id,
-            "event_type": self.event_type.value,
-            "data": self.data,
             "timestamp": self.timestamp,
         }
 

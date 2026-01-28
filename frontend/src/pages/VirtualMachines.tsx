@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Monitor,
@@ -62,6 +62,10 @@ export function VirtualMachines() {
   const [screenshotData, setScreenshotData] = useState<string | null>(null);
   const [screenshotLoading, setScreenshotLoading] = useState(false);
   const [screenshotError, setScreenshotError] = useState<string | null>(null);
+
+  // États pour la synchronisation automatique
+  const [isAutoSyncing, setIsAutoSyncing] = useState(false);
+  const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Fetch VMs
   const { data: vms = [], isLoading: vmsLoading, refetch } = useQuery({
@@ -155,6 +159,86 @@ export function VirtualMachines() {
       addToast({ type: 'error', title: 'Erreur lors de la synchronisation' });
     },
   });
+
+  // Fonction de synchronisation automatique (sans toast)
+  const performAutoSync = useCallback(async () => {
+    // Éviter les synchronisations simultanées
+    if (isAutoSyncing || syncMutation.isPending || vmsLoading || hypervisors.length === 0) {
+      return;
+    }
+
+    setIsAutoSyncing(true);
+    try {
+      if (selectedHypervisor === 'all') {
+        // Synchroniser tous les hyperviseurs séquentiellement
+        for (const hypervisor of hypervisors) {
+          try {
+            await hypervisorsApi.syncVms(hypervisor.id);
+          } catch (error) {
+            // Erreur silencieuse pour les syncs automatiques
+            console.error(`Auto-sync error for hypervisor ${hypervisor.name}:`, error);
+          }
+        }
+      } else {
+        // Synchroniser uniquement l'hyperviseur sélectionné
+        try {
+          await hypervisorsApi.syncVms(selectedHypervisor);
+        } catch (error) {
+          // Erreur silencieuse pour les syncs automatiques
+          console.error(`Auto-sync error for hypervisor ${selectedHypervisor}:`, error);
+        }
+      }
+      // Invalider les queries pour rafraîchir la liste
+      queryClient.invalidateQueries({ queryKey: ['vms'] });
+    } catch (error) {
+      // Erreur silencieuse pour les syncs automatiques
+      console.error('Auto-sync error:', error);
+    } finally {
+      setIsAutoSyncing(false);
+    }
+  }, [selectedHypervisor, hypervisors, queryClient, isAutoSyncing, syncMutation.isPending, vmsLoading]);
+
+  // Effet pour la synchronisation périodique (toutes les 5 minutes)
+  useEffect(() => {
+    // Ne pas démarrer si pas d'hyperviseurs
+    if (hypervisors.length === 0) return;
+
+    // Démarrer l'intervalle (5 minutes = 300000 ms)
+    syncIntervalRef.current = setInterval(() => {
+      performAutoSync();
+    }, 300000);
+
+    // Nettoyer à la destruction ou changement de dépendances
+    return () => {
+      if (syncIntervalRef.current) {
+        clearInterval(syncIntervalRef.current);
+        syncIntervalRef.current = null;
+      }
+    };
+  }, [performAutoSync, hypervisors.length]);
+
+  // Gestion de la visibilité de la page pour mettre en pause la synchronisation
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        // Pause la synchronisation si l'onglet n'est pas visible
+        if (syncIntervalRef.current) {
+          clearInterval(syncIntervalRef.current);
+          syncIntervalRef.current = null;
+        }
+      } else {
+        // Reprendre la synchronisation quand l'onglet redevient visible
+        if (!syncIntervalRef.current && hypervisors.length > 0) {
+          syncIntervalRef.current = setInterval(() => {
+            performAutoSync();
+          }, 300000);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [performAutoSync, hypervisors.length]);
 
   const openActionModal = (type: 'stop' | 'restart' | 'delete', vm: VirtualMachine) => {
     setActionModal({ type, vm });

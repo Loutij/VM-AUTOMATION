@@ -102,9 +102,9 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
         setStatus('connected');
         reconnectAttemptsRef.current = 0;
         
-        // Re-souscrire aux rooms précédentes
+        // Re-souscrire aux rooms précédentes avec le format attendu par le backend
         subscribedRoomsRef.current.forEach((room) => {
-          ws.send(JSON.stringify({ type: 'subscribe', payload: { room } }));
+          ws.send(JSON.stringify({ action: 'join_room', room: room }));
         });
         
         onOpen?.();
@@ -178,9 +178,10 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
     subscribedRoomsRef.current.add(room);
     
     if (wsRef.current?.readyState === WebSocket.OPEN) {
+      // Format attendu par le backend : {"action": "join_room", "room": "..."}
       wsRef.current.send(JSON.stringify({
-        type: 'subscribe',
-        payload: { room },
+        action: 'join_room',
+        room: room,
       }));
     }
   }, []);
@@ -190,9 +191,10 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
     subscribedRoomsRef.current.delete(room);
     
     if (wsRef.current?.readyState === WebSocket.OPEN) {
+      // Format attendu par le backend : {"action": "leave_room", "room": "..."}
       wsRef.current.send(JSON.stringify({
-        type: 'unsubscribe',
-        payload: { room },
+        action: 'leave_room',
+        room: room,
       }));
     }
   }, []);
@@ -231,8 +233,23 @@ export function useDeploymentEvents(
   const [progress, setProgress] = useState<DeploymentProgressPayload | null>(null);
 
   const handleMessage = useCallback((message: WebSocketMessage) => {
-    if (message.type === 'deployment_progress') {
-      const payload = message.payload as DeploymentProgressPayload;
+    // Normaliser le format du message (support backend et frontend)
+    const messageType = (message as any).type || (message as any).event_type || message.type;
+    const messagePayload = (message as any).payload || (message as any).data || message.payload;
+    
+    // Normaliser le type (deployment.progress -> deployment_progress)
+    const normalizedType = messageType?.replace(/\./g, '_');
+    
+    // Accepter les événements de progression de déploiement
+    if (normalizedType === 'deployment_progress' || 
+        normalizedType === 'deployment_created' ||
+        normalizedType === 'deployment_started' ||
+        normalizedType === 'deployment_completed' ||
+        normalizedType === 'deployment_failed' ||
+        normalizedType === 'deployment_cancelled' ||
+        normalizedType === 'deployment_step_completed') {
+      
+      const payload = messagePayload as DeploymentProgressPayload;
       
       if (!deploymentId || payload.deployment_id === deploymentId) {
         setProgress(payload);

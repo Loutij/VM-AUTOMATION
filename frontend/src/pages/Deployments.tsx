@@ -73,6 +73,28 @@ const getDisplayStep = (deployment: Deployment): DisplayStep => {
   return 'pending';
 };
 
+// Mapping des étapes affichées vers leur progression
+const displayStepProgress: Record<DisplayStep, number> = {
+  'pending': 0,
+  'creating_vm': 15,
+  'installing_os': 50,
+  'post_install': 75,
+  'installing_software': 90,
+  'completed': 100,
+};
+
+// Fonction pour calculer la progression synchronisée avec les pastilles
+const getSynchronizedProgress = (deployment: Deployment): number => {
+  // Statuts terminaux
+  if (deployment.status === 'completed') return 100;
+  if (deployment.status === 'failed' || deployment.status === 'cancelled') return 0;
+  if (deployment.status === 'pending') return 0;
+  
+  // Utiliser l'étape affichée pour calculer la progression
+  const displayStep = getDisplayStep(deployment);
+  return displayStepProgress[displayStep] || 0;
+};
+
 export function Deployments() {
   const queryClient = useQueryClient();
   const { addToast } = useToast();
@@ -99,8 +121,32 @@ export function Deployments() {
   });
 
   // WebSocket pour les mises à jour temps réel
-  const handleDeploymentProgress = useCallback(() => {
-    // Rafraîchir immédiatement quand un événement WebSocket arrive
+  const handleDeploymentProgress = useCallback((payload: DeploymentProgressPayload) => {
+    // Mettre à jour directement les données du déploiement sans refetch
+    queryClient.setQueryData<Deployment[]>(['deployments'], (oldData) => {
+      if (!oldData) return oldData;
+      
+      return oldData.map((deployment) => {
+        if (deployment.id === payload.deployment_id) {
+          // Mettre à jour le déploiement avec les nouvelles données
+          // Accepter current_step ou step pour compatibilité
+          const currentStep = payload.current_step || (payload as any).step || deployment.current_step;
+          const errorMsg = payload.message || (payload as any).error || deployment.error_message;
+          
+          return {
+            ...deployment,
+            status: payload.status as DeploymentStatus,
+            progress: payload.progress ?? deployment.progress,
+            current_step: currentStep,
+            error_message: errorMsg,
+          };
+        }
+        return deployment;
+      });
+    });
+    
+    // Optionnellement, invalider pour s'assurer que les données sont à jour
+    // mais avec une priorité moindre que la mise à jour directe
     queryClient.invalidateQueries({ queryKey: ['deployments'] });
   }, [queryClient]);
 
@@ -227,20 +273,36 @@ export function Deployments() {
     const currentDisplayStep = getDisplayStep(deployment);
     const currentIndex = displaySteps.indexOf(currentDisplayStep);
     const stepIndex = displaySteps.indexOf(step);
+    const progress = getSynchronizedProgress(deployment);
+    const stepProgress = displayStepProgress[step];
 
     if (deployment.status === 'failed' || deployment.status === 'cancelled') {
-      if (stepIndex <= currentIndex) {
+      // Pour les échecs, marquer les étapes complétées avant l'échec
+      if (stepIndex < currentIndex) {
+        return <CheckCircle size={16} className="text-green-500" />;
+      }
+      if (stepIndex === currentIndex) {
         return <XCircle size={16} className="text-red-500" />;
       }
       return <div className="w-4 h-4 rounded-full border-2 border-dark-600" />;
     }
 
-    if (stepIndex < currentIndex || deployment.status === 'completed') {
+    // Si l'étape est complétée (indice inférieur OU progression supérieure)
+    if (stepIndex < currentIndex || (progress >= stepProgress && stepProgress > 0)) {
       return <CheckCircle size={16} className="text-green-500" />;
     }
+    
+    // Si c'est l'étape actuelle et en cours
     if (stepIndex === currentIndex && deployment.status !== 'pending') {
       return <Loader2 size={16} className="text-primary-500 animate-spin" />;
     }
+    
+    // Si le déploiement est terminé, toutes les étapes sont complétées
+    if (deployment.status === 'completed') {
+      return <CheckCircle size={16} className="text-green-500" />;
+    }
+    
+    // Étape future
     return <div className="w-4 h-4 rounded-full border-2 border-dark-600" />;
   };
 
@@ -465,7 +527,9 @@ export function Deployments() {
                 <div className="mb-4">
                   <div className="flex items-center justify-between text-sm mb-2">
                     <span className="text-gray-500 dark:text-dark-400">Progression</span>
-                    <span className="text-gray-900 dark:text-white font-medium">{deployment.progress}%</span>
+                    <span className="text-gray-900 dark:text-white font-medium">
+                      {getSynchronizedProgress(deployment)}%
+                    </span>
                   </div>
                   <div className="h-2 bg-light-200 dark:bg-dark-700 rounded-full overflow-hidden">
                     <div
@@ -476,7 +540,7 @@ export function Deployments() {
                           ? 'bg-green-500'
                           : 'bg-primary-500'
                       }`}
-                      style={{ width: `${deployment.progress}%` }}
+                      style={{ width: `${getSynchronizedProgress(deployment)}%` }}
                     />
                   </div>
                 </div>
