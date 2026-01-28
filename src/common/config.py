@@ -168,6 +168,17 @@ class Settings(BaseSettings):
         default=1800, description="Timeout post-installation (secondes)"
     )
 
+    # -------------------------------------------------------------------------
+    # Email SMTP (Notifications)
+    # -------------------------------------------------------------------------
+    smtp_host: str = Field(default="smtp.hostinger.com", description="Serveur SMTP")
+    smtp_port: int = Field(default=465, description="Port SMTP")
+    smtp_ssl: bool = Field(default=True, description="Utiliser SSL")
+    smtp_user: str = Field(default="", description="Utilisateur SMTP")
+    smtp_password: SecretStr = Field(default=SecretStr(""), description="Mot de passe SMTP")
+    smtp_from: str = Field(default="", description="Adresse d'expédition")
+    smtp_enabled: bool = Field(default=False, description="Activer les notifications email")
+
 
 @lru_cache
 def get_settings() -> Settings:

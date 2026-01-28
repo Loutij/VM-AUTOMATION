@@ -88,27 +88,31 @@ Outil interne d'automatisation complète du déploiement de machines virtuelles.
 | React Router | TERMINÉ | 7 routes configurées dans App.tsx |
 | Dashboard principal | TERMINÉ | Stats, déploiements récents |
 | Page Hyperviseurs | TERMINÉ | CRUD complet + test connexion |
-| Page VMs | TERMINÉ | Liste avec stats, filtres, actions, sync Hyper-V, détails complets |
-| Page Templates | TERMINÉ | CRUD grille avec filtres OS, duplicate |
-| Page Déploiements | TERMINÉ | Timeline, logs modal, cancel/retry, auto-refresh |
-| Wizard création VM | À FAIRE | Multi-étapes, validation |
-| Temps réel (WebSocket) | À FAIRE | Progression live |
+| Page VMs | TERMINÉ | Liste avec stats, filtres, actions, sync Hyper-V, détails complets, colonne VLAN |
+| Page Templates | TERMINÉ | CRUD grille avec filtres OS, duplicate, sélecteur langue |
+| Page Déploiements | TERMINÉ | Timeline, logs modal, cancel/retry, indicateur temps réel |
+| Page Paramètres | TERMINÉ | Config multi-sections + notifications email |
+| Wizard création VM | TERMINÉ | Multi-étapes avec sélecteur espace disque visuel |
+| Temps réel (WebSocket) | TERMINÉ | Progression live + indicateur connexion
 
 ### Module 7 : API REST (Backend FastAPI)
 | Fonctionnalité | Statut | Description |
 |----------------|--------|-------------|
-| Endpoints VMs | TERMINÉ | CRUD + start/stop/restart |
-| Endpoints Templates | TERMINÉ | CRUD templates OS |
+| Endpoints VMs | TERMINÉ | CRUD + start/stop/restart + VLAN/switch réseau |
+| Endpoints Templates | TERMINÉ | CRUD templates OS + langue d'installation |
 | Endpoints Deployments | TERMINÉ | Création, logs, cancel |
-| Endpoints Hypervisors | TERMINÉ | CRUD + test connexion |
+| Endpoints Hypervisors | TERMINÉ | CRUD + test connexion + storage-locations |
+| Endpoints Settings | TERMINÉ | Configuration SMTP + test email |
 | Documentation OpenAPI | TERMINÉ | Swagger UI sur /docs |
 | Authentification JWT | TERMINÉ | src/common/auth.py (bcrypt + jose) |
-| Migration Alembic | TERMINÉ | 001_initial_schema.py (8 tables) |
+| Migration Alembic | TERMINÉ | 5 migrations (8 tables + install_locale) |
 | CI/CD Pipeline | TERMINÉ | GitHub Actions (lint, test, build) |
 | Pre-commit hooks | TERMINÉ | Black, isort, ruff, mypy, bandit |
 | WebSocket Backend | TERMINÉ | WebSocketManager + rooms + subscriptions |
 | SSE Endpoint | TERMINÉ | /api/v1/realtime/sse avec heartbeat |
-| Notifications push | TERMINÉ | emit_deployment_event(), emit_vm_event() |
+| Notifications push | TERMINÉ | emit_deployment_event(), emit_vm_event(), emit_notification() |
+| Notifications Email | TERMINÉ | Service SMTP pour fin de déploiement |
+| Sync auto Hyper-V | TERMINÉ | Tâche Celery toutes les 5 minutes |
 
 ---
 
@@ -239,6 +243,13 @@ vm-automation/
 | `AD_PASSWORD` | Mot de passe AD | Non |
 | `ISO_BASE_PATH` | Chemin vers les ISOs | Oui |
 | `VHDX_BASE_PATH` | Chemin stockage disques | Oui |
+| `SMTP_HOST` | Serveur SMTP | Non |
+| `SMTP_PORT` | Port SMTP (défaut: 465) | Non |
+| `SMTP_SSL` | Utiliser SSL (défaut: true) | Non |
+| `SMTP_USER` | Utilisateur SMTP | Non |
+| `SMTP_PASSWORD` | Mot de passe SMTP | Non |
+| `SMTP_FROM` | Adresse d'expédition | Non |
+| `SMTP_ENABLED` | Activer les notifications email | Non |
 
 ---
 
@@ -303,6 +314,78 @@ docker-compose -f docker-compose.prod.yml up -d
 ---
 
 ## Changelog
+
+### v0.9.0 (2026-01-28) - Améliorations UX et Notifications
+
+#### Nouvelles fonctionnalités
+
+- **Colonne VLAN dans la liste des VMs** :
+  - Nouvelle colonne dédiée affichant le VLAN ID configuré
+  - Récupération dynamique depuis Hyper-V via `Get-VMNetworkAdapterVlan`
+  - Inclus dans le schéma VMResponse backend
+
+- **Sélecteur d'espace disque visuel** :
+  - Nouveau composant dans le wizard de déploiement (étape Ressources)
+  - Affichage visuel des disques disponibles avec barre de progression
+  - Badge "Recommandé" pour le disque avec le plus d'espace libre
+  - Badge "Défaut" pour le disque C:
+  - Option de chemin personnalisé conservée
+  - Sélection automatique du disque par défaut (C:)
+
+- **Synchronisation automatique Hyper-V** :
+  - Nouvelle tâche Celery `sync_all_hypervisors()` exécutée toutes les 5 minutes
+  - Synchronisation de tous les hyperviseurs actifs
+  - Notification WebSocket quand des changements sont détectés
+  - Ajout au `beat_schedule` de Celery
+
+- **Choix de la langue d'installation** :
+  - Nouveau champ `install_locale` dans les templates OS (défaut: `fr-FR`)
+  - Migration Alembic `005_add_template_locale.py`
+  - 12 langues disponibles (fr-FR, en-US, en-GB, de-DE, es-ES, etc.)
+  - Sélecteur dans le formulaire de création/édition de template
+  - Affichage de la langue dans les cartes de templates
+
+- **Notifications Email SMTP** :
+  - Service `EmailService` dans `src/common/email.py`
+  - Emails HTML riches pour fin de déploiement (succès/échec)
+  - Contenu détaillé : IP, credentials, config, lien RDP
+  - Configuration via variables d'environnement SMTP_*
+  - Nouvel endpoint `POST /settings/smtp/test` pour tester l'envoi
+  - Section "Notifications Email" dans la page Paramètres
+  - Bouton "Envoyer email de test"
+
+- **Mise à jour temps réel des déploiements** :
+  - Intégration du hook `useDeploymentEvents` dans la page Deployments
+  - Rafraîchissement instantané via WebSocket
+  - Indicateur visuel de connexion (Live/Polling)
+  - Nouvelle fonction `emit_notification()` pour notifications génériques
+
+#### Fichiers modifiés
+
+- Backend :
+  - `src/api/routers/vms.py` : ajout `network_switch` et `vlan_id` dans VMResponse
+  - `src/api/routers/templates.py` : ajout `install_locale` dans les schémas
+  - `src/api/routers/settings.py` : nouveau router pour paramètres + test SMTP
+  - `src/domain/models.py` : ajout `install_locale` à OSTemplate
+  - `src/common/config.py` : ajout paramètres SMTP
+  - `src/common/email.py` : nouveau service d'envoi d'emails
+  - `src/workers/tasks.py` : tâche `sync_all_hypervisors()`
+  - `src/workers/celery_app.py` : ajout au beat_schedule
+  - `src/api/websocket.py` : fonction `emit_notification()`
+  - `src/api/main.py` : enregistrement router settings
+
+- Frontend :
+  - `src/types/index.ts` : ajout `vlan_id`, `network_switch`, `install_locale`, `StorageLocation`
+  - `src/services/api.ts` : ajout `getStorageLocations`, màj mappers
+  - `src/pages/VirtualMachines.tsx` : nouvelle colonne VLAN
+  - `src/pages/NewDeployment.tsx` : sélecteur d'espace disque visuel
+  - `src/pages/Templates.tsx` : sélecteur de langue d'installation
+  - `src/pages/Settings.tsx` : section notifications email
+  - `src/pages/Deployments.tsx` : indicateur temps réel WebSocket
+
+- Configuration :
+  - `alembic/versions/005_add_template_locale.py` : migration
+  - `config/env.example` : variables SMTP ajoutées
 
 ### v0.8.3 (2026-01-28) - Post-Installation Automatique DISM
 - **Correction majeure du workflow DISM** :

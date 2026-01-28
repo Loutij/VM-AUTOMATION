@@ -63,6 +63,8 @@ class VMResponse(VMBase):
     hypervisor_vm_id: str | None = None
     state: str
     ip_address: str | None = None
+    network_switch: str | None = None
+    vlan_id: int | None = None
     os_template_id: UUID | None = None
     created_at: datetime
     updated_at: datetime | None = None
@@ -144,6 +146,8 @@ async def list_vms(
             disk_gb=vm.disk_gb,
             state=vm.state.value,
             ip_address=vm.ip_address,
+            network_switch=vm.network_switch,
+            vlan_id=vm.vlan_id,
             os_template_id=vm.os_template_id,
             created_at=vm.created_at,
             updated_at=vm.updated_at,
@@ -196,6 +200,8 @@ async def create_vm(
         disk_gb=vm.disk_gb,
         state=vm.state.value,
         ip_address=vm.ip_address,
+        network_switch=vm.network_switch,
+        vlan_id=vm.vlan_id,
         os_template_id=vm.os_template_id,
         created_at=vm.created_at,
         updated_at=vm.updated_at,
@@ -228,6 +234,8 @@ async def get_vm(
         disk_gb=vm.disk_gb,
         state=vm.state.value,
         ip_address=vm.ip_address,
+        network_switch=vm.network_switch,
+        vlan_id=vm.vlan_id,
         os_template_id=vm.os_template_id,
         created_at=vm.created_at,
         updated_at=vm.updated_at,
@@ -273,6 +281,8 @@ async def update_vm(
         disk_gb=vm.disk_gb,
         state=vm.state.value,
         ip_address=vm.ip_address,
+        network_switch=vm.network_switch,
+        vlan_id=vm.vlan_id,
         os_template_id=vm.os_template_id,
         created_at=vm.created_at,
         updated_at=vm.updated_at,
@@ -413,6 +423,8 @@ async def sync_vm_state(
         disk_gb=vm.disk_gb,
         state=vm.state.value,
         ip_address=vm.ip_address,
+        network_switch=vm.network_switch,
+        vlan_id=vm.vlan_id,
         os_template_id=vm.os_template_id,
         created_at=vm.created_at,
         updated_at=vm.updated_at,

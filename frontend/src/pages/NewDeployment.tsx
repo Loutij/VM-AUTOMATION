@@ -29,7 +29,7 @@ import {
 import { Header } from '../components/layout';
 import { Button, Input, Select, Switch, Modal, useToast } from '../components/ui';
 import { hypervisorsApi, templatesApi, deploymentsApi, softwareApi } from '../services/api';
-import type { DeploymentConfig, SwitchType, SoftwareProfile, SoftwarePackage, ConfigField } from '../types';
+import type { DeploymentConfig, SwitchType, SoftwareProfile, SoftwarePackage, ConfigField, StorageLocation } from '../types';
 
 // Import du composant Marketplace pour la sélection à la carte
 import { Marketplace } from './Marketplace';
@@ -195,6 +195,13 @@ export function NewDeployment() {
 
   const allSoftware: SoftwarePackage[] = allSoftwareData?.items || [];
 
+  // Fetch emplacements de stockage (dépend de l'hyperviseur sélectionné)
+  const { data: storageLocations = [], isLoading: storageLoading } = useQuery({
+    queryKey: ['storage-locations', formData.hypervisor_id],
+    queryFn: () => hypervisorsApi.getStorageLocations(formData.hypervisor_id, 20),
+    enabled: !!formData.hypervisor_id,
+  });
+
   // Mutation pour créer un switch
   const createSwitchMutation = useMutation({
     mutationFn: (data: typeof newSwitchData) =>
@@ -231,6 +238,22 @@ export function NewDeployment() {
     // Note: formData.network_switch is intentionally excluded to prevent infinite loops
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [switches]);
+
+  // Sélectionner automatiquement le disque C: par défaut ou le recommandé
+  useEffect(() => {
+    if (storageLocations.length > 0 && !formData.vhdx_path) {
+      // Chercher le disque C: par défaut
+      const defaultDisk = storageLocations.find((s: StorageLocation) => s.is_default);
+      // Sinon prendre le recommandé
+      const recommendedDisk = storageLocations.find((s: StorageLocation) => s.is_recommended);
+      // Sinon prendre le premier
+      const selectedDisk = defaultDisk || recommendedDisk || storageLocations[0];
+      if (selectedDisk) {
+        setFormData((prev) => ({ ...prev, vhdx_path: selectedDisk.path }));
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storageLocations]);
 
   // Mutation pour créer le déploiement
   const createMutation = useMutation({
@@ -800,20 +823,134 @@ export function NewDeployment() {
                   <FolderOpen size={16} />
                   Emplacement du disque virtuel
                 </h3>
-                <Input
-                  label="Chemin du fichier VHDX"
-                  value={formData.vhdx_path}
-                  onChange={(e) => setFormData({ ...formData, vhdx_path: e.target.value })}
-                  placeholder="C:\Hyper-V\Virtual Hard Disks"
-                  helperText="Laissez vide pour utiliser l'emplacement par défaut de l'hyperviseur. Le fichier sera nommé automatiquement d'après le nom de la VM."
-                />
+                
+                {/* Sélecteur de disque visuel */}
+                {storageLoading ? (
+                  <div className="flex items-center gap-2 text-dark-400 py-4">
+                    <Loader2 size={16} className="animate-spin" />
+                    Chargement des disques disponibles...
+                  </div>
+                ) : storageLocations.length > 0 ? (
+                  <div className="space-y-4">
+                    <p className="text-xs text-dark-400 mb-3">Sélectionnez un disque pour stocker le fichier VHDX :</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {storageLocations.map((storage: StorageLocation) => {
+                        const isSelected = formData.vhdx_path === storage.path;
+                        const usedPercent = 100 - storage.percent_free;
+                        return (
+                          <label
+                            key={storage.drive_letter}
+                            className={`p-4 rounded-lg border cursor-pointer transition-all ${
+                              isSelected
+                                ? 'border-primary-500 bg-primary-500/10 ring-1 ring-primary-500'
+                                : 'border-dark-600 hover:border-dark-500 bg-dark-700/30'
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              name="storage_location"
+                              value={storage.path}
+                              checked={isSelected}
+                              onChange={() => setFormData({ ...formData, vhdx_path: storage.path })}
+                              className="sr-only"
+                            />
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                <HardDrive size={18} className={isSelected ? 'text-primary-500' : 'text-dark-400'} />
+                                <span className="font-bold text-white text-lg">{storage.drive_letter}:</span>
+                              </div>
+                              <div className="flex gap-1">
+                                {storage.is_default && (
+                                  <span className="text-xs px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded">Défaut</span>
+                                )}
+                                {storage.is_recommended && (
+                                  <span className="text-xs px-2 py-0.5 bg-green-500/20 text-green-400 rounded">Recommandé</span>
+                                )}
+                              </div>
+                            </div>
+                            
+                            {/* Barre de progression */}
+                            <div className="h-2 bg-dark-600 rounded-full overflow-hidden mb-2">
+                              <div 
+                                className={`h-full rounded-full transition-all ${
+                                  usedPercent > 90 ? 'bg-red-500' :
+                                  usedPercent > 70 ? 'bg-yellow-500' :
+                                  'bg-primary-500'
+                                }`}
+                                style={{ width: `${usedPercent}%` }}
+                              />
+                            </div>
+                            
+                            <div className="flex justify-between text-xs">
+                              <span className="text-dark-400">
+                                {storage.used_gb.toFixed(1)} Go utilisés
+                              </span>
+                              <span className={`font-medium ${
+                                storage.free_gb < 50 ? 'text-red-400' :
+                                storage.free_gb < 100 ? 'text-yellow-400' :
+                                'text-green-400'
+                              }`}>
+                                {storage.free_gb.toFixed(1)} Go libres
+                              </span>
+                            </div>
+                            <p className="text-xs text-dark-500 mt-1 truncate">{storage.path}</p>
+                          </label>
+                        );
+                      })}
+                      
+                      {/* Option chemin personnalisé */}
+                      <label
+                        className={`p-4 rounded-lg border border-dashed cursor-pointer transition-all ${
+                          formData.vhdx_path && !storageLocations.some((s: StorageLocation) => s.path === formData.vhdx_path)
+                            ? 'border-primary-500 bg-primary-500/10'
+                            : 'border-dark-500 hover:border-dark-400'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="storage_location"
+                          value="custom"
+                          checked={formData.vhdx_path !== '' && !storageLocations.some((s: StorageLocation) => s.path === formData.vhdx_path)}
+                          onChange={() => setFormData({ ...formData, vhdx_path: '' })}
+                          className="sr-only"
+                        />
+                        <div className="flex items-center gap-2 mb-2">
+                          <FolderOpen size={18} className="text-dark-400" />
+                          <span className="font-medium text-dark-300">Chemin personnalisé</span>
+                        </div>
+                        <p className="text-xs text-dark-400">Spécifier un chemin manuel</p>
+                      </label>
+                    </div>
+                    
+                    {/* Champ chemin personnalisé */}
+                    {(formData.vhdx_path === '' || !storageLocations.some((s: StorageLocation) => s.path === formData.vhdx_path)) && (
+                      <Input
+                        label="Chemin personnalisé"
+                        value={formData.vhdx_path}
+                        onChange={(e) => setFormData({ ...formData, vhdx_path: e.target.value })}
+                        placeholder="D:\VMs\VirtualHardDisks"
+                        helperText="Entrez le chemin complet du dossier"
+                      />
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-xs text-dark-400">Aucun disque disponible détecté. Entrez le chemin manuellement :</p>
+                    <Input
+                      label="Chemin du fichier VHDX"
+                      value={formData.vhdx_path}
+                      onChange={(e) => setFormData({ ...formData, vhdx_path: e.target.value })}
+                      placeholder="C:\Hyper-V\Virtual Hard Disks"
+                      helperText="Laissez vide pour utiliser l'emplacement par défaut."
+                    />
+                  </div>
+                )}
+                
                 <div className="mt-3 p-3 bg-dark-700/50 rounded-lg">
                   <p className="text-xs text-dark-400">
-                    <strong className="text-dark-300">Exemple :</strong> Si le chemin est{' '}
-                    <code className="bg-dark-600 px-1 rounded">C:\Hyper-V\Disks</code> et le nom de la VM est{' '}
-                    <code className="bg-dark-600 px-1 rounded">{formData.vm_name || 'ma-vm'}</code>, le disque sera créé à{' '}
+                    <strong className="text-dark-300">Fichier créé :</strong>{' '}
                     <code className="bg-dark-600 px-1 rounded">
-                      {formData.vhdx_path || 'C:\\Hyper-V\\Disks'}\\{formData.vm_name || 'ma-vm'}.vhdx
+                      {formData.vhdx_path || 'C:\\Hyper-V\\VirtualHardDisks'}\\{formData.vm_name || 'ma-vm'}.vhdx
                     </code>
                   </p>
                 </div>

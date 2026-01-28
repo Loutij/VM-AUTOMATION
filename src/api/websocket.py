@@ -483,3 +483,25 @@ async def emit_system_notification(
     )
     
     await ws_manager.broadcast(event)
+
+
+async def emit_notification(
+    title: str,
+    message: str,
+    notification_type: str = "info",
+    data: dict[str, Any] | None = None,
+) -> None:
+    """
+    Émet une notification (alias pour emit_system_notification avec titre).
+    
+    Args:
+        title: Titre de la notification
+        message: Message de notification
+        notification_type: Type (info, warning, error, success)
+        data: Données additionnelles
+    """
+    await emit_system_notification(
+        message=f"{title}: {message}" if title else message,
+        level=notification_type,
+        data={"title": title, **(data or {})},
+    )

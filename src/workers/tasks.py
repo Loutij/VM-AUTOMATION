@@ -19,7 +19,7 @@ from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
 from src.common.config import settings
-from src.domain.models import Deployment, DeploymentLog, DeploymentStatus
+from src.domain.models import Deployment, DeploymentLog, DeploymentStatus, Hypervisor
 
 logger = get_task_logger(__name__)
 
@@ -331,3 +331,101 @@ def cancel_deployment_task(deployment_id: str) -> dict:
         raise
     finally:
         db.close()
+
+
+@shared_task
+def sync_all_hypervisors() -> dict:
+    """
+    Synchronise toutes les VMs de tous les hyperviseurs actifs.
+    Exécutée périodiquement par Celery Beat (toutes les 5 minutes).
+    
+    Returns:
+        Résumé de la synchronisation
+    """
+    logger.info("Starting automatic synchronization of all hypervisors...")
+    
+    async def _sync():
+        async with get_fresh_async_session() as db:
+            from src.domain.vm_service import VMService
+            from src.api.websocket import emit_notification
+            
+            service = VMService(db)
+            
+            # Récupérer tous les hyperviseurs actifs
+            hypervisors = await service.list_hypervisors()
+            active_hypervisors = [h for h in hypervisors if h.is_active]
+            
+            total_imported = 0
+            total_updated = 0
+            total_missing = 0
+            errors = []
+            
+            for hypervisor in active_hypervisors:
+                try:
+                    logger.info(f"Syncing hypervisor: {hypervisor.name} ({hypervisor.id})")
+                    
+                    result = await service.sync_all_vms(
+                        hypervisor_id=hypervisor.id,
+                        import_new=True,
+                        update_existing=True,
+                        mark_missing=True,
+                    )
+                    
+                    total_imported += result["imported"]
+                    total_updated += result["updated"]
+                    total_missing += result["marked_missing"]
+                    
+                    if result["errors"]:
+                        errors.extend(result["errors"])
+                    
+                    # Si des changements ont été détectés, émettre une notification
+                    changes = result["imported"] + result["updated"] + result["marked_missing"]
+                    if changes > 0:
+                        logger.info(
+                            f"Hypervisor {hypervisor.name}: "
+                            f"{result['imported']} imported, "
+                            f"{result['updated']} updated, "
+                            f"{result['marked_missing']} missing"
+                        )
+                        
+                        # Émettre notification WebSocket
+                        try:
+                            await emit_notification(
+                                title="Synchronisation Hyper-V",
+                                message=f"{hypervisor.name}: {changes} changement(s) détecté(s)",
+                                notification_type="info" if not result["errors"] else "warning",
+                            )
+                        except Exception as ws_err:
+                            logger.warning(f"Failed to emit WebSocket notification: {ws_err}")
+                    
+                except Exception as e:
+                    error_msg = f"Error syncing {hypervisor.name}: {str(e)}"
+                    logger.error(error_msg)
+                    errors.append(error_msg)
+            
+            return {
+                "hypervisors_synced": len(active_hypervisors),
+                "total_imported": total_imported,
+                "total_updated": total_updated,
+                "total_missing": total_missing,
+                "errors": errors,
+            }
+    
+    try:
+        result = run_async(_sync())
+        logger.info(
+            f"Sync completed: {result['hypervisors_synced']} hypervisors, "
+            f"{result['total_imported']} imported, "
+            f"{result['total_updated']} updated, "
+            f"{result['total_missing']} missing"
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Error in sync_all_hypervisors: {e}")
+        return {
+            "hypervisors_synced": 0,
+            "total_imported": 0,
+            "total_updated": 0,
+            "total_missing": 0,
+            "errors": [str(e)],
+        }

@@ -530,11 +530,62 @@ frontend/
 2. ✅ Page Paramètres (configuration) - COMPLÉTÉ
 3. ✅ Page Aide (documentation intégrée) - COMPLÉTÉ
 4. ✅ WebSocket hook pour temps réel - COMPLÉTÉ
-5. 🔄 Intégration WebSocket dans les pages
+5. ✅ Intégration WebSocket dans les pages - COMPLÉTÉ
 6. ⬜ Tests frontend (Vitest)
 
 **Documentation technique:** `docs/UNATTENDED_INSTALL.md`
 
 ---
 
-*Dernière mise à jour : 2026-01-26 19:30*
+## Phase 9 : Améliorations UX v0.9.0 (2026-01-28)
+
+### 9.1 Affichage VLAN
+| ID | Tâche | Statut | Notes |
+|----|-------|--------|-------|
+| 9.1.1 | Ajouter network_switch et vlan_id à VMResponse | ✅ | vms.py modifié |
+| 9.1.2 | Mettre à jour type VirtualMachine frontend | ✅ | types/index.ts |
+| 9.1.3 | Ajouter colonne VLAN dans liste VMs | ✅ | VirtualMachines.tsx |
+
+### 9.2 Sélecteur Espace Disque
+| ID | Tâche | Statut | Notes |
+|----|-------|--------|-------|
+| 9.2.1 | Ajouter type StorageLocation | ✅ | types/index.ts |
+| 9.2.2 | Ajouter API getStorageLocations | ✅ | api.ts |
+| 9.2.3 | Créer sélecteur visuel avec barres de progression | ✅ | NewDeployment.tsx |
+| 9.2.4 | Sélection auto disque C: par défaut | ✅ | useEffect dans wizard |
+
+### 9.3 Synchronisation Auto Hyper-V
+| ID | Tâche | Statut | Notes |
+|----|-------|--------|-------|
+| 9.3.1 | Créer tâche Celery sync_all_hypervisors | ✅ | tasks.py |
+| 9.3.2 | Ajouter au beat_schedule (5 min) | ✅ | celery_app.py |
+| 9.3.3 | Émettre notification WebSocket | ✅ | emit_notification() |
+
+### 9.4 Langue Installation Templates
+| ID | Tâche | Statut | Notes |
+|----|-------|--------|-------|
+| 9.4.1 | Ajouter install_locale au modèle OSTemplate | ✅ | models.py |
+| 9.4.2 | Créer migration Alembic | ✅ | 005_add_template_locale.py |
+| 9.4.3 | Mettre à jour schémas API templates | ✅ | templates.py |
+| 9.4.4 | Ajouter sélecteur langue dans Templates.tsx | ✅ | 12 langues disponibles |
+
+### 9.5 Notifications Email SMTP
+| ID | Tâche | Statut | Notes |
+|----|-------|--------|-------|
+| 9.5.1 | Ajouter paramètres SMTP à config.py | ✅ | 7 nouvelles variables |
+| 9.5.2 | Créer EmailService | ✅ | src/common/email.py |
+| 9.5.3 | Email HTML pour déploiement terminé | ✅ | send_deployment_completed() |
+| 9.5.4 | Email HTML pour échec | ✅ | send_deployment_failed() |
+| 9.5.5 | Créer router settings | ✅ | src/api/routers/settings.py |
+| 9.5.6 | Endpoint test email | ✅ | POST /settings/smtp/test |
+| 9.5.7 | Section email dans Settings.tsx | ✅ | Bouton "Envoyer email de test" |
+
+### 9.6 Mise à jour Temps Réel Déploiements
+| ID | Tâche | Statut | Notes |
+|----|-------|--------|-------|
+| 9.6.1 | Intégrer useDeploymentEvents dans Deployments.tsx | ✅ | Rafraîchissement instantané |
+| 9.6.2 | Ajouter indicateur connexion WebSocket | ✅ | Badge Live/Polling |
+
+---
+
+*Dernière mise à jour : 2026-01-28 14:00*

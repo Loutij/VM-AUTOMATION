@@ -19,6 +19,9 @@ import {
   HardDrive,
   Cpu,
   Database,
+  Mail,
+  Send,
+  Loader2,
 } from 'lucide-react';
 import { Header } from '../components/layout';
 import { Button, Input, Select, Switch, useToast } from '../components/ui';
@@ -100,11 +103,39 @@ export function Settings() {
     confirm: '',
   });
   const [isChangingPassword, setIsChangingPassword] = useState(false);
+  
+  // États pour la configuration email
+  const [smtpConfig, setSmtpConfig] = useState<{
+    host: string;
+    port: number;
+    use_ssl: boolean;
+    user: string;
+    from_addr: string;
+    enabled: boolean;
+  } | null>(null);
+  const [testEmail, setTestEmail] = useState('');
+  const [isSendingTestEmail, setIsSendingTestEmail] = useState(false);
+  const [isLoadingSMTP, setIsLoadingSMTP] = useState(true);
 
   // Détecter les changements
   useEffect(() => {
     setHasChanges(JSON.stringify(localSettings) !== JSON.stringify(settings));
   }, [localSettings, settings]);
+
+  // Charger la configuration SMTP
+  useEffect(() => {
+    const loadSMTPConfig = async () => {
+      try {
+        const response = await apiClient.get('/settings/smtp');
+        setSmtpConfig(response.data);
+      } catch (error) {
+        console.error('Failed to load SMTP config:', error);
+      } finally {
+        setIsLoadingSMTP(false);
+      }
+    };
+    loadSMTPConfig();
+  }, []);
 
   // Mettre à jour un paramètre
   const updateSetting = <K extends keyof AppSettings>(
@@ -268,6 +299,48 @@ export function Settings() {
     }
   };
 
+  // Envoyer un email de test
+  const handleSendTestEmail = async () => {
+    if (!testEmail) {
+      addToast({
+        type: 'error',
+        title: 'Erreur',
+        message: 'Veuillez entrer une adresse email.',
+      });
+      return;
+    }
+
+    setIsSendingTestEmail(true);
+    try {
+      const response = await apiClient.post('/settings/smtp/test', {
+        email: testEmail,
+      });
+      
+      if (response.data.success) {
+        addToast({
+          type: 'success',
+          title: 'Email envoyé',
+          message: response.data.message,
+        });
+        setTestEmail('');
+      } else {
+        addToast({
+          type: 'error',
+          title: 'Échec de l\'envoi',
+          message: response.data.message,
+        });
+      }
+    } catch (error: any) {
+      addToast({
+        type: 'error',
+        title: 'Erreur',
+        message: error.response?.data?.detail || 'Impossible d\'envoyer l\'email de test.',
+      });
+    } finally {
+      setIsSendingTestEmail(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-dark-900">
       <Header title="Paramètres" />
@@ -372,6 +445,111 @@ export function Settings() {
                 disabled={!localSettings.notifications.enabled}
               />
             </div>
+          </SettingsSection>
+
+          {/* Notifications Email */}
+          <SettingsSection
+            icon={Mail}
+            title="Notifications Email"
+            description="Configuration SMTP pour les notifications de déploiement"
+          >
+            {isLoadingSMTP ? (
+              <div className="flex items-center gap-2 text-dark-400 py-4">
+                <Loader2 size={16} className="animate-spin" />
+                Chargement de la configuration...
+              </div>
+            ) : smtpConfig ? (
+              <div className="space-y-4">
+                {/* Statut */}
+                <div className="flex items-center justify-between p-4 bg-dark-700/50 rounded-lg">
+                  <div className="flex items-center gap-3">
+                    {smtpConfig.enabled ? (
+                      <CheckCircle size={20} className="text-green-500" />
+                    ) : (
+                      <XCircle size={20} className="text-dark-400" />
+                    )}
+                    <div>
+                      <p className="font-medium text-white">
+                        {smtpConfig.enabled ? 'Notifications email activées' : 'Notifications email désactivées'}
+                      </p>
+                      <p className="text-sm text-dark-400">
+                        {smtpConfig.host}:{smtpConfig.port} {smtpConfig.use_ssl ? '(SSL)' : ''}
+                      </p>
+                    </div>
+                  </div>
+                  <span className={`px-2 py-1 rounded text-xs ${
+                    smtpConfig.enabled 
+                      ? 'bg-green-500/20 text-green-400' 
+                      : 'bg-dark-600 text-dark-400'
+                  }`}>
+                    {smtpConfig.enabled ? 'Actif' : 'Inactif'}
+                  </span>
+                </div>
+
+                {/* Configuration actuelle */}
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div className="p-3 bg-dark-700/30 rounded">
+                    <span className="text-dark-400 block mb-1">Serveur SMTP</span>
+                    <span className="text-white font-mono">{smtpConfig.host}</span>
+                  </div>
+                  <div className="p-3 bg-dark-700/30 rounded">
+                    <span className="text-dark-400 block mb-1">Port</span>
+                    <span className="text-white font-mono">{smtpConfig.port}</span>
+                  </div>
+                  <div className="p-3 bg-dark-700/30 rounded">
+                    <span className="text-dark-400 block mb-1">Utilisateur</span>
+                    <span className="text-white font-mono">{smtpConfig.user || '-'}</span>
+                  </div>
+                  <div className="p-3 bg-dark-700/30 rounded">
+                    <span className="text-dark-400 block mb-1">Expéditeur</span>
+                    <span className="text-white font-mono">{smtpConfig.from_addr || '-'}</span>
+                  </div>
+                </div>
+
+                {/* Test email */}
+                <div className="border-t border-dark-700 pt-4">
+                  <h4 className="text-sm font-medium text-dark-200 mb-4 flex items-center gap-2">
+                    <Send size={16} />
+                    Envoyer un email de test
+                  </h4>
+                  <div className="flex gap-2">
+                    <Input
+                      value={testEmail}
+                      onChange={(e) => setTestEmail(e.target.value)}
+                      placeholder="votre-email@exemple.com"
+                      type="email"
+                      className="flex-1"
+                    />
+                    <Button
+                      onClick={handleSendTestEmail}
+                      isLoading={isSendingTestEmail}
+                      disabled={!testEmail || !smtpConfig.user}
+                      leftIcon={<Send size={16} />}
+                    >
+                      Envoyer
+                    </Button>
+                  </div>
+                  <p className="text-xs text-dark-400 mt-2">
+                    Un email de test sera envoyé pour vérifier la configuration SMTP.
+                  </p>
+                </div>
+
+                {/* Info configuration */}
+                <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                  <p className="text-sm text-blue-400">
+                    <strong>Note :</strong> La configuration SMTP se fait via les variables d'environnement du serveur 
+                    (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_ENABLED). 
+                    Contactez votre administrateur pour modifier ces paramètres.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-4 text-dark-400">
+                <Mail size={24} className="mx-auto mb-2 opacity-50" />
+                <p>Configuration SMTP non disponible</p>
+                <p className="text-sm">Configurez les variables d'environnement SMTP sur le serveur</p>
+              </div>
+            )}
           </SettingsSection>
 
           {/* Valeurs par défaut des déploiements */}

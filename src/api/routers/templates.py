@@ -39,6 +39,12 @@ class OSTemplateBase(BaseModel):
     min_cpu: int = Field(default=1, ge=1, description="CPU minimum requis")
     min_ram_gb: int = Field(default=2, ge=1, description="RAM minimum en GB")
     min_disk_gb: int = Field(default=20, ge=10, description="Disque minimum en GB")
+    install_locale: str = Field(
+        default="fr-FR",
+        max_length=10,
+        pattern="^[a-z]{2}-[A-Z]{2}$",
+        description="Langue d'installation (ex: fr-FR, en-US)"
+    )
 
 
 class OSTemplateCreate(OSTemplateBase):
@@ -55,6 +61,12 @@ class OSTemplateUpdate(BaseModel):
     min_cpu: int | None = Field(None, ge=1)
     min_ram_gb: int | None = Field(None, ge=1)
     min_disk_gb: int | None = Field(None, ge=10)
+    install_locale: str | None = Field(
+        None,
+        max_length=10,
+        pattern="^[a-z]{2}-[A-Z]{2}$",
+        description="Langue d'installation"
+    )
     unattend_template: str | None = None
     is_active: bool | None = None
 
@@ -63,6 +75,7 @@ class OSTemplateResponse(OSTemplateBase):
     """Schéma de réponse pour un template OS."""
 
     id: UUID
+    install_locale: str
     is_active: bool
     created_at: datetime
     updated_at: datetime | None
@@ -155,6 +168,7 @@ def _template_to_response(template: OSTemplate) -> OSTemplateResponse:
         min_cpu=template.min_cpu,
         min_ram_gb=template.min_ram_gb,
         min_disk_gb=template.min_disk_gb,
+        install_locale=template.install_locale,
         is_active=template.is_active,
         created_at=template.created_at.isoformat() if template.created_at else "",
         updated_at=template.updated_at.isoformat() if template.updated_at else None,
@@ -211,6 +225,7 @@ async def create_template(
         min_cpu=template.min_cpu,
         min_ram_gb=template.min_ram_gb,
         min_disk_gb=template.min_disk_gb,
+        install_locale=template.install_locale,
     )
     
     db.add(db_template)

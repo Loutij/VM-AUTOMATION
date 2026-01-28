@@ -25,6 +25,8 @@ export interface VirtualMachine {
   disk_gb: number; // Aligned with backend (was disk_size_gb)
   os_type?: string;
   ip_address?: string;
+  network_switch?: string;
+  vlan_id?: number;
   created_at: string;
   updated_at: string;
 }
@@ -124,6 +126,7 @@ export interface OSTemplate {
   min_cpu: number;     // Aligned with backend (was default_cpu)
   min_ram_gb: number;  // Aligned with backend (was default_memory_mb)
   min_disk_gb: number; // Aligned with backend (was default_disk_gb)
+  install_locale?: string;  // Langue d'installation (ex: fr-FR, en-US)
   created_at: string;
 }
 
@@ -294,6 +297,18 @@ export interface PhysicalAdapter {
   status: string;
   link_speed: string;
   mac_address: string;
+}
+
+// Types pour les emplacements de stockage
+export interface StorageLocation {
+  drive_letter: string;
+  path: string;
+  total_gb: number;
+  free_gb: number;
+  used_gb: number;
+  percent_free: number;
+  is_default: boolean;
+  is_recommended: boolean;
 }
 
 // Types pour les paramètres de l'application

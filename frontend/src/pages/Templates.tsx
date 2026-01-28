@@ -12,6 +12,7 @@ import {
   FolderOpen,
   Loader2,
   HardDrive,
+  Languages,
 } from 'lucide-react';
 import { Header } from '../components/layout';
 import {
@@ -28,6 +29,22 @@ import {
 import { templatesApi, hypervisorsApi, type ISOInfo } from '../services/api';
 import type { OSTemplate, OSFamily, Hypervisor } from '../types';
 
+// Liste des langues d'installation supportées
+const INSTALL_LOCALES = [
+  { value: 'fr-FR', label: 'Français (France)' },
+  { value: 'en-US', label: 'English (United States)' },
+  { value: 'en-GB', label: 'English (United Kingdom)' },
+  { value: 'de-DE', label: 'Deutsch (Deutschland)' },
+  { value: 'es-ES', label: 'Español (España)' },
+  { value: 'it-IT', label: 'Italiano (Italia)' },
+  { value: 'pt-BR', label: 'Português (Brasil)' },
+  { value: 'nl-NL', label: 'Nederlands (Nederland)' },
+  { value: 'pl-PL', label: 'Polski (Polska)' },
+  { value: 'ru-RU', label: 'Русский (Россия)' },
+  { value: 'ja-JP', label: '日本語 (日本)' },
+  { value: 'zh-CN', label: '简体中文 (中国)' },
+];
+
 interface TemplateFormData {
   name: string;
   os_family: OSFamily;
@@ -37,6 +54,7 @@ interface TemplateFormData {
   min_cpu: string;
   min_ram_gb: string;
   min_disk_gb: string;
+  install_locale: string;
 }
 
 const defaultFormData: TemplateFormData = {
@@ -48,6 +66,7 @@ const defaultFormData: TemplateFormData = {
   min_cpu: '2',
   min_ram_gb: '4',
   min_disk_gb: '60',
+  install_locale: 'fr-FR',
 };
 
 export function Templates() {
@@ -134,6 +153,7 @@ export function Templates() {
         min_cpu: template.min_cpu.toString(),
         min_ram_gb: template.min_ram_gb.toString(),
         min_disk_gb: template.min_disk_gb.toString(),
+        install_locale: template.install_locale || 'fr-FR',
       });
     } else {
       setSelectedTemplate(null);
@@ -159,6 +179,7 @@ export function Templates() {
       min_cpu: parseInt(formData.min_cpu),
       min_ram_gb: parseInt(formData.min_ram_gb),
       min_disk_gb: parseInt(formData.min_disk_gb),
+      install_locale: formData.install_locale,
     };
 
     if (selectedTemplate) {
@@ -184,6 +205,7 @@ export function Templates() {
       min_cpu: template.min_cpu.toString(),
       min_ram_gb: template.min_ram_gb.toString(),
       min_disk_gb: template.min_disk_gb.toString(),
+      install_locale: template.install_locale || 'fr-FR',
     });
     setIsModalOpen(true);
   };
@@ -340,10 +362,18 @@ export function Templates() {
                 )}
 
                 {/* Default specs */}
-                <div className="mt-4 pt-4 border-t border-dark-700 flex items-center gap-4 text-xs text-dark-400">
-                  <span>{template.min_cpu} vCPU</span>
-                  <span>{template.min_ram_gb} Go</span>
-                  <span>{template.min_disk_gb} GB</span>
+                <div className="mt-4 pt-4 border-t border-dark-700 flex items-center justify-between text-xs text-dark-400">
+                  <div className="flex items-center gap-4">
+                    <span>{template.min_cpu} vCPU</span>
+                    <span>{template.min_ram_gb} Go</span>
+                    <span>{template.min_disk_gb} GB</span>
+                  </div>
+                  {template.install_locale && (
+                    <div className="flex items-center gap-1.5 text-dark-300">
+                      <Languages size={12} />
+                      <span>{template.install_locale}</span>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
@@ -393,13 +423,22 @@ export function Templates() {
               />
             </div>
 
-            <Input
-              label="Type d'OS"
-              value={formData.os_type}
-              onChange={(e) => setFormData({ ...formData, os_type: e.target.value })}
-              placeholder="Server 2022 Standard"
-              required
-            />
+            <div className="grid grid-cols-2 gap-4">
+              <Input
+                label="Type d'OS"
+                value={formData.os_type}
+                onChange={(e) => setFormData({ ...formData, os_type: e.target.value })}
+                placeholder="Server 2022 Standard"
+                required
+              />
+              <Select
+                label="Langue d'installation"
+                value={formData.install_locale}
+                onChange={(e) => setFormData({ ...formData, install_locale: e.target.value })}
+                options={INSTALL_LOCALES}
+                required
+              />
+            </div>
 
             <Textarea
               label="Description"

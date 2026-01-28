@@ -58,5 +58,9 @@ celery_app.conf.update(
             "task": "src.workers.tasks.cleanup_old_logs",
             "schedule": 3600.0,  # Toutes les heures
         },
+        "sync-all-hypervisors": {
+            "task": "src.workers.tasks.sync_all_hypervisors",
+            "schedule": 300.0,  # Toutes les 5 minutes
+        },
     },
 )

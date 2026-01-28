@@ -21,6 +21,7 @@ import {
   Camera,
   Maximize2,
   CloudDownload,
+  Tag,
 } from 'lucide-react';
 import { Header } from '../components/layout';
 import {
@@ -314,6 +315,19 @@ export function VirtualMachines() {
         <div className="flex items-center gap-1.5 text-dark-300">
           <Network size={14} />
           <span className="font-mono text-sm">{vm.ip_address || '-'}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'vlan_id',
+      header: 'VLAN',
+      sortable: true,
+      render: (vm) => (
+        <div className="flex items-center gap-1.5 text-dark-300">
+          <Tag size={14} />
+          <span className="font-mono text-sm">
+            {vm.vlan_id ? `VLAN ${vm.vlan_id}` : '-'}
+          </span>
         </div>
       ),
     },

@@ -13,6 +13,7 @@ import type {
   VirtualSwitch,
   CreateSwitchRequest,
   PhysicalAdapter,
+  StorageLocation,
   SoftwarePackage,
   SoftwareCategory_Info,
   SoftwareProfile,
@@ -242,6 +243,14 @@ export const hypervisorsApi = {
     const response = await apiClient.get(`/hypervisors/${id}/vms`);
     return response.data;
   },
+
+  // Lister les emplacements de stockage disponibles
+  getStorageLocations: async (id: string, minFreeGb = 50): Promise<StorageLocation[]> => {
+    const response = await apiClient.get<StorageLocation[]>(`/hypervisors/${id}/storage-locations`, {
+      params: { min_free_gb: minFreeGb },
+    });
+    return response.data;
+  },
 };
 
 // ============================================
@@ -259,6 +268,8 @@ interface VMBackend {
   disk_gb: number;
   state: string;
   ip_address: string | null;
+  network_switch: string | null;
+  vlan_id: number | null;
   os_template_id: string | null;
   created_at: string;
   updated_at: string | null;
@@ -275,6 +286,8 @@ function mapVM(vm: VMBackend): VirtualMachine {
     ram_gb: vm.ram_gb,
     disk_gb: vm.disk_gb,
     ip_address: vm.ip_address || undefined,
+    network_switch: vm.network_switch || undefined,
+    vlan_id: vm.vlan_id || undefined,
     created_at: vm.created_at,
     updated_at: vm.updated_at || vm.created_at,
   };
@@ -360,6 +373,7 @@ interface TemplateBackend {
   min_cpu: number;
   min_ram_gb: number;
   min_disk_gb: number;
+  install_locale: string;
   is_active: boolean;
   created_at: string;
   updated_at: string | null;
@@ -377,6 +391,7 @@ function mapTemplate(t: TemplateBackend): OSTemplate {
     min_cpu: t.min_cpu,
     min_ram_gb: t.min_ram_gb,
     min_disk_gb: t.min_disk_gb,
+    install_locale: t.install_locale,
     created_at: t.created_at,
   };
 }
@@ -402,6 +417,7 @@ export const templatesApi = {
       min_cpu: data.min_cpu || 2,
       min_ram_gb: data.min_ram_gb || 4,
       min_disk_gb: data.min_disk_gb || 60,
+      install_locale: data.install_locale || 'fr-FR',
     };
     const response = await apiClient.post<TemplateBackend>('/templates', payload);
     return mapTemplate(response.data);
@@ -414,6 +430,7 @@ export const templatesApi = {
     if (data.min_cpu) payload.min_cpu = data.min_cpu;
     if (data.min_ram_gb) payload.min_ram_gb = data.min_ram_gb;
     if (data.min_disk_gb) payload.min_disk_gb = data.min_disk_gb;
+    if (data.install_locale) payload.install_locale = data.install_locale;
     
     const response = await apiClient.patch<TemplateBackend>(`/templates/${id}`, payload);
     return mapTemplate(response.data);

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
@@ -14,6 +14,8 @@ import {
   Loader2,
   FileText,
   Trash2,
+  Wifi,
+  WifiOff,
 } from 'lucide-react';
 import { Header } from '../components/layout';
 import {
@@ -25,6 +27,7 @@ import {
   useToast,
 } from '../components/ui';
 import { deploymentsApi } from '../services/api';
+import { useDeploymentEvents } from '../hooks/useWebSocket';
 import type { Deployment, DeploymentStatus, DeploymentLog } from '../types';
 
 // Étapes affichées dans l'interface
@@ -94,6 +97,17 @@ export function Deployments() {
     queryFn: () => deploymentsApi.list(),
     refetchInterval: 5000, // Auto-refresh every 5 seconds for active deployments
   });
+
+  // WebSocket pour les mises à jour temps réel
+  const handleDeploymentProgress = useCallback(() => {
+    // Rafraîchir immédiatement quand un événement WebSocket arrive
+    queryClient.invalidateQueries({ queryKey: ['deployments'] });
+  }, [queryClient]);
+
+  const { isConnected: wsConnected } = useDeploymentEvents(
+    undefined, // écouter tous les déploiements
+    handleDeploymentProgress
+  );
 
   // Cancel mutation
   const cancelMutation = useMutation({
@@ -325,6 +339,18 @@ export function Deployments() {
             ))}
           </div>
           <div className="flex items-center gap-3">
+            {/* Indicateur de connexion temps réel */}
+            <div 
+              className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs ${
+                wsConnected 
+                  ? 'bg-green-500/20 text-green-400' 
+                  : 'bg-dark-600 text-dark-400'
+              }`}
+              title={wsConnected ? 'Mises à jour en temps réel actives' : 'Mises à jour par polling'}
+            >
+              {wsConnected ? <Wifi size={14} /> : <WifiOff size={14} />}
+              <span>{wsConnected ? 'Live' : 'Polling'}</span>
+            </div>
             <Button
               variant="secondary"
               leftIcon={<RefreshCw size={18} />}

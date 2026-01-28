@@ -207,6 +207,10 @@ class OSTemplate(Base, TimestampMixin):
     min_cpu: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     min_ram_gb: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
     min_disk_gb: Mapped[int] = mapped_column(Integer, default=20, nullable=False)
+    install_locale: Mapped[str] = mapped_column(
+        String(10), default="fr-FR", nullable=False,
+        comment="Langue d'installation (ex: fr-FR, en-US)"
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     # Relations
