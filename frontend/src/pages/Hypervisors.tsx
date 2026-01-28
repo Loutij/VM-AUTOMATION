@@ -174,10 +174,10 @@ export function Hypervisors() {
       sortable: true,
       render: (h) => (
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-primary-600/20 rounded-lg flex items-center justify-center">
-            <Server size={16} className="text-primary-500" />
+          <div className="w-8 h-8 bg-oto-100 dark:bg-primary-600/20 rounded-lg flex items-center justify-center">
+            <Server size={16} className="text-oto-500" />
           </div>
-          <span className="font-medium text-white">{h.name}</span>
+          <span className="font-medium text-gray-900 dark:text-white">{h.name}</span>
         </div>
       ),
     },
@@ -186,7 +186,7 @@ export function Hypervisors() {
       header: 'Type',
       sortable: true,
       render: (h) => (
-        <span className="px-2 py-1 bg-dark-700 rounded text-sm capitalize">{h.type}</span>
+        <span className="px-2 py-1 bg-light-200 dark:bg-dark-700 rounded text-sm capitalize text-gray-700 dark:text-gray-300">{h.type}</span>
       ),
     },
     {

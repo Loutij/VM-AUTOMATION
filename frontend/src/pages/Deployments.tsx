@@ -527,13 +527,13 @@ export function Deployments() {
         >
           {isLoadingLogs ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 size={32} className="text-primary-500 animate-spin" />
-              <span className="ml-3 text-dark-400">Chargement des logs...</span>
+              <Loader2 size={32} className="text-oto-500 animate-spin" />
+              <span className="ml-3 text-gray-500 dark:text-dark-400">Chargement des logs...</span>
             </div>
           ) : logsError ? (
             <div className="text-center py-8">
               <XCircle size={40} className="mx-auto mb-3 text-red-500" />
-              <p className="text-red-400">{logsError}</p>
+              <p className="text-red-500 dark:text-red-400">{logsError}</p>
               <Button
                 variant="secondary"
                 size="sm"
@@ -550,41 +550,41 @@ export function Deployments() {
                   key={log.id}
                   className={`p-3 rounded-lg text-sm ${
                     log.level === 'error'
-                      ? 'bg-red-500/10 border border-red-500/20'
+                      ? 'bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20'
                       : log.level === 'info'
-                      ? 'bg-green-500/10 border border-green-500/20'
+                      ? 'bg-green-50 dark:bg-green-500/10 border border-green-200 dark:border-green-500/20'
                       : log.level === 'warning'
-                      ? 'bg-yellow-500/10 border border-yellow-500/20'
-                      : 'bg-dark-700/50 border border-dark-600'
+                      ? 'bg-yellow-50 dark:bg-yellow-500/10 border border-yellow-200 dark:border-yellow-500/20'
+                      : 'bg-light-100 dark:bg-dark-700/50 border border-light-200 dark:border-dark-600'
                   }`}
                 >
                   <div className="flex items-center justify-between mb-1">
                     <span
                       className={`font-medium ${
                         log.level === 'error'
-                          ? 'text-red-400'
+                          ? 'text-red-600 dark:text-red-400'
                           : log.level === 'info'
-                          ? 'text-green-400'
+                          ? 'text-green-600 dark:text-green-400'
                           : log.level === 'warning'
-                          ? 'text-yellow-400'
-                          : 'text-blue-400'
+                          ? 'text-yellow-600 dark:text-yellow-400'
+                          : 'text-blue-600 dark:text-blue-400'
                       }`}
                     >
                       [{log.step}]
                     </span>
-                    <span className="text-xs text-dark-500">
+                    <span className="text-xs text-gray-400 dark:text-dark-500">
                       {new Date(log.created_at).toLocaleTimeString('fr-FR')}
                     </span>
                   </div>
-                  <p className="text-dark-200">{log.message}</p>
+                  <p className="text-gray-700 dark:text-dark-200">{log.message}</p>
                 </div>
               ))}
             </div>
           ) : (
             <div className="text-center py-8">
-              <FileText size={40} className="mx-auto mb-3 text-dark-500" />
-              <p className="text-dark-400">Aucun log disponible pour ce déploiement</p>
-              <p className="text-dark-500 text-sm mt-2">
+              <FileText size={40} className="mx-auto mb-3 text-gray-400 dark:text-dark-500" />
+              <p className="text-gray-500 dark:text-dark-400">Aucun log disponible pour ce déploiement</p>
+              <p className="text-gray-400 dark:text-dark-500 text-sm mt-2">
                 Les logs apparaîtront une fois le déploiement démarré
               </p>
             </div>
