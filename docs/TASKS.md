@@ -138,9 +138,9 @@
 ### 3.1 Templates Windows Unattend
 | ID | Tâche | Statut | Assigné | Notes |
 |----|-------|--------|---------|-------|
-| 3.1.1 | Template Windows 10 | ⬜ | - | - |
-| 3.1.2 | Template Windows 11 | ⬜ | - | - |
-| 3.1.3 | Template Windows Server 2019 | ⬜ | - | - |
+| 3.1.1 | Template Windows 10 | ✅ | Agent | templates/unattend/windows_10.xml |
+| 3.1.2 | Template Windows 11 | ✅ | Agent | templates/unattend/windows_11.xml |
+| 3.1.3 | Template Windows Server 2019 | ✅ | Agent | templates/unattend/windows_server_2019.xml |
 | 3.1.4 | Template Windows Server 2022 | ✅ | Agent | templates/unattend/ + ISO OEMDRV |
 | 3.1.5 | Injection clé produit | ✅ | Agent | Supporté dans template |
 
@@ -179,7 +179,7 @@
 | 3.5.4 | Timeout et gestion erreurs | ✅ | Agent | Intégré dans wait_for_vm_ready() |
 | 3.5.5 | Déploiement DISM | ✅ | Agent | deploy_with_dism() évite "Press any key" (~90s) |
 | 3.5.6 | Création ISO custom | ✅ | Agent | create_custom_iso() avec efisys_noprompt.bin |
-| 3.5.7 | OOBE automatique | 🔄 | - | EN COURS - nécessite image WIM syspreppée (voir HANDOFF.md) |
+| 3.5.7 | OOBE automatique | ✅ | Agent | RunOnce + setup.ps1 au premier boot |
 
 ### 3.6 Gestion Partitionnement
 | ID | Tâche | Statut | Assigné | Notes |
@@ -363,7 +363,7 @@
 |----|-------|--------|---------|-------|
 | 7.4.1 | Responsive design | ✅ | Agent | Mobile, tablet, desktop (Tailwind) |
 | 7.4.2 | Keyboard shortcuts | ✅ | Agent | Ctrl+K, Ctrl+N, Ctrl+, Esc, ? |
-| 7.4.3 | Dark/Light mode toggle | ⬜ | - | Préférence utilisateur |
+| 7.4.3 | Dark/Light mode toggle | ✅ | Agent | ThemeContext + persistance localStorage |
 | 7.4.4 | Animations/Transitions | ⬜ | - | Framer Motion |
 | 7.4.5 | Breadcrumbs | ⬜ | - | Navigation contexte |
 | 7.4.6 | Error boundaries | ⬜ | - | Gestion erreurs gracieuse |
@@ -427,18 +427,18 @@
 
 ## Statistiques
 
-| Phase | Total | À Faire | En Cours | Terminé | % Complet |
+| Phase | Total | A Faire | En Cours | Termine | % Complet |
 |-------|-------|---------|----------|---------|-----------|
 | Phase 1 : Fondations | 31 | 0 | 0 | 31 | **100%** |
-| Phase 2 : Création VMs | 32 | 0 | 0 | 32 | **100%** |
-| Phase 3 : Installation OS | 26 | 4 | 0 | 22 | **85%** |
+| Phase 2 : Creation VMs | 32 | 0 | 0 | 32 | **100%** |
+| Phase 3 : Installation OS | 26 | 0 | 0 | 26 | **100%** |
 | Phase 4 : Post-Installation | 26 | 0 | 0 | 26 | **100%** |
 | Phase 5 : Logiciels | 20 | 4 | 0 | 16 | **80%** |
 | Phase 6 : Orchestration | 10 | 2 | 0 | 8 | **80%** |
-| Phase 7 : Interface Web | 38 | 9 | 0 | 29 | **76%** |
+| Phase 7 : Interface Web | 38 | 8 | 0 | 30 | **79%** |
 | Phase 8 : Industrialisation | 13 | 12 | 0 | 1 | **8%** |
 | Phase 9 : VMware (futur) | 4 | 4 | 0 | 0 | **0%** |
-| **TOTAL** | **200** | **35** | **0** | **165** | **~83%** |
+| **TOTAL** | **200** | **30** | **0** | **170** | **~85%** |
 
 ---
 
@@ -530,11 +530,62 @@ frontend/
 2. ✅ Page Paramètres (configuration) - COMPLÉTÉ
 3. ✅ Page Aide (documentation intégrée) - COMPLÉTÉ
 4. ✅ WebSocket hook pour temps réel - COMPLÉTÉ
-5. 🔄 Intégration WebSocket dans les pages
+5. ✅ Intégration WebSocket dans les pages - COMPLÉTÉ
 6. ⬜ Tests frontend (Vitest)
 
 **Documentation technique:** `docs/UNATTENDED_INSTALL.md`
 
 ---
 
-*Dernière mise à jour : 2026-01-26 19:30*
+## Phase 9 : Améliorations UX v0.9.0 (2026-01-28)
+
+### 9.1 Affichage VLAN
+| ID | Tâche | Statut | Notes |
+|----|-------|--------|-------|
+| 9.1.1 | Ajouter network_switch et vlan_id à VMResponse | ✅ | vms.py modifié |
+| 9.1.2 | Mettre à jour type VirtualMachine frontend | ✅ | types/index.ts |
+| 9.1.3 | Ajouter colonne VLAN dans liste VMs | ✅ | VirtualMachines.tsx |
+
+### 9.2 Sélecteur Espace Disque
+| ID | Tâche | Statut | Notes |
+|----|-------|--------|-------|
+| 9.2.1 | Ajouter type StorageLocation | ✅ | types/index.ts |
+| 9.2.2 | Ajouter API getStorageLocations | ✅ | api.ts |
+| 9.2.3 | Créer sélecteur visuel avec barres de progression | ✅ | NewDeployment.tsx |
+| 9.2.4 | Sélection auto disque C: par défaut | ✅ | useEffect dans wizard |
+
+### 9.3 Synchronisation Auto Hyper-V
+| ID | Tâche | Statut | Notes |
+|----|-------|--------|-------|
+| 9.3.1 | Créer tâche Celery sync_all_hypervisors | ✅ | tasks.py |
+| 9.3.2 | Ajouter au beat_schedule (5 min) | ✅ | celery_app.py |
+| 9.3.3 | Émettre notification WebSocket | ✅ | emit_notification() |
+
+### 9.4 Langue Installation Templates
+| ID | Tâche | Statut | Notes |
+|----|-------|--------|-------|
+| 9.4.1 | Ajouter install_locale au modèle OSTemplate | ✅ | models.py |
+| 9.4.2 | Créer migration Alembic | ✅ | 005_add_template_locale.py |
+| 9.4.3 | Mettre à jour schémas API templates | ✅ | templates.py |
+| 9.4.4 | Ajouter sélecteur langue dans Templates.tsx | ✅ | 12 langues disponibles |
+
+### 9.5 Notifications Email SMTP
+| ID | Tâche | Statut | Notes |
+|----|-------|--------|-------|
+| 9.5.1 | Ajouter paramètres SMTP à config.py | ✅ | 7 nouvelles variables |
+| 9.5.2 | Créer EmailService | ✅ | src/common/email.py |
+| 9.5.3 | Email HTML pour déploiement terminé | ✅ | send_deployment_completed() |
+| 9.5.4 | Email HTML pour échec | ✅ | send_deployment_failed() |
+| 9.5.5 | Créer router settings | ✅ | src/api/routers/settings.py |
+| 9.5.6 | Endpoint test email | ✅ | POST /settings/smtp/test |
+| 9.5.7 | Section email dans Settings.tsx | ✅ | Bouton "Envoyer email de test" |
+
+### 9.6 Mise à jour Temps Réel Déploiements
+| ID | Tâche | Statut | Notes |
+|----|-------|--------|-------|
+| 9.6.1 | Intégrer useDeploymentEvents dans Deployments.tsx | ✅ | Rafraîchissement instantané |
+| 9.6.2 | Ajouter indicateur connexion WebSocket | ✅ | Badge Live/Polling |
+
+---
+
+*Derniere mise a jour : 2026-03-05*

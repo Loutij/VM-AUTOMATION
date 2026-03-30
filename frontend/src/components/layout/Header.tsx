@@ -1,9 +1,24 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Bell, Search, User, LogOut, ChevronDown, CheckCircle, XCircle, AlertTriangle, Info, Trash2, Check } from 'lucide-react';
+import { Bell, User, LogOut, ChevronDown, CheckCircle, XCircle, AlertTriangle, Info, Trash2, Check } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { useNotifications, type NotificationPayload } from '../../hooks/useWebSocket';
 import { useToast } from '../ui/Toast';
+import { ThemeToggle } from '../ui/ThemeToggle';
+
+// Composant OTO Mark (3 formes géométriques)
+function OTOMark() {
+  return (
+    <div className="flex items-center gap-1.5">
+      {/* Cercle avec encoche (forme "C") */}
+      <div className="w-5 h-5 border-[2.5px] border-current rounded-full border-r-transparent rotate-45 text-gray-900 dark:text-white" />
+      {/* Cercle plein */}
+      <div className="w-5 h-5 rounded-full bg-current text-gray-900 dark:text-white" />
+      {/* Carré bleu */}
+      <div className="w-5 h-5 rounded-sm bg-oto-500" />
+    </div>
+  );
+}
 
 interface HeaderProps {
   title: string;
@@ -120,54 +135,47 @@ export function Header({ title }: HeaderProps) {
   };
 
   return (
-    <header className="h-16 bg-dark-800 border-b border-dark-700 flex items-center justify-between px-6">
+    <header className="h-16 bg-white dark:bg-dark-800 border-b border-light-300 dark:border-dark-700 flex items-center justify-between px-6 transition-colors">
       {/* Titre de la page */}
-      <h1 className="text-xl font-semibold text-white">{title}</h1>
+      <h1 className="text-xl font-bold uppercase tracking-tight text-gray-900 dark:text-white">{title}</h1>
 
       {/* Actions */}
       <div className="flex items-center gap-4">
-        {/* Recherche */}
-        <div className="relative">
-          <Search
-            size={18}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-dark-400"
-          />
-          <input
-            type="text"
-            placeholder="Rechercher..."
-            className="w-64 pl-10 pr-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-dark-100 placeholder-dark-400 focus:outline-none focus:border-primary-500 transition-colors"
-          />
-        </div>
+        {/* OTO Mark */}
+        <OTOMark />
+
+        {/* Theme Toggle */}
+        <ThemeToggle size="sm" />
 
         {/* Notifications */}
         <div className="relative" ref={notifRef}>
           <button 
             onClick={() => setShowNotifications(!showNotifications)}
-            className="relative p-2 text-dark-300 hover:text-white hover:bg-dark-700 rounded-lg transition-colors"
+            className="relative p-2 text-gray-500 dark:text-dark-300 hover:text-gray-900 dark:hover:text-white hover:bg-light-200 dark:hover:bg-dark-700 rounded-lg transition-colors"
             title={isConnected ? 'Notifications (connecté)' : 'Notifications (déconnecté)'}
           >
             <Bell size={20} />
             {unreadCount > 0 && (
-              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-primary-500 rounded-full text-xs font-medium text-white flex items-center justify-center">
+              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-oto-500 rounded-full text-xs font-medium text-white flex items-center justify-center">
                 {unreadCount > 9 ? '9+' : unreadCount}
               </span>
             )}
             {!isConnected && (
-              <span className="absolute bottom-0 right-0 w-2 h-2 bg-yellow-500 rounded-full border border-dark-800" title="Déconnecté" />
+              <span className="absolute bottom-0 right-0 w-2 h-2 bg-yellow-500 rounded-full border-2 border-white dark:border-dark-800" title="Déconnecté" />
             )}
           </button>
 
           {/* Panneau des notifications */}
           {showNotifications && (
-            <div className="absolute right-0 top-full mt-2 w-96 bg-dark-700 border border-dark-600 rounded-lg shadow-xl z-50 overflow-hidden">
+            <div className="absolute right-0 top-full mt-2 w-96 bg-white dark:bg-dark-700 border border-light-300 dark:border-dark-600 rounded-lg shadow-xl z-50 overflow-hidden">
               {/* Header du panneau */}
-              <div className="flex items-center justify-between px-4 py-3 border-b border-dark-600">
-                <h3 className="font-medium text-white">Notifications</h3>
+              <div className="flex items-center justify-between px-4 py-3 border-b border-light-200 dark:border-dark-600">
+                <h3 className="font-semibold text-gray-900 dark:text-white">Notifications</h3>
                 <div className="flex items-center gap-2">
                   {unreadCount > 0 && (
                     <button
                       onClick={markAllAsRead}
-                      className="p-1 text-dark-400 hover:text-primary-400 transition-colors"
+                      className="p-1 text-gray-400 dark:text-dark-400 hover:text-oto-500 dark:hover:text-oto-400 transition-colors"
                       title="Tout marquer comme lu"
                     >
                       <Check size={16} />
@@ -176,7 +184,7 @@ export function Header({ title }: HeaderProps) {
                   {allNotifications.length > 0 && (
                     <button
                       onClick={clearAll}
-                      className="p-1 text-dark-400 hover:text-red-400 transition-colors"
+                      className="p-1 text-gray-400 dark:text-dark-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
                       title="Tout effacer"
                     >
                       <Trash2 size={16} />
@@ -189,9 +197,9 @@ export function Header({ title }: HeaderProps) {
               <div className="max-h-96 overflow-y-auto">
                 {allNotifications.length === 0 ? (
                   <div className="px-4 py-8 text-center">
-                    <Bell size={32} className="mx-auto text-dark-500 mb-2" />
-                    <p className="text-dark-400 text-sm">Aucune notification</p>
-                    <p className="text-dark-500 text-xs mt-1">
+                    <Bell size={32} className="mx-auto text-gray-300 dark:text-dark-500 mb-2" />
+                    <p className="text-gray-500 dark:text-dark-400 text-sm">Aucune notification</p>
+                    <p className="text-gray-400 dark:text-dark-500 text-xs mt-1">
                       {isConnected ? 'Les nouvelles notifications apparaîtront ici' : 'Connexion en cours...'}
                     </p>
                   </div>
@@ -204,8 +212,8 @@ export function Header({ title }: HeaderProps) {
                     return (
                       <div
                         key={notification.id}
-                        className={`px-4 py-3 border-b border-dark-600 last:border-b-0 hover:bg-dark-600/50 transition-colors ${
-                          !isRead ? 'bg-dark-600/30' : ''
+                        className={`px-4 py-3 border-b border-light-200 dark:border-dark-600 last:border-b-0 hover:bg-light-100 dark:hover:bg-dark-600/50 transition-colors ${
+                          !isRead ? 'bg-oto-50 dark:bg-dark-600/30' : ''
                         }`}
                         onClick={() => setReadNotifications(prev => new Set([...prev, notification.id]))}
                       >
@@ -213,7 +221,7 @@ export function Header({ title }: HeaderProps) {
                           <Icon size={18} className={`flex-shrink-0 mt-0.5 ${colorClass}`} />
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center justify-between">
-                              <p className={`text-sm font-medium ${!isRead ? 'text-white' : 'text-dark-200'}`}>
+                              <p className={`text-sm font-medium ${!isRead ? 'text-gray-900 dark:text-white' : 'text-gray-600 dark:text-dark-200'}`}>
                                 {notification.title}
                               </p>
                               <button
@@ -221,20 +229,20 @@ export function Header({ title }: HeaderProps) {
                                   e.stopPropagation();
                                   removeNotification(notification.id);
                                 }}
-                                className="p-1 text-dark-500 hover:text-dark-300 transition-colors"
+                                className="p-1 text-gray-400 dark:text-dark-500 hover:text-gray-600 dark:hover:text-dark-300 transition-colors"
                               >
                                 <XCircle size={14} />
                               </button>
                             </div>
-                            <p className="text-xs text-dark-400 mt-0.5 line-clamp-2">
+                            <p className="text-xs text-gray-500 dark:text-dark-400 mt-0.5 line-clamp-2">
                               {notification.message}
                             </p>
-                            <p className="text-xs text-dark-500 mt-1">
+                            <p className="text-xs text-gray-400 dark:text-dark-500 mt-1">
                               {formatTime(notification.id)}
                             </p>
                           </div>
                           {!isRead && (
-                            <span className="w-2 h-2 bg-primary-500 rounded-full flex-shrink-0 mt-2" />
+                            <span className="w-2 h-2 bg-oto-500 rounded-full flex-shrink-0 mt-2" />
                           )}
                         </div>
                       </div>
@@ -245,8 +253,8 @@ export function Header({ title }: HeaderProps) {
 
               {/* Footer */}
               {allNotifications.length > 0 && (
-                <div className="px-4 py-2 border-t border-dark-600 bg-dark-750">
-                  <p className="text-xs text-dark-400 text-center">
+                <div className="px-4 py-2 border-t border-light-200 dark:border-dark-600 bg-light-50 dark:bg-dark-750">
+                  <p className="text-xs text-gray-500 dark:text-dark-400 text-center">
                     {allNotifications.length} notification{allNotifications.length > 1 ? 's' : ''}
                     {unreadCount > 0 && ` (${unreadCount} non lue${unreadCount > 1 ? 's' : ''})`}
                   </p>
@@ -260,25 +268,25 @@ export function Header({ title }: HeaderProps) {
         <div className="relative" ref={menuRef}>
           <button 
             onClick={() => setShowUserMenu(!showUserMenu)}
-            className="flex items-center gap-2 p-2 text-dark-300 hover:text-white hover:bg-dark-700 rounded-lg transition-colors"
+            className="flex items-center gap-2 p-2 text-gray-500 dark:text-dark-300 hover:text-gray-900 dark:hover:text-white hover:bg-light-200 dark:hover:bg-dark-700 rounded-lg transition-colors"
           >
-            <div className="w-8 h-8 bg-primary-600 rounded-full flex items-center justify-center">
+            <div className="w-8 h-8 bg-oto-500 rounded-full flex items-center justify-center">
               <User size={16} className="text-white" />
             </div>
-            <span className="text-sm font-medium">{user?.username || 'Utilisateur'}</span>
+            <span className="text-sm font-medium text-gray-700 dark:text-dark-200">{user?.username || 'Utilisateur'}</span>
             <ChevronDown size={16} className={`transition-transform ${showUserMenu ? 'rotate-180' : ''}`} />
           </button>
 
           {/* Dropdown menu */}
           {showUserMenu && (
-            <div className="absolute right-0 top-full mt-2 w-56 bg-dark-700 border border-dark-600 rounded-lg shadow-xl py-2 z-50">
-              <div className="px-4 py-2 border-b border-dark-600">
-                <p className="text-sm font-medium text-white">{user?.username}</p>
-                <p className="text-xs text-dark-400">{user?.email}</p>
+            <div className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-dark-700 border border-light-300 dark:border-dark-600 rounded-lg shadow-xl py-2 z-50">
+              <div className="px-4 py-2 border-b border-light-200 dark:border-dark-600">
+                <p className="text-sm font-medium text-gray-900 dark:text-white">{user?.username}</p>
+                <p className="text-xs text-gray-500 dark:text-dark-400">{user?.email}</p>
               </div>
               <button
                 onClick={handleLogout}
-                className="w-full flex items-center gap-3 px-4 py-2 text-sm text-dark-300 hover:text-white hover:bg-dark-600 transition-colors"
+                className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-600 dark:text-dark-300 hover:text-gray-900 dark:hover:text-white hover:bg-light-100 dark:hover:bg-dark-600 transition-colors"
               >
                 <LogOut size={16} />
                 Se déconnecter

@@ -8,3 +8,6 @@ export { Marketplace } from './Marketplace';
 export { Settings } from './Settings';
 export { Help } from './Help';
 export { Login } from './Login';
+export { VMConsolePage } from './VMConsole';
+export { VNCConsolePage } from './VNCConsole';
+export { AdminUsers } from './AdminUsers';

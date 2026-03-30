@@ -5,6 +5,7 @@
 Endpoints CRUD pour la gestion des templates OS.
 """
 
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -13,7 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.dependencies import CurrentUser, DbSession, Pagination
+from src.api.dependencies import CurrentUser, DbSession, Pagination, RequireAdmin
 from src.common.logging import get_logger
 from src.domain.models import OSTemplate, OSFamily, Architecture
 
@@ -38,6 +39,12 @@ class OSTemplateBase(BaseModel):
     min_cpu: int = Field(default=1, ge=1, description="CPU minimum requis")
     min_ram_gb: int = Field(default=2, ge=1, description="RAM minimum en GB")
     min_disk_gb: int = Field(default=20, ge=10, description="Disque minimum en GB")
+    install_locale: str = Field(
+        default="fr-FR",
+        max_length=10,
+        pattern="^[a-z]{2}-[A-Z]{2}$",
+        description="Langue d'installation (ex: fr-FR, en-US)"
+    )
 
 
 class OSTemplateCreate(OSTemplateBase):
@@ -54,6 +61,12 @@ class OSTemplateUpdate(BaseModel):
     min_cpu: int | None = Field(None, ge=1)
     min_ram_gb: int | None = Field(None, ge=1)
     min_disk_gb: int | None = Field(None, ge=10)
+    install_locale: str | None = Field(
+        None,
+        max_length=10,
+        pattern="^[a-z]{2}-[A-Z]{2}$",
+        description="Langue d'installation"
+    )
     unattend_template: str | None = None
     is_active: bool | None = None
 
@@ -62,9 +75,10 @@ class OSTemplateResponse(OSTemplateBase):
     """Schéma de réponse pour un template OS."""
 
     id: UUID
+    install_locale: str
     is_active: bool
-    created_at: str
-    updated_at: str | None
+    created_at: datetime
+    updated_at: datetime | None
 
     class Config:
         from_attributes = True
@@ -93,6 +107,7 @@ class OSTemplateList(BaseModel):
 async def list_templates(
     db: DbSession,
     pagination: Pagination,
+    current_user: CurrentUser,
     os_family: Annotated[str | None, Query(description="Filtrer par famille OS")] = None,
     is_active: Annotated[bool | None, Query(description="Filtrer par statut actif")] = None,
 ) -> OSTemplateList:
@@ -154,6 +169,7 @@ def _template_to_response(template: OSTemplate) -> OSTemplateResponse:
         min_cpu=template.min_cpu,
         min_ram_gb=template.min_ram_gb,
         min_disk_gb=template.min_disk_gb,
+        install_locale=template.install_locale,
         is_active=template.is_active,
         created_at=template.created_at.isoformat() if template.created_at else "",
         updated_at=template.updated_at.isoformat() if template.updated_at else None,
@@ -170,7 +186,7 @@ def _template_to_response(template: OSTemplate) -> OSTemplateResponse:
 async def create_template(
     db: DbSession,
     template: OSTemplateCreate,
-    # user: CurrentUser,
+    user: RequireAdmin,
 ) -> OSTemplateResponse:
     """Crée un nouveau template OS."""
     logger.info(
@@ -210,6 +226,7 @@ async def create_template(
         min_cpu=template.min_cpu,
         min_ram_gb=template.min_ram_gb,
         min_disk_gb=template.min_disk_gb,
+        install_locale=template.install_locale,
     )
     
     db.add(db_template)
@@ -229,6 +246,7 @@ async def create_template(
 async def get_template(
     db: DbSession,
     template_id: UUID,
+    current_user: CurrentUser,
 ) -> OSTemplateResponse:
     """Récupère un template OS par son ID."""
     logger.info("getting_template", template_id=str(template_id))
@@ -257,7 +275,7 @@ async def update_template(
     db: DbSession,
     template_id: UUID,
     template: OSTemplateUpdate,
-    # user: CurrentUser,
+    user: RequireAdmin,
 ) -> OSTemplateResponse:
     """Met à jour un template OS existant."""
     logger.info(
@@ -300,7 +318,7 @@ async def update_template(
 async def delete_template(
     db: DbSession,
     template_id: UUID,
-    # user: CurrentUser,
+    user: RequireAdmin,
 ) -> None:
     """Supprime un template OS."""
     logger.info("deleting_template", template_id=str(template_id))
@@ -346,6 +364,7 @@ async def delete_template(
 async def validate_template(
     db: DbSession,
     template_id: UUID,
+    current_user: CurrentUser,
 ) -> dict:
     """Valide un template OS (vérifie l'ISO, le template Jinja2, etc.)."""
     logger.info("validating_template", template_id=str(template_id))

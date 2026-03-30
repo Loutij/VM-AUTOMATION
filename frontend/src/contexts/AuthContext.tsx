@@ -9,6 +9,7 @@ interface User {
   full_name: string | null;
   is_active: boolean;
   is_superuser: boolean;
+  role: 'admin' | 'user';
 }
 
 interface AuthContextType {
@@ -76,11 +77,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               originalRequest.headers.Authorization = `Bearer ${access_token}`;
               return apiClient(originalRequest);
             } catch {
-              // Refresh échoué - déconnecter
+              // Refresh échoué - déconnecter et rediriger vers login
               logout();
+              window.location.href = '/login';
             }
           } else {
             logout();
+            window.location.href = '/login';
           }
         }
 
@@ -93,6 +96,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       apiClient.interceptors.response.eject(responseInterceptor);
     };
   }, []);
+
+  // Note: la redirection vers /login est gérée directement dans l'intercepteur 401
 
   // Vérifier si l'utilisateur est déjà connecté au démarrage
   useEffect(() => {
@@ -138,8 +143,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const userResponse = await apiClient.get<User>('/auth/me');
       setUser(userResponse.data);
     } catch (err: unknown) {
+      const errData = (err as { response?: { data?: any } })?.response?.data;
       const errorMessage =
-        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+        errData?.detail || errData?.message || errData?.error ||
         'Erreur de connexion';
       setError(errorMessage);
       throw new Error(errorMessage);

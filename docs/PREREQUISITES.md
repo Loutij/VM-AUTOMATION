@@ -95,23 +95,23 @@ python-multipart>=0.0.6
 pydantic-settings>=2.1.0
 ```
 
-### 2.4 Dépendances Frontend
+### 2.4 Dependances Frontend
 
 ```json
 {
   "dependencies": {
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-router-dom": "^6.21.0",
-    "axios": "^1.6.0",
-    "@tanstack/react-query": "^5.17.0",
-    "zustand": "^4.4.0"
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-router-dom": "^7.13.0",
+    "axios": "^1.13.0",
+    "@tanstack/react-query": "^5.90.0",
+    "lucide-react": "latest"
   },
   "devDependencies": {
-    "typescript": "^5.3.0",
-    "vite": "^5.0.0",
-    "tailwindcss": "^3.4.0",
-    "@types/react": "^18.2.0"
+    "typescript": "^5.9.0",
+    "vite": "^7.2.0",
+    "tailwindcss": "^4.1.0",
+    "@types/react": "^19.0.0"
   }
 }
 ```
@@ -125,7 +125,7 @@ pydantic-settings>=2.1.0
 | Service | Port | Direction | Notes |
 |---------|------|-----------|-------|
 | API Backend | 8000 | Inbound | FastAPI |
-| Frontend | 3000 | Inbound | Dev uniquement |
+| Frontend | 5173 | Inbound | Dev (Vite) |
 | Frontend | 80/443 | Inbound | Production |
 | PostgreSQL | 5432 | Backend → DB | Peut être local |
 | Redis | 6379 | Backend → Redis | Peut être local |
@@ -320,4 +320,4 @@ VMs possibles (estimation) :
 
 ---
 
-*Document créé le 2026-01-26*
+*Derniere mise a jour : 2026-03-05*

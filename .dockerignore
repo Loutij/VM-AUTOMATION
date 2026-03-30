@@ -1,0 +1,17 @@
+node_modules
+frontend/node_modules
+.git
+__pycache__
+*.pyc
+venv
+.venv
+.env
+*.tar
+*.iso
+*.vhdx
+*.vhd
+*.log
+.mypy_cache
+.pytest_cache
+htmlcov
+.coverage

@@ -12,3 +12,8 @@ export { Switch } from './Switch';
 export { ProgressBar, ProgressTimeline, ProgressCircle } from './Progress';
 export type { ProgressStep, StepStatus } from './Progress';
 export { Skeleton, SkeletonCard, SkeletonTable } from './Skeleton';
+export { ThemeToggle, ThemeDropdown } from './ThemeToggle';
+export { CopyButton } from './CopyButton';
+export { Tooltip } from './Tooltip';
+export { CommandPalette } from './CommandPalette';
+export { ErrorBoundary } from '../ErrorBoundary';

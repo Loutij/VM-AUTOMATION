@@ -6,17 +6,75 @@ Routes pour recevoir les callbacks des VMs après installation.
 Permet aux VMs de signaler la fin de leur installation.
 """
 
+import hashlib
+import hmac
 from datetime import datetime, timezone
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy import select
 
+from src.api.dependencies import CurrentUser
+from src.common.config import settings
+from src.common.database import db_session
 from src.common.logging import get_logger
+from src.domain.models import Deployment, DeploymentStatus
+from src.api.websocket import EventType, emit_deployment_event
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/callbacks", tags=["Callbacks"])
+
+
+def generate_callback_token(vm_name: str, secret: str) -> str:
+    """
+    Generate an HMAC-SHA256 callback token for a VM.
+
+    This token should be embedded in VM installation scripts so the VM
+    can authenticate its callbacks without knowing the raw API secret.
+    """
+    return hmac.new(secret.encode(), vm_name.encode(), hashlib.sha256).hexdigest()
+
+
+async def verify_callback_token(
+    x_callback_token: Annotated[str | None, Header()] = None,
+    x_vm_name: Annotated[str | None, Header()] = None,
+) -> str:
+    """
+    Vérifie le token HMAC pour les callbacks de VMs.
+    Le token est un HMAC-SHA256 du hostname signé avec la clé API secrète.
+    Accepte aussi le token brut (clé API) pour compatibilité (deprecated).
+    """
+    if x_callback_token is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing X-Callback-Token header",
+        )
+
+    secret = settings.api_secret_key.get_secret_value()
+
+    # Preferred: verify HMAC-SHA256 token (requires X-VM-Name header)
+    if x_vm_name:
+        expected = generate_callback_token(x_vm_name, secret)
+        if hmac.compare_digest(x_callback_token, expected):
+            return x_callback_token
+
+    # Backward compatibility: accept raw secret (deprecated)
+    if hmac.compare_digest(x_callback_token, secret):
+        logger.warning(
+            "callback_raw_secret_deprecated",
+            message="Callback authenticated with raw API secret. "
+            "Migrate to HMAC tokens using generate_callback_token(). "
+            "Raw secret support will be removed in a future release.",
+        )
+        return x_callback_token
+
+    # Otherwise reject
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid callback token",
+    )
 
 
 # =============================================================================
@@ -104,13 +162,102 @@ async def process_callback(callback_data: VMCallbackRequest) -> None:
         ip=callback_data.ip,
     )
     
-    # Si un deployment_id est fourni, mettre à jour le déploiement
-    if callback_data.deployment_id:
-        # TODO: Implémenter la mise à jour du déploiement en DB
-        logger.info(
-            "callback_for_deployment",
-            deployment_id=callback_data.deployment_id,
-            status=callback_data.status,
+    # Mettre à jour le déploiement en DB si identifiable
+    deployment = None
+    try:
+        async with db_session() as session:
+            # Chercher par deployment_id si fourni, sinon par vm_name
+            if callback_data.deployment_id:
+                result = await session.execute(
+                    select(Deployment).where(
+                        Deployment.id == callback_data.deployment_id
+                    )
+                )
+                deployment = result.scalar_one_or_none()
+
+            if not deployment:
+                # Fallback: chercher le déploiement actif le plus récent pour ce hostname
+                result = await session.execute(
+                    select(Deployment)
+                    .where(Deployment.vm_name == callback_data.hostname)
+                    .where(
+                        Deployment.status.in_([
+                            DeploymentStatus.IN_PROGRESS,
+                            DeploymentStatus.INSTALLING,
+                            DeploymentStatus.POST_INSTALL,
+                            DeploymentStatus.INSTALLING_SOFTWARE,
+                        ])
+                    )
+                    .order_by(Deployment.created_at.desc())
+                    .limit(1)
+                )
+                deployment = result.scalar_one_or_none()
+
+            if deployment:
+                # Mapper le statut du callback vers DeploymentStatus
+                status_map = {
+                    "completed": DeploymentStatus.COMPLETED,
+                    "failed": DeploymentStatus.FAILED,
+                    "progress": DeploymentStatus.IN_PROGRESS,
+                }
+                new_status = status_map.get(callback_data.status)
+
+                if new_status:
+                    deployment.status = new_status
+
+                if callback_data.step:
+                    deployment.current_step = callback_data.step
+
+                if callback_data.progress is not None:
+                    deployment.progress = callback_data.progress
+
+                if callback_data.error:
+                    deployment.error_message = callback_data.error
+
+                if callback_data.status == "completed":
+                    deployment.completed_at = datetime.now(timezone.utc)
+
+                await session.commit()
+
+                logger.info(
+                    "deployment_updated_from_callback",
+                    deployment_id=str(deployment.id),
+                    new_status=callback_data.status,
+                )
+
+                # Emettre un evenement WebSocket
+                event_type_map = {
+                    "completed": EventType.DEPLOYMENT_COMPLETED,
+                    "failed": EventType.DEPLOYMENT_FAILED,
+                    "progress": EventType.DEPLOYMENT_PROGRESS,
+                }
+                ws_event_type = event_type_map.get(
+                    callback_data.status, EventType.DEPLOYMENT_PROGRESS
+                )
+                await emit_deployment_event(
+                    deployment_id=str(deployment.id),
+                    event_type=ws_event_type,
+                    data={
+                        "vm_name": callback_data.hostname,
+                        "status": callback_data.status,
+                        "step": callback_data.step,
+                        "progress": callback_data.progress,
+                        "message": callback_data.message,
+                        "ip": callback_data.ip,
+                    },
+                )
+            else:
+                logger.warning(
+                    "callback_no_matching_deployment",
+                    hostname=callback_data.hostname,
+                    deployment_id=callback_data.deployment_id,
+                )
+    except Exception as e:
+        logger.error(
+            "callback_processing_error",
+            hostname=callback_data.hostname,
+            error=str(e),
+            exc_info=True,
         )
 
 
@@ -123,6 +270,7 @@ async def process_callback(callback_data: VMCallbackRequest) -> None:
 async def receive_vm_callback(
     callback: VMCallbackRequest,
     background_tasks: BackgroundTasks,
+    token: str = Depends(verify_callback_token),
 ) -> CallbackResponse:
     """
     Reçoit un callback d'une VM après installation.
@@ -158,7 +306,7 @@ async def receive_vm_callback(
 
 
 @router.get("/vm/{hostname}")
-async def get_vm_callbacks(hostname: str) -> dict[str, Any]:
+async def get_vm_callbacks(hostname: str, current_user: CurrentUser) -> dict[str, Any]:
     """
     Récupère tous les callbacks reçus pour un hostname.
     
@@ -178,7 +326,7 @@ async def get_vm_callbacks(hostname: str) -> dict[str, Any]:
 
 
 @router.delete("/vm/{hostname}")
-async def delete_vm_callbacks(hostname: str) -> dict[str, Any]:
+async def delete_vm_callbacks(hostname: str, current_user: CurrentUser) -> dict[str, Any]:
     """
     Supprime les callbacks d'un hostname.
     
@@ -199,7 +347,7 @@ async def delete_vm_callbacks(hostname: str) -> dict[str, Any]:
 
 
 @router.get("/pending")
-async def list_pending_callbacks() -> dict[str, Any]:
+async def list_pending_callbacks(current_user: CurrentUser) -> dict[str, Any]:
     """
     Liste tous les hostnames avec des callbacks en attente.
     
@@ -221,6 +369,7 @@ async def list_pending_callbacks() -> dict[str, Any]:
 @router.post("/vm/{hostname}/complete")
 async def mark_installation_complete(
     hostname: str,
+    current_user: CurrentUser,
     deployment_id: str | None = None,
 ) -> dict[str, Any]:
     """

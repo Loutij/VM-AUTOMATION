@@ -1,0 +1,29 @@
+# =============================================================================
+# VM Automation - Service systemd (démarrage au boot)
+# =============================================================================
+# Installation:
+#   sudo cp config/vm-automation.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable vm-automation
+#   sudo systemctl start vm-automation   # optionnel, pour démarrer tout de suite
+# =============================================================================
+
+[Unit]
+Description=VM Automation - API, Frontend et Celery
+Documentation=file:///home/otoroot/VM-AUTOMATION/README.md
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+User=otoroot
+Group=otoroot
+WorkingDirectory=/home/otoroot/VM-AUTOMATION
+ExecStart=/home/otoroot/VM-AUTOMATION/scripts/start_services.sh start
+ExecStop=/home/otoroot/VM-AUTOMATION/scripts/start_services.sh stop
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

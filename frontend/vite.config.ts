@@ -5,12 +5,21 @@ import path from 'path'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  build: {
+    target: 'esnext', // Required for @novnc/novnc (top-level await)
+  },
+  optimizeDeps: {
+    esbuildOptions: {
+      target: 'esnext',
+    },
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
     },
   },
   server: {
+    host: '0.0.0.0', // Écoute sur toutes les interfaces (accès LAN)
     port: 3000,
     proxy: {
       '/api/v1': {

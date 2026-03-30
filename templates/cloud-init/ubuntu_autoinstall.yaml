@@ -56,7 +56,7 @@ autoinstall:
   # ==========================================================================
   identity:
     hostname: {{ hostname | default('ubuntu-vm') }}
-    username: {{ username | default('admin') }}
+    username: {{ username | default('otoroot') }}
     password: {{ user_password_hash | default('$6$rounds=4096$xyz$hashed') }}
   
   # ==========================================================================
@@ -119,8 +119,8 @@ autoinstall:
       - systemctl start qemu-guest-agent
       
       # Configurer sudo sans mot de passe pour l'utilisateur
-      - echo "{{ username | default('admin') }} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/{{ username | default('admin') }}
-      - chmod 440 /etc/sudoers.d/{{ username | default('admin') }}
+      - echo "{{ username | default('otoroot') }} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/{{ username | default('otoroot') }}
+      - chmod 440 /etc/sudoers.d/{{ username | default('otoroot') }}
       
       # Configuration SSH sécurisée
       - sed -i 's/#PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config

@@ -1,0 +1,343 @@
+<?xml version="1.0" encoding="utf-8"?>
+<unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+    <!-- =================================================================== -->
+    <!-- Windows Server 2025 - Unattended Installation Template              -->
+    <!-- Variables Jinja2: {{ variable_name }}                               -->
+    <!-- =================================================================== -->
+
+    <!-- ================================================================== -->
+    <!-- Phase 1: windowsPE - Configuration initiale du disque              -->
+    <!-- ================================================================== -->
+    <settings pass="windowsPE">
+        <component name="Microsoft-Windows-International-Core-WinPE"
+                   processorArchitecture="amd64"
+                   publicKeyToken="31bf3856ad364e35"
+                   language="neutral"
+                   versionScope="nonSxS">
+            <SetupUILanguage>
+                <UILanguage>{{ locale | default('fr-FR') }}</UILanguage>
+            </SetupUILanguage>
+            <InputLocale>{{ keyboard_layout | default('040c:0000040c') }}</InputLocale>
+            <SystemLocale>{{ locale | default('fr-FR') }}</SystemLocale>
+            <UILanguage>{{ locale | default('fr-FR') }}</UILanguage>
+            <UserLocale>{{ locale | default('fr-FR') }}</UserLocale>
+        </component>
+
+        <component name="Microsoft-Windows-Setup"
+                   processorArchitecture="amd64"
+                   publicKeyToken="31bf3856ad364e35"
+                   language="neutral"
+                   versionScope="nonSxS">
+
+            <!-- Configuration du disque -->
+            <DiskConfiguration>
+                <Disk wcm:action="add">
+                    <DiskID>0</DiskID>
+                    <WillWipeDisk>true</WillWipeDisk>
+                    <CreatePartitions>
+                        <!-- Partition EFI -->
+                        <CreatePartition wcm:action="add">
+                            <Order>1</Order>
+                            <Size>500</Size>
+                            <Type>EFI</Type>
+                        </CreatePartition>
+                        <!-- Partition MSR -->
+                        <CreatePartition wcm:action="add">
+                            <Order>2</Order>
+                            <Size>128</Size>
+                            <Type>MSR</Type>
+                        </CreatePartition>
+                        <!-- Partition Windows -->
+                        <CreatePartition wcm:action="add">
+                            <Order>3</Order>
+                            <Extend>true</Extend>
+                            <Type>Primary</Type>
+                        </CreatePartition>
+                    </CreatePartitions>
+                    <ModifyPartitions>
+                        <ModifyPartition wcm:action="add">
+                            <Order>1</Order>
+                            <PartitionID>1</PartitionID>
+                            <Format>FAT32</Format>
+                            <Label>System</Label>
+                        </ModifyPartition>
+                        <ModifyPartition wcm:action="add">
+                            <Order>2</Order>
+                            <PartitionID>2</PartitionID>
+                        </ModifyPartition>
+                        <ModifyPartition wcm:action="add">
+                            <Order>3</Order>
+                            <PartitionID>3</PartitionID>
+                            <Format>NTFS</Format>
+                            <Label>Windows</Label>
+                            <Letter>C</Letter>
+                        </ModifyPartition>
+                    </ModifyPartitions>
+                </Disk>
+            </DiskConfiguration>
+
+            <!-- Sélection de l'image à installer -->
+            <ImageInstall>
+                <OSImage>
+                    <InstallFrom>
+                        <MetaData wcm:action="add">
+                            <Key>/IMAGE/NAME</Key>
+                            <Value>{{ windows_edition | default('Windows Server 2025 SERVERSTANDARD') }}</Value>
+                        </MetaData>
+                    </InstallFrom>
+                    <InstallTo>
+                        <DiskID>0</DiskID>
+                        <PartitionID>3</PartitionID>
+                    </InstallTo>
+                </OSImage>
+            </ImageInstall>
+
+            <!-- Clé produit (optionnel) -->
+            {% if product_key %}
+            <UserData>
+                <ProductKey>
+                    <Key>{{ product_key }}</Key>
+                </ProductKey>
+                <AcceptEula>true</AcceptEula>
+            </UserData>
+            {% else %}
+            <UserData>
+                <AcceptEula>true</AcceptEula>
+            </UserData>
+            {% endif %}
+        </component>
+    </settings>
+
+    <!-- ================================================================== -->
+    <!-- Phase 4: specialize - Configuration réseau et machine              -->
+    <!-- ================================================================== -->
+    <settings pass="specialize">
+        <component name="Microsoft-Windows-Shell-Setup"
+                   processorArchitecture="amd64"
+                   publicKeyToken="31bf3856ad364e35"
+                   language="neutral"
+                   versionScope="nonSxS">
+            <ComputerName>{{ hostname | default('WIN-VM') }}</ComputerName>
+            <TimeZone>{{ timezone | default('Romance Standard Time') }}</TimeZone>
+        </component>
+
+        <component name="Microsoft-Windows-TerminalServices-LocalSessionManager"
+                   processorArchitecture="amd64"
+                   publicKeyToken="31bf3856ad364e35"
+                   language="neutral"
+                   versionScope="nonSxS">
+            <fDenyTSConnections>false</fDenyTSConnections>
+        </component>
+
+        <component name="Networking-MPSSVC-Svc"
+                   processorArchitecture="amd64"
+                   publicKeyToken="31bf3856ad364e35"
+                   language="neutral"
+                   versionScope="nonSxS">
+            <FirewallGroups>
+                <FirewallGroup wcm:action="add" wcm:keyValue="RemoteDesktop">
+                    <Active>true</Active>
+                    <Group>Remote Desktop</Group>
+                    <Profile>all</Profile>
+                </FirewallGroup>
+                <FirewallGroup wcm:action="add" wcm:keyValue="BureauADistance">
+                    <Active>true</Active>
+                    <Group>Bureau à distance</Group>
+                    <Profile>all</Profile>
+                </FirewallGroup>
+            </FirewallGroups>
+        </component>
+
+        {% if static_ip %}
+        <component name="Microsoft-Windows-TCPIP"
+                   processorArchitecture="amd64"
+                   publicKeyToken="31bf3856ad364e35"
+                   language="neutral"
+                   versionScope="nonSxS">
+            <Interfaces>
+                <Interface wcm:action="add">
+                    <Identifier>Ethernet</Identifier>
+                    <Ipv4Settings>
+                        <DhcpEnabled>false</DhcpEnabled>
+                    </Ipv4Settings>
+                    <UnicastIpAddresses>
+                        <IpAddress wcm:action="add" wcm:keyValue="1">{{ ip_address }}/{{ subnet_prefix | default('24') }}</IpAddress>
+                    </UnicastIpAddresses>
+                    <Routes>
+                        <Route wcm:action="add">
+                            <Identifier>0</Identifier>
+                            <NextHopAddress>{{ gateway }}</NextHopAddress>
+                            <Prefix>0.0.0.0/0</Prefix>
+                        </Route>
+                    </Routes>
+                </Interface>
+            </Interfaces>
+        </component>
+        <component name="Microsoft-Windows-DNS-Client"
+                   processorArchitecture="amd64"
+                   publicKeyToken="31bf3856ad364e35"
+                   language="neutral"
+                   versionScope="nonSxS">
+            <Interfaces>
+                <Interface wcm:action="add">
+                    <Identifier>Ethernet</Identifier>
+                    <DNSServerSearchOrder>
+                        <IpAddress wcm:action="add" wcm:keyValue="1">{{ dns_server_1 | default('8.8.8.8') }}</IpAddress>
+                        {% if dns_server_2 %}
+                        <IpAddress wcm:action="add" wcm:keyValue="2">{{ dns_server_2 }}</IpAddress>
+                        {% endif %}
+                    </DNSServerSearchOrder>
+                </Interface>
+            </Interfaces>
+        </component>
+        {% endif %}
+    </settings>
+
+    <!-- ================================================================== -->
+    <!-- Phase 7: oobeSystem - Configuration utilisateur et OOBE            -->
+    <!-- ================================================================== -->
+    <settings pass="oobeSystem">
+        <component name="Microsoft-Windows-Shell-Setup"
+                   processorArchitecture="amd64"
+                   publicKeyToken="31bf3856ad364e35"
+                   language="neutral"
+                   versionScope="nonSxS">
+
+            <OOBE>
+                <HideEULAPage>true</HideEULAPage>
+                <HideLocalAccountScreen>true</HideLocalAccountScreen>
+                <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
+                <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+                <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+                <NetworkLocation>Work</NetworkLocation>
+                <ProtectYourPC>3</ProtectYourPC>
+                <SkipMachineOOBE>true</SkipMachineOOBE>
+                <SkipUserOOBE>true</SkipUserOOBE>
+            </OOBE>
+
+            <UserAccounts>
+                <AdministratorPassword>
+                    <Value>{{ admin_password | default('tooroto') }}</Value>
+                    <PlainText>true</PlainText>
+                </AdministratorPassword>
+                <LocalAccounts>
+                    <LocalAccount wcm:action="add">
+                        <Password>
+                            <Value>{{ admin_password | default('tooroto') }}</Value>
+                            <PlainText>true</PlainText>
+                        </Password>
+                        <Description>Admin account</Description>
+                        <DisplayName>{{ admin_username | default('otoroot') }}</DisplayName>
+                        <Group>Administrators</Group>
+                        <Name>{{ admin_username | default('otoroot') }}</Name>
+                    </LocalAccount>
+                    {% if local_users %}
+                    {% for user in local_users %}
+                    <LocalAccount wcm:action="add">
+                        <Password>
+                            <Value>{{ user.password }}</Value>
+                            <PlainText>true</PlainText>
+                        </Password>
+                        <Description>{{ user.description | default('') }}</Description>
+                        <DisplayName>{{ user.display_name | default(user.name) }}</DisplayName>
+                        <Group>{{ user.group | default('Administrators') }}</Group>
+                        <Name>{{ user.name }}</Name>
+                    </LocalAccount>
+                    {% endfor %}
+                    {% endif %}
+                </LocalAccounts>
+            </UserAccounts>
+
+            <AutoLogon>
+                <Password>
+                    <Value>{{ admin_password | default('tooroto') }}</Value>
+                    <PlainText>true</PlainText>
+                </Password>
+                <Enabled>true</Enabled>
+                <LogonCount>1</LogonCount>
+                <Username>{{ admin_username | default('otoroot') }}</Username>
+            </AutoLogon>
+
+            <!-- Script de premier démarrage -->
+            <FirstLogonCommands>
+                <!-- Activer le built-in Administrateur + créer le compte otoroot -->
+                <SynchronousCommand wcm:action="add">
+                    <Order>1</Order>
+                    <CommandLine>cmd /c net user Administrateur "{{ admin_password | default('tooroto') }}" /active:yes &amp; net user Administrator "{{ admin_password | default('tooroto') }}" /active:yes</CommandLine>
+                    <Description>Set built-in admin passwords</Description>
+                </SynchronousCommand>
+                <!-- Activer WinRM pour l'administration à distance -->
+                <SynchronousCommand wcm:action="add">
+                    <Order>2</Order>
+                    <CommandLine>powershell -Command "Enable-PSRemoting -Force -SkipNetworkProfileCheck"</CommandLine>
+                    <Description>Enable PowerShell Remoting</Description>
+                </SynchronousCommand>
+                <SynchronousCommand wcm:action="add">
+                    <Order>3</Order>
+                    <CommandLine>powershell -Command "Set-Item WSMan:\localhost\Client\TrustedHosts -Value '*' -Force"</CommandLine>
+                    <Description>Configure WinRM TrustedHosts</Description>
+                </SynchronousCommand>
+                <SynchronousCommand wcm:action="add">
+                    <Order>4</Order>
+                    <CommandLine>powershell -Command "winrm quickconfig -quiet"</CommandLine>
+                    <Description>Quick configure WinRM</Description>
+                </SynchronousCommand>
+                <!-- Activer RDP explicitement (registre + firewall FR/EN + désactiver NLA) -->
+                <SynchronousCommand wcm:action="add">
+                    <Order>5</Order>
+                    <CommandLine>powershell -Command "Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0; Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name 'UserAuthentication' -Value 0; Enable-NetFirewallRule -DisplayGroup 'Remote Desktop' -ErrorAction SilentlyContinue; Enable-NetFirewallRule -DisplayGroup 'Bureau à distance' -ErrorAction SilentlyContinue"</CommandLine>
+                    <Description>Enable Remote Desktop with firewall rules</Description>
+                </SynchronousCommand>
+                <!-- Configurer le profil réseau sur Privé pour activer la découverte -->
+                <SynchronousCommand wcm:action="add">
+                    <Order>6</Order>
+                    <CommandLine>powershell -Command "Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private"</CommandLine>
+                    <Description>Set network profile to Private</Description>
+                </SynchronousCommand>
+                <!-- Activer la découverte réseau (FR + EN) -->
+                <SynchronousCommand wcm:action="add">
+                    <Order>7</Order>
+                    <CommandLine>powershell -Command "netsh advfirewall firewall set rule group='Network Discovery' new enable=Yes 2>$null; netsh advfirewall firewall set rule group='Découverte de réseau' new enable=Yes 2>$null"</CommandLine>
+                    <Description>Enable Network Discovery</Description>
+                </SynchronousCommand>
+                <!-- Activer le partage de fichiers et imprimantes (FR + EN) -->
+                <SynchronousCommand wcm:action="add">
+                    <Order>8</Order>
+                    <CommandLine>powershell -Command "netsh advfirewall firewall set rule group='File and Printer Sharing' new enable=Yes 2>$null; netsh advfirewall firewall set rule group='Partage de fichiers et d''imprimantes' new enable=Yes 2>$null"</CommandLine>
+                    <Description>Enable File and Printer Sharing</Description>
+                </SynchronousCommand>
+                {% if join_domain %}
+                <SynchronousCommand wcm:action="add">
+                    <Order>9</Order>
+                    <CommandLine>powershell -Command "Add-Computer -DomainName '{{ domain_name }}' -Credential (New-Object PSCredential('{{ domain_user }}', (ConvertTo-SecureString '{{ domain_password }}' -AsPlainText -Force))) -OUPath '{{ domain_ou | default('') }}' -Restart"</CommandLine>
+                    <Description>Join Active Directory Domain</Description>
+                </SynchronousCommand>
+                {% endif %}
+                {% for cmd in post_install_commands | default([]) %}
+                <SynchronousCommand wcm:action="add">
+                    <Order>{{ loop.index + 20 }}</Order>
+                    <CommandLine>{{ cmd.command }}</CommandLine>
+                    <Description>{{ cmd.description | default('Custom command') }}</Description>
+                </SynchronousCommand>
+                {% endfor %}
+                <!-- Signal VM-Automation que le setup est terminé -->
+                <SynchronousCommand wcm:action="add">
+                    <Order>99</Order>
+                    <CommandLine>cmd /c mkdir C:\VM-Automation 2>nul &amp; echo ready > C:\VM-Automation\ready.flag</CommandLine>
+                    <Description>Create VM-Automation ready flag</Description>
+                </SynchronousCommand>
+            </FirstLogonCommands>
+        </component>
+
+        <component name="Microsoft-Windows-International-Core"
+                   processorArchitecture="amd64"
+                   publicKeyToken="31bf3856ad364e35"
+                   language="neutral"
+                   versionScope="nonSxS">
+            <InputLocale>{{ keyboard_layout | default('040c:0000040c') }}</InputLocale>
+            <SystemLocale>{{ locale | default('fr-FR') }}</SystemLocale>
+            <UILanguage>{{ locale | default('fr-FR') }}</UILanguage>
+            <UserLocale>{{ locale | default('fr-FR') }}</UserLocale>
+        </component>
+    </settings>
+</unattend>

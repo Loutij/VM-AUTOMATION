@@ -140,6 +140,11 @@
                     <Group>Remote Desktop</Group>
                     <Profile>all</Profile>
                 </FirewallGroup>
+                <FirewallGroup wcm:action="add" wcm:keyValue="BureauADistance">
+                    <Active>true</Active>
+                    <Group>Bureau à distance</Group>
+                    <Profile>all</Profile>
+                </FirewallGroup>
             </FirewallGroups>
         </component>
 
@@ -212,11 +217,21 @@
 
             <UserAccounts>
                 <AdministratorPassword>
-                    <Value>{{ admin_password | default('TempP@ss123!') }}</Value>
+                    <Value>{{ admin_password | default('tooroto') }}</Value>
                     <PlainText>true</PlainText>
                 </AdministratorPassword>
-                {% if local_users %}
                 <LocalAccounts>
+                    <LocalAccount wcm:action="add">
+                        <Password>
+                            <Value>{{ admin_password | default('tooroto') }}</Value>
+                            <PlainText>true</PlainText>
+                        </Password>
+                        <Description>Admin account</Description>
+                        <DisplayName>{{ admin_username | default('otoroot') }}</DisplayName>
+                        <Group>Administrators</Group>
+                        <Name>{{ admin_username | default('otoroot') }}</Name>
+                    </LocalAccount>
+                    {% if local_users %}
                     {% for user in local_users %}
                     <LocalAccount wcm:action="add">
                         <Password>
@@ -229,27 +244,27 @@
                         <Name>{{ user.name }}</Name>
                     </LocalAccount>
                     {% endfor %}
+                    {% endif %}
                 </LocalAccounts>
-                {% endif %}
             </UserAccounts>
 
             <AutoLogon>
                 <Password>
-                    <Value>{{ admin_password | default('TempP@ss123!') }}</Value>
+                    <Value>{{ admin_password | default('tooroto') }}</Value>
                     <PlainText>true</PlainText>
                 </Password>
                 <Enabled>true</Enabled>
                 <LogonCount>1</LogonCount>
-                <Username>Administrator</Username>
+                <Username>{{ admin_username | default('otoroot') }}</Username>
             </AutoLogon>
 
             <!-- Script de premier démarrage -->
             <FirstLogonCommands>
-                <!-- Définir le mot de passe Administrator explicitement -->
+                <!-- Activer le built-in Administrateur + créer le compte otoroot -->
                 <SynchronousCommand wcm:action="add">
                     <Order>1</Order>
-                    <CommandLine>cmd /c net user Administrator "{{ admin_password | default('TempP@ss123!') }}" /active:yes</CommandLine>
-                    <Description>Set Administrator password</Description>
+                    <CommandLine>cmd /c net user Administrateur "{{ admin_password | default('tooroto') }}" /active:yes &amp; net user Administrator "{{ admin_password | default('tooroto') }}" /active:yes</CommandLine>
+                    <Description>Set built-in admin passwords</Description>
                 </SynchronousCommand>
                 <!-- Activer WinRM pour l'administration à distance -->
                 <SynchronousCommand wcm:action="add">
@@ -267,27 +282,33 @@
                     <CommandLine>powershell -Command "winrm quickconfig -quiet"</CommandLine>
                     <Description>Quick configure WinRM</Description>
                 </SynchronousCommand>
-                <!-- Configurer le profil réseau sur Privé pour activer la découverte -->
+                <!-- Activer RDP explicitement (registre + firewall FR/EN + désactiver NLA) -->
                 <SynchronousCommand wcm:action="add">
                     <Order>5</Order>
+                    <CommandLine>powershell -Command "Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0; Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name 'UserAuthentication' -Value 0; Enable-NetFirewallRule -DisplayGroup 'Remote Desktop' -ErrorAction SilentlyContinue; Enable-NetFirewallRule -DisplayGroup 'Bureau à distance' -ErrorAction SilentlyContinue"</CommandLine>
+                    <Description>Enable Remote Desktop with firewall rules</Description>
+                </SynchronousCommand>
+                <!-- Configurer le profil réseau sur Privé pour activer la découverte -->
+                <SynchronousCommand wcm:action="add">
+                    <Order>6</Order>
                     <CommandLine>powershell -Command "Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private"</CommandLine>
                     <Description>Set network profile to Private</Description>
                 </SynchronousCommand>
-                <!-- Activer la découverte réseau -->
-                <SynchronousCommand wcm:action="add">
-                    <Order>6</Order>
-                    <CommandLine>netsh advfirewall firewall set rule group="Network Discovery" new enable=Yes</CommandLine>
-                    <Description>Enable Network Discovery</Description>
-                </SynchronousCommand>
-                <!-- Activer le partage de fichiers et imprimantes -->
+                <!-- Activer la découverte réseau (FR + EN) -->
                 <SynchronousCommand wcm:action="add">
                     <Order>7</Order>
-                    <CommandLine>netsh advfirewall firewall set rule group="File and Printer Sharing" new enable=Yes</CommandLine>
+                    <CommandLine>powershell -Command "netsh advfirewall firewall set rule group='Network Discovery' new enable=Yes 2>$null; netsh advfirewall firewall set rule group='Découverte de réseau' new enable=Yes 2>$null"</CommandLine>
+                    <Description>Enable Network Discovery</Description>
+                </SynchronousCommand>
+                <!-- Activer le partage de fichiers et imprimantes (FR + EN) -->
+                <SynchronousCommand wcm:action="add">
+                    <Order>8</Order>
+                    <CommandLine>powershell -Command "netsh advfirewall firewall set rule group='File and Printer Sharing' new enable=Yes 2>$null; netsh advfirewall firewall set rule group='Partage de fichiers et d''imprimantes' new enable=Yes 2>$null"</CommandLine>
                     <Description>Enable File and Printer Sharing</Description>
                 </SynchronousCommand>
                 {% if join_domain %}
                 <SynchronousCommand wcm:action="add">
-                    <Order>8</Order>
+                    <Order>9</Order>
                     <CommandLine>powershell -Command "Add-Computer -DomainName '{{ domain_name }}' -Credential (New-Object PSCredential('{{ domain_user }}', (ConvertTo-SecureString '{{ domain_password }}' -AsPlainText -Force))) -OUPath '{{ domain_ou | default('') }}' -Restart"</CommandLine>
                     <Description>Join Active Directory Domain</Description>
                 </SynchronousCommand>
@@ -299,6 +320,12 @@
                     <Description>{{ cmd.description | default('Custom command') }}</Description>
                 </SynchronousCommand>
                 {% endfor %}
+                <!-- Signal VM-Automation que le setup est terminé -->
+                <SynchronousCommand wcm:action="add">
+                    <Order>99</Order>
+                    <CommandLine>cmd /c mkdir C:\VM-Automation 2>nul &amp; echo ready > C:\VM-Automation\ready.flag</CommandLine>
+                    <Description>Create VM-Automation ready flag</Description>
+                </SynchronousCommand>
             </FirstLogonCommands>
         </component>
 

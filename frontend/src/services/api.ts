@@ -13,11 +13,18 @@ import type {
   VirtualSwitch,
   CreateSwitchRequest,
   PhysicalAdapter,
+  StorageLocation,
   SoftwarePackage,
   SoftwareCategory_Info,
   SoftwareProfile,
   SoftwareList,
   ProfileList,
+  AdminUser,
+  CreateUserRequest,
+  UpdateUserRequest,
+  ResetPasswordRequest,
+  AuditLogList,
+  SoftwareInventory,
 } from '../types';
 
 // Configuration de base
@@ -29,35 +36,30 @@ const apiClient: AxiosInstance = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 30000,
+  timeout: 60000,
 });
 
 // Intercepteur pour les erreurs
 apiClient.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
-    const message = (error.response?.data as { detail?: string })?.detail || error.message;
+    const errorData = error.response?.data as any;
+    const message = errorData?.detail || errorData?.message || errorData?.error || error.message;
     console.error('API Error:', message);
+
+    // Token expiré ou invalide → forcer reconnexion
+    if (error.response?.status === 401) {
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('refresh_token');
+      // Redirect vers login si on n'y est pas déjà
+      if (!window.location.pathname.includes('/login')) {
+        window.location.href = '/login';
+      }
+    }
+
     return Promise.reject(error);
   }
 );
-
-// Helper pour retry avec backoff (exporté pour usage externe)
-export async function withRetry<T>(
-  fn: () => Promise<T>,
-  retries = 3,
-  delay = 1000
-): Promise<T> {
-  try {
-    return await fn();
-  } catch (error) {
-    if (retries > 0) {
-      await new Promise((resolve) => setTimeout(resolve, delay));
-      return withRetry(fn, retries - 1, Math.min(delay * 2, 30000));
-    }
-    throw error;
-  }
-}
 
 // ============================================
 // Health Check
@@ -100,12 +102,18 @@ export interface ISOInfo {
 interface HypervisorBackend {
   id: string;
   name: string;
-  hypervisor_type: string;
+  type: string;
   host: string;
   port: number;
   use_ssl: boolean;
   username: string;
   is_active: boolean;
+  vm_count: number;
+  // VMware-specific
+  datacenter?: string;
+  cluster?: string;
+  default_datastore?: string;
+  default_resource_pool?: string;
   created_at: string;
   updated_at: string | null;
 }
@@ -115,11 +123,17 @@ function mapHypervisor(h: HypervisorBackend): Hypervisor {
   return {
     id: h.id,
     name: h.name,
-    type: h.hypervisor_type as 'hyperv' | 'vmware',
+    type: (h.type || 'hyperv') as 'hyperv' | 'vmware',
     host: h.host,
     port: h.port,
     username: h.username,
-    is_connected: h.is_active,
+    is_active: h.is_active,
+    vm_count: h.vm_count ?? 0,
+    // VMware-specific
+    datacenter: h.datacenter,
+    cluster: h.cluster,
+    default_datastore: h.default_datastore,
+    default_resource_pool: h.default_resource_pool,
     created_at: h.created_at,
     updated_at: h.updated_at || h.created_at,
   };
@@ -137,15 +151,23 @@ export const hypervisorsApi = {
   },
 
   create: async (data: Partial<Hypervisor>): Promise<Hypervisor> => {
-    const payload = {
+    const defaultPort = data.type === 'vmware' ? 443 : 5985;
+    const payload: Record<string, unknown> = {
       name: data.name,
-      hypervisor_type: data.type,
+      type: data.type,
       host: data.host,
-      port: data.port || 5985,
-      use_ssl: false,
+      port: data.port || defaultPort,
+      use_ssl: data.type === 'vmware' ? true : false,
       username: data.username,
       password: (data as { password?: string }).password,
     };
+    // VMware-specific fields
+    if (data.type === 'vmware') {
+      if (data.datacenter) payload.datacenter = data.datacenter;
+      if (data.cluster) payload.cluster = data.cluster;
+      if (data.default_datastore) payload.default_datastore = data.default_datastore;
+      if (data.default_resource_pool) payload.default_resource_pool = data.default_resource_pool;
+    }
     const response = await apiClient.post<HypervisorBackend>('/hypervisors', payload);
     return mapHypervisor(response.data);
   },
@@ -153,11 +175,19 @@ export const hypervisorsApi = {
   update: async (id: string, data: Partial<Hypervisor>): Promise<Hypervisor> => {
     const payload: Record<string, unknown> = {};
     if (data.name) payload.name = data.name;
+    if (data.type) payload.type = data.type;
     if (data.host) payload.host = data.host;
     if (data.port) payload.port = data.port;
     if (data.username) payload.username = data.username;
     if ((data as { password?: string }).password) payload.password = (data as { password?: string }).password;
-    
+    // VMware-specific fields
+    if (data.type === 'vmware') {
+      payload.datacenter = data.datacenter || undefined;
+      payload.cluster = data.cluster || undefined;
+      payload.default_datastore = data.default_datastore || undefined;
+      payload.default_resource_pool = data.default_resource_pool || undefined;
+    }
+
     const response = await apiClient.patch<HypervisorBackend>(`/hypervisors/${id}`, payload);
     return mapHypervisor(response.data);
   },
@@ -240,6 +270,25 @@ export const hypervisorsApi = {
     const response = await apiClient.get(`/hypervisors/${id}/vms`);
     return response.data;
   },
+
+  // Lister les emplacements de stockage disponibles
+  getStorageLocations: async (id: string, minFreeGb = 50): Promise<StorageLocation[]> => {
+    const response = await apiClient.get<StorageLocation[]>(`/hypervisors/${id}/storage-locations`, {
+      params: { min_free_gb: minFreeGb },
+    });
+    return response.data;
+  },
+
+  // VMware-specific endpoints
+  listDatastores: async (hypervisorId: string): Promise<{ name: string; capacity_gb: number; free_gb: number; type: string }[]> => {
+    const response = await apiClient.get(`/hypervisors/${hypervisorId}/datastores`);
+    return response.data;
+  },
+
+  listResourcePools: async (hypervisorId: string): Promise<{ name: string; cpu_limit?: number; memory_limit_gb?: number }[]> => {
+    const response = await apiClient.get(`/hypervisors/${hypervisorId}/resource-pools`);
+    return response.data;
+  },
 };
 
 // ============================================
@@ -257,7 +306,10 @@ interface VMBackend {
   disk_gb: number;
   state: string;
   ip_address: string | null;
+  network_switch: string | null;
+  vlan_id: number | null;
   os_template_id: string | null;
+  os_type?: string;
   created_at: string;
   updated_at: string | null;
 }
@@ -272,7 +324,10 @@ function mapVM(vm: VMBackend): VirtualMachine {
     cpu_count: vm.cpu_count,
     ram_gb: vm.ram_gb,
     disk_gb: vm.disk_gb,
+    os_type: vm.os_type || undefined,
     ip_address: vm.ip_address || undefined,
+    network_switch: vm.network_switch || undefined,
+    vlan_id: vm.vlan_id || undefined,
     created_at: vm.created_at,
     updated_at: vm.updated_at || vm.created_at,
   };
@@ -341,6 +396,11 @@ export const vmsApi = {
     const params = username ? `?username=${encodeURIComponent(username)}` : '';
     return `${API_BASE_URL}/vms/${id}/rdp${params}`;
   },
+
+  getSoftwareInventory: async (id: string): Promise<SoftwareInventory> => {
+    const response = await apiClient.get<SoftwareInventory>(`/vms/${id}/software-inventory`);
+    return response.data;
+  },
 };
 
 // ============================================
@@ -358,6 +418,7 @@ interface TemplateBackend {
   min_cpu: number;
   min_ram_gb: number;
   min_disk_gb: number;
+  install_locale: string;
   is_active: boolean;
   created_at: string;
   updated_at: string | null;
@@ -375,6 +436,8 @@ function mapTemplate(t: TemplateBackend): OSTemplate {
     min_cpu: t.min_cpu,
     min_ram_gb: t.min_ram_gb,
     min_disk_gb: t.min_disk_gb,
+    install_locale: t.install_locale,
+    updated_at: t.updated_at || undefined,
     created_at: t.created_at,
   };
 }
@@ -400,6 +463,7 @@ export const templatesApi = {
       min_cpu: data.min_cpu || 2,
       min_ram_gb: data.min_ram_gb || 4,
       min_disk_gb: data.min_disk_gb || 60,
+      install_locale: data.install_locale || 'fr-FR',
     };
     const response = await apiClient.post<TemplateBackend>('/templates', payload);
     return mapTemplate(response.data);
@@ -412,6 +476,7 @@ export const templatesApi = {
     if (data.min_cpu) payload.min_cpu = data.min_cpu;
     if (data.min_ram_gb) payload.min_ram_gb = data.min_ram_gb;
     if (data.min_disk_gb) payload.min_disk_gb = data.min_disk_gb;
+    if (data.install_locale) payload.install_locale = data.install_locale;
     
     const response = await apiClient.patch<TemplateBackend>(`/templates/${id}`, payload);
     return mapTemplate(response.data);
@@ -434,6 +499,7 @@ interface DeploymentBackend {
   os_template_id: string;
   vm_id: string | null;
   status: string;
+  progress: number;
   current_step: string | null;
   error_message: string | null;
   config: Record<string, unknown>;
@@ -444,32 +510,39 @@ interface DeploymentBackend {
 
 // Mapper backend vers frontend
 function mapDeployment(d: DeploymentBackend): Deployment {
-  // Calculer la progression basée sur le statut
-  const progressMap: Record<string, number> = {
-    pending: 0,
-    creating_vm: 20,
-    installing_os: 50,
-    post_install: 75,
-    installing_software: 90,
-    completed: 100,
-    failed: 0,
-    cancelled: 0,
-  };
-  
   return {
     id: d.id,
     vm_name: d.vm_name,
+    name: d.vm_name,  // Alias pour l'affichage
     hypervisor_id: d.hypervisor_id,
     os_template_id: d.os_template_id,
     vm_id: d.vm_id || undefined,
     status: d.status as Deployment['status'],
-    progress: progressMap[d.status] || 0,
+    progress: d.progress ?? 0,  // Utilise la progression du backend
+    current_step: d.current_step || undefined,
     error_message: d.error_message || undefined,
     config: {
       vm_name: d.vm_name,
       cpu_count: (d.config.cpu_count as number) || 2,
       ram_gb: (d.config.ram_gb as number) || 4,
       disk_gb: (d.config.disk_gb as number) || 60,
+      vhdx_path: d.config.vhdx_path as string | undefined,
+      network_switch: d.config.network_switch as string | undefined,
+      hostname: d.config.hostname as string | undefined,
+      admin_password: d.config.admin_password as string | undefined,
+      domain_join: d.config.domain_join as DeploymentConfig['domain_join'],
+      ip_config: d.config.ip_config as DeploymentConfig['ip_config'],
+      services: d.config.services as DeploymentConfig['services'],
+      security: d.config.security as DeploymentConfig['security'],
+      software_profile: d.config.software_profile as string | undefined,
+      packages: d.config.packages as string[] | undefined,
+      package_configs: d.config.package_configs as Record<string, Record<string, unknown>> | undefined,
+      enable_windows_update: d.config.enable_windows_update as boolean | undefined,
+      post_install_commands: d.config.post_install_commands as string[] | undefined,
+      ssh_keys: d.config.ssh_keys as string[] | undefined,
+      extra_packages: d.config.extra_packages as string[] | undefined,
+      post_commands: d.config.post_commands as string[] | undefined,
+      network: d.config.network as DeploymentConfig['network'],
     },
     created_at: d.created_at,
     updated_at: d.completed_at || d.started_at || d.created_at,
@@ -490,13 +563,13 @@ export const deploymentsApi = {
   },
 
   create: async (data: {
-    name: string;
+    vm_name: string;
     hypervisor_id: string;
-    template_id: string;
+    os_template_id: string;
     config: DeploymentConfig;
   }): Promise<Deployment> => {
     const payload: Record<string, unknown> = {
-      vm_name: data.name,
+      vm_name: data.vm_name,
       hypervisor_id: data.hypervisor_id,
       os_template_id: data.os_template_id,
       cpu_count: data.config.cpu_count,
@@ -534,6 +607,11 @@ export const deploymentsApi = {
     return mapDeployment(response.data);
   },
 
+  resume: async (id: string): Promise<Deployment> => {
+    const response = await apiClient.post<DeploymentBackend>(`/deployments/${id}/resume`);
+    return mapDeployment(response.data);
+  },
+
   getLogs: async (id: string): Promise<Deployment['logs']> => {
     interface LogBackend {
       id: string;
@@ -550,12 +628,35 @@ export const deploymentsApi = {
       step: log.step,
       level: log.level as 'debug' | 'info' | 'warning' | 'error',
       message: log.message,
+      details: log.details || undefined,
       created_at: log.created_at,
     }));
   },
 
   delete: async (id: string): Promise<void> => {
     await apiClient.delete(`/deployments/${id}`);
+  },
+
+  // Approval workflow
+  listPendingApprovals: async (): Promise<Deployment[]> => {
+    const response = await apiClient.get<DeploymentBackend[]>('/deployments/pending-approval');
+    return response.data.map(mapDeployment);
+  },
+
+  approve: async (id: string, note?: string): Promise<Deployment> => {
+    const response = await apiClient.post<DeploymentBackend>(`/deployments/${id}/approve`, { note, auto_start: true });
+    return mapDeployment(response.data);
+  },
+
+  reject: async (id: string, note: string): Promise<Deployment> => {
+    const response = await apiClient.post<DeploymentBackend>(`/deployments/${id}/reject`, { note });
+    return mapDeployment(response.data);
+  },
+
+  // Audit log
+  getAuditLog: async (params?: { page?: number; page_size?: number; action?: string; username?: string }): Promise<AuditLogList> => {
+    const response = await apiClient.get<AuditLogList>('/deployments/audit-log', { params });
+    return response.data;
   },
 };
 
@@ -659,6 +760,61 @@ export const softwareApi = {
   seedCatalog: async (): Promise<{ created: number; skipped: number }> => {
     const response = await apiClient.post<{ created: number; skipped: number }>('/software-catalog/seed');
     return response.data;
+  },
+};
+
+// ============================================
+// VNC API
+// ============================================
+
+export const vncApi = {
+  installVNC: (vmId: string, config?: { port?: number; username?: string }) =>
+    apiClient.post(`/vms/${vmId}/vnc/install`, config).then(r => r.data),
+
+  checkStatus: (vmId: string, port?: number) =>
+    apiClient.get(`/vms/${vmId}/vnc/status`, { params: { port } }).then(r => r.data),
+
+  listSessions: () =>
+    apiClient.get('/vnc/sessions').then(r => r.data),
+};
+
+// ============================================
+// Admin - Gestion des utilisateurs
+// ============================================
+
+export const adminApi = {
+  // Lister tous les utilisateurs
+  listUsers: async (): Promise<AdminUser[]> => {
+    const response = await apiClient.get<AdminUser[]>('/auth/admin/users');
+    return response.data;
+  },
+
+  // Récupérer un utilisateur
+  getUser: async (userId: string): Promise<AdminUser> => {
+    const response = await apiClient.get<AdminUser>(`/auth/admin/users/${userId}`);
+    return response.data;
+  },
+
+  // Créer un utilisateur
+  createUser: async (data: CreateUserRequest): Promise<AdminUser> => {
+    const response = await apiClient.post<AdminUser>('/auth/admin/users', data);
+    return response.data;
+  },
+
+  // Modifier un utilisateur
+  updateUser: async (userId: string, data: UpdateUserRequest): Promise<AdminUser> => {
+    const response = await apiClient.patch<AdminUser>(`/auth/admin/users/${userId}`, data);
+    return response.data;
+  },
+
+  // Supprimer un utilisateur
+  deleteUser: async (userId: string): Promise<void> => {
+    await apiClient.delete(`/auth/admin/users/${userId}`);
+  },
+
+  // Réinitialiser le mot de passe
+  resetPassword: async (userId: string, data: ResetPasswordRequest): Promise<void> => {
+    await apiClient.post(`/auth/admin/users/${userId}/reset-password`, data);
   },
 };
 

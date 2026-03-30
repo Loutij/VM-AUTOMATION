@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.common.config import settings
+from src.common.crypto import encrypt_password
 from src.common.exceptions import (
     AlreadyExistsError,
     NotFoundError,
@@ -23,6 +24,7 @@ from src.common.exceptions import (
     VMOperationError,
 )
 from src.common.logging import get_logger
+from src.common.resilience import CircuitBreaker
 from src.domain.models import (
     Deployment,
     DeploymentLog,
@@ -35,7 +37,7 @@ from src.domain.models import (
     VMStatus,
 )
 from src.domain.template_engine import get_template_engine
-from src.integrations.hypervisors import HyperVClient, VMSpecs
+from src.integrations.hypervisors import HyperVClient, VMSpecs, BaseHypervisor, ESXI_AVAILABLE
 
 logger = get_logger(__name__)
 
@@ -50,41 +52,83 @@ class VMService:
     - Orchestration des déploiements
     """
 
+    _circuit_breakers: dict[UUID, CircuitBreaker] = {}
+
     def __init__(self, db: AsyncSession) -> None:
         """
         Initialise le service.
-        
+
         Args:
             db: Session de base de données
         """
         self.db = db
-        self._hypervisor_clients: dict[UUID, HyperVClient] = {}
+        self._hypervisor_clients: dict[UUID, BaseHypervisor] = {}
 
-    async def _get_hypervisor_client(self, hypervisor_id: UUID) -> HyperVClient:
+    def _get_circuit_breaker(self, hypervisor_id: UUID) -> CircuitBreaker:
+        """Get or create circuit breaker for a hypervisor."""
+        if hypervisor_id not in self._circuit_breakers:
+            self._circuit_breakers[hypervisor_id] = CircuitBreaker(
+                failure_threshold=3,
+                recovery_timeout=300,
+                name=f"hypervisor-{hypervisor_id}",
+            )
+        return self._circuit_breakers[hypervisor_id]
+
+    def _check_circuit_breaker(self, hypervisor_id: UUID) -> None:
+        """Check circuit breaker state; raise if open."""
+        cb = self._get_circuit_breaker(hypervisor_id)
+        if not cb.is_available:
+            raise VMOperationError(
+                vm_name="",
+                operation="hypervisor_call",
+                reason="Hypervisor temporarily unavailable (circuit breaker open)",
+            )
+
+    async def _get_hypervisor_client(self, hypervisor_id: UUID) -> BaseHypervisor:
         """Récupère ou crée un client pour l'hyperviseur."""
         if hypervisor_id not in self._hypervisor_clients:
-            # Récupérer l'hyperviseur de la DB
             result = await self.db.execute(
                 select(Hypervisor).where(Hypervisor.id == hypervisor_id)
             )
             hypervisor = result.scalar_one_or_none()
-            
+
             if not hypervisor:
                 raise NotFoundError("Hypervisor", str(hypervisor_id))
-            
-            if hypervisor.type != HypervisorType.HYPERV:
-                raise ValidationError(
-                    f"Unsupported hypervisor type: {hypervisor.type}"
-                )
-            
-            self._hypervisor_clients[hypervisor_id] = HyperVClient(
+
+            client = self._create_hypervisor_client(hypervisor)
+            self._hypervisor_clients[hypervisor_id] = client
+
+        return self._hypervisor_clients[hypervisor_id]
+
+    def _create_hypervisor_client(self, hypervisor: Hypervisor) -> BaseHypervisor:
+        """Factory method — crée le bon client selon le type d'hyperviseur."""
+        if hypervisor.type == HypervisorType.HYPERV:
+            return HyperVClient(
                 host=hypervisor.host,
                 username=hypervisor.username,
                 password=hypervisor.password,
                 use_ssl=hypervisor.use_ssl,
             )
-        
-        return self._hypervisor_clients[hypervisor_id]
+        elif hypervisor.type == HypervisorType.VMWARE:
+            if not ESXI_AVAILABLE:
+                raise ValidationError(
+                    "pyvmomi is not installed. Install it with: pip install pyvmomi"
+                )
+            from src.integrations.hypervisors.esxi_client import ESXiClient
+            return ESXiClient(
+                host=hypervisor.host,
+                username=hypervisor.username,
+                password=hypervisor.password,
+                port=hypervisor.port,
+                use_ssl=hypervisor.use_ssl,
+                datacenter=getattr(hypervisor, 'datacenter', '') or '',
+                cluster=getattr(hypervisor, 'cluster', '') or '',
+                default_datastore=getattr(hypervisor, 'default_datastore', 'datastore1') or 'datastore1',
+                default_resource_pool=getattr(hypervisor, 'default_resource_pool', '') or '',
+                vm_folder=getattr(hypervisor, 'vm_folder', '') or '',
+            )
+        else:
+            raise ValidationError(f"Unsupported hypervisor type: {hypervisor.type}")
 
     # =========================================================================
     # Hypervisor Operations
@@ -129,7 +173,7 @@ class VMService:
             host=host,
             type=hypervisor_type,
             username=username,
-            password_encrypted=password,  # TODO: encrypt password
+            password_encrypted=encrypt_password(password),
             use_ssl=use_ssl,
             **kwargs,
         )
@@ -142,8 +186,19 @@ class VMService:
 
     async def test_hypervisor_connection(self, hypervisor_id: UUID) -> bool:
         """Teste la connexion à un hyperviseur."""
+        self._check_circuit_breaker(hypervisor_id)
+        cb = self._get_circuit_breaker(hypervisor_id)
         client = await self._get_hypervisor_client(hypervisor_id)
-        return await client.test_connection()
+        try:
+            result = await client.test_connection()
+            if result:
+                cb.record_success()
+            else:
+                cb.record_failure()
+            return result
+        except Exception:
+            cb.record_failure()
+            raise
 
     # =========================================================================
     # VM Operations
@@ -182,6 +237,74 @@ class VMService:
         )
         return result.scalar_one_or_none()
 
+    async def cleanup_vm_if_exists(
+        self,
+        name: str,
+        hypervisor_id: UUID,
+        force: bool = False,
+    ) -> bool:
+        """
+        Nettoie une VM existante (base de données et hyperviseur).
+        
+        Args:
+            name: Nom de la VM à nettoyer
+            hypervisor_id: ID de l'hyperviseur
+            force: Forcer la suppression même si l'hyperviseur échoue
+            
+        Returns:
+            True si une VM a été nettoyée, False sinon
+        """
+        cleaned = False
+        
+        # 1. Vérifier et supprimer de la base de données
+        db_vm = await self.get_vm_by_name(name)
+        if db_vm:
+            try:
+                # Supprimer de l'hyperviseur d'abord si possible
+                if db_vm.hypervisor_vm_id:
+                    try:
+                        client = await self._get_hypervisor_client(hypervisor_id)
+                        await client.delete_vm(db_vm.hypervisor_vm_id, delete_disks=True)
+                    except Exception as e:
+                        logger.warning(
+                            "cleanup_vm_hypervisor_failed",
+                            vm_name=name,
+                            error=str(e),
+                        )
+                        if not force:
+                            # Si force=False et que la suppression sur l'hyperviseur échoue,
+                            # on continue quand même pour supprimer de la base
+                            pass
+                
+                # Supprimer de la base de données
+                await self.db.delete(db_vm)
+                await self.db.flush()
+                cleaned = True
+                logger.info("cleanup_vm_removed_from_db", vm_name=name)
+            except Exception as e:
+                logger.error("cleanup_vm_db_failed", vm_name=name, error=str(e))
+        
+        # 2. Vérifier et supprimer de l'hyperviseur (si pas déjà fait)
+        if not db_vm or not db_vm.hypervisor_vm_id:
+            try:
+                client = await self._get_hypervisor_client(hypervisor_id)
+                # Vérifier si la VM existe sur l'hyperviseur
+                # get_vm retourne None si la VM n'existe pas
+                vm_info = await client.get_vm(name)
+                if vm_info:
+                    # VM existe sur l'hyperviseur, la supprimer
+                    await client.delete_vm(vm_info.id, delete_disks=True)
+                    cleaned = True
+                    logger.info("cleanup_vm_removed_from_hypervisor", vm_name=name)
+            except Exception as e:
+                logger.warning(
+                    "cleanup_vm_hypervisor_check_failed",
+                    vm_name=name,
+                    error=str(e),
+                )
+        
+        return cleaned
+
     async def create_vm(
         self,
         name: str,
@@ -192,6 +315,7 @@ class VMService:
         network_switch: str | None = None,
         vhdx_path: str | None = None,
         template_id: UUID | None = None,
+        force: bool = False,
         **kwargs: Any,
     ) -> VirtualMachine:
         """
@@ -206,14 +330,19 @@ class VMService:
             network_switch: Switch réseau (optionnel)
             vhdx_path: Chemin du dossier pour le disque VHDX (optionnel)
             template_id: ID du template OS (optionnel)
+            force: Si True, supprime la VM existante avant de créer (pour retry)
             
         Returns:
             VM créée
         """
-        # Vérifier que la VM n'existe pas déjà
-        existing = await self.get_vm_by_name(name)
-        if existing:
-            raise AlreadyExistsError("VirtualMachine", name)
+        # Vérifier que la VM n'existe pas déjà (sauf si force=True)
+        if not force:
+            existing = await self.get_vm_by_name(name)
+            if existing:
+                raise AlreadyExistsError("VirtualMachine", name)
+        else:
+            # En mode force, nettoyer la VM existante
+            await self.cleanup_vm_if_exists(name, hypervisor_id, force=True)
         
         # Récupérer le client hyperviseur
         client = await self._get_hypervisor_client(hypervisor_id)
@@ -243,12 +372,17 @@ class VMService:
             name=name,
             hypervisor=hypervisor.name,
             specs=specs.__dict__,
+            force=force,
         )
         
         # Créer la VM sur l'hyperviseur
+        self._check_circuit_breaker(hypervisor_id)
+        cb = self._get_circuit_breaker(hypervisor_id)
         try:
-            vm_info = await client.create_vm(specs)
+            vm_info = await client.create_vm(specs, force=force)
+            cb.record_success()
         except Exception as e:
+            cb.record_failure()
             logger.error("vm_creation_failed", name=name, error=str(e))
             raise VMCreationError(name, str(e))
         
@@ -326,68 +460,178 @@ class VMService:
         )
         return True
 
+    _HYPERV_STATE_MAP = {
+        "Running": VMState.RUNNING,
+        "Off": VMState.STOPPED,
+        "Paused": VMState.PAUSED,
+        "Saved": VMState.SUSPENDED,
+    }
+
+    async def _verify_vm_state(
+        self,
+        vm: VirtualMachine,
+        client: BaseHypervisor,
+        expected: str,
+        operation: str,
+    ) -> None:
+        """
+        Post-operation verification: query the hypervisor for the real state
+        and correct the DB if it doesn't match.  Wrapped in try/except so a
+        verification failure never breaks the caller.
+        """
+        try:
+            real_state = await client.get_vm_state(vm.hypervisor_vm_id or vm.name)
+            if real_state and real_state != expected:
+                actual = self._HYPERV_STATE_MAP.get(real_state, VMState.UNKNOWN)
+                logger.warning(
+                    "vm_state_mismatch_after_operation",
+                    vm_id=str(vm.id),
+                    operation=operation,
+                    expected=expected,
+                    actual=real_state,
+                )
+                vm.state = actual
+                await self.db.flush()
+        except Exception as e:
+            logger.debug(
+                "vm_state_verify_failed",
+                vm_id=str(vm.id),
+                operation=operation,
+                error=str(e),
+            )
+
     async def start_vm(self, vm_id: UUID) -> VirtualMachine:
         """Démarre une VM."""
         vm = await self.get_vm(vm_id)
-        
+
         if vm.state == VMState.RUNNING:
             return vm
-        
+
+        self._check_circuit_breaker(vm.hypervisor_id)
+        cb = self._get_circuit_breaker(vm.hypervisor_id)
         client = await self._get_hypervisor_client(vm.hypervisor_id)
-        await client.start_vm(vm.hypervisor_vm_id or vm.name)
-        
+        try:
+            await client.start_vm(vm.hypervisor_vm_id or vm.name)
+            cb.record_success()
+        except Exception:
+            cb.record_failure()
+            raise
+
         vm.state = VMState.RUNNING
         await self.db.flush()
-        
+
+        await self._verify_vm_state(vm, client, "Running", "start")
+
         logger.info("vm_started", vm_id=str(vm_id))
         return vm
 
     async def stop_vm(self, vm_id: UUID, force: bool = False) -> VirtualMachine:
         """Arrête une VM."""
         vm = await self.get_vm(vm_id)
-        
+
         if vm.state == VMState.STOPPED:
             return vm
-        
+
+        self._check_circuit_breaker(vm.hypervisor_id)
+        cb = self._get_circuit_breaker(vm.hypervisor_id)
         client = await self._get_hypervisor_client(vm.hypervisor_id)
-        await client.stop_vm(vm.hypervisor_vm_id or vm.name, force=force)
-        
+        try:
+            await client.stop_vm(vm.hypervisor_vm_id or vm.name, force=force)
+            cb.record_success()
+        except Exception:
+            cb.record_failure()
+            raise
+
         vm.state = VMState.STOPPED
         await self.db.flush()
-        
+
+        await self._verify_vm_state(vm, client, "Off", "stop")
+
         logger.info("vm_stopped", vm_id=str(vm_id), force=force)
         return vm
 
     async def restart_vm(self, vm_id: UUID, force: bool = False) -> VirtualMachine:
         """Redémarre une VM."""
         vm = await self.get_vm(vm_id)
-        
+
+        self._check_circuit_breaker(vm.hypervisor_id)
+        cb = self._get_circuit_breaker(vm.hypervisor_id)
         client = await self._get_hypervisor_client(vm.hypervisor_id)
-        await client.restart_vm(vm.hypervisor_vm_id or vm.name, force=force)
-        
+        try:
+            await client.restart_vm(vm.hypervisor_vm_id or vm.name, force=force)
+            cb.record_success()
+        except Exception:
+            cb.record_failure()
+            raise
+
         vm.state = VMState.RUNNING
         await self.db.flush()
-        
+
+        await self._verify_vm_state(vm, client, "Running", "restart")
+
         logger.info("vm_restarted", vm_id=str(vm_id))
         return vm
+
+    @staticmethod
+    def _correct_stale_status(
+        vm: VirtualMachine, new_state: VMState,
+    ) -> None:
+        """
+        Corrige un VMStatus incohérent avec l'état Hyper-V réel.
+
+        Ne touche pas aux statuts ``deleting`` / ``deleted`` qui sont
+        gérés par d'autres flux.
+        """
+        if vm.status in (VMStatus.DELETING, VMStatus.DELETED):
+            return
+
+        if new_state == VMState.RUNNING:
+            if vm.status in (VMStatus.CREATING, VMStatus.STARTING):
+                vm.status = VMStatus.RUNNING
+        elif new_state == VMState.STOPPED:
+            if vm.status in (VMStatus.CREATING, VMStatus.STOPPING):
+                vm.status = VMStatus.STOPPED
+            elif vm.status == VMStatus.STARTING:
+                vm.status = VMStatus.ERROR
 
     async def sync_vm_state(self, vm_id: UUID) -> VirtualMachine:
         """Synchronise l'état de la VM avec l'hyperviseur."""
         vm = await self.get_vm(vm_id)
-        
+
+        self._check_circuit_breaker(vm.hypervisor_id)
+        cb = self._get_circuit_breaker(vm.hypervisor_id)
         client = await self._get_hypervisor_client(vm.hypervisor_id)
-        state = await client.get_vm_state(vm.hypervisor_vm_id or vm.name)
-        
+        try:
+            state = await client.get_vm_state(vm.hypervisor_vm_id or vm.name)
+            cb.record_success()
+        except Exception:
+            cb.record_failure()
+            raise
+
         if state:
             state_mapping = {
                 "Running": VMState.RUNNING,
                 "Off": VMState.STOPPED,
                 "Paused": VMState.PAUSED,
                 "Saved": VMState.SUSPENDED,
+                "Starting": VMState.RUNNING,
+                "Stopping": VMState.STOPPED,
+                "Saving": VMState.SUSPENDED,
+                "Resuming": VMState.RUNNING,
+                "Reset": VMState.RUNNING,
+                "Pausing": VMState.PAUSED,
+                "2": VMState.RUNNING,
+                "3": VMState.STOPPED,
+                "4": VMState.STOPPED,    # Stopping
+                "6": VMState.SUSPENDED,  # Saving
+                "9": VMState.PAUSED,     # Pausing
+                "10": VMState.RUNNING,   # Starting
             }
-            vm.state = state_mapping.get(state, VMState.UNKNOWN)
+            new_state = state_mapping.get(state, VMState.UNKNOWN)
+            vm.state = new_state
+            self._correct_stale_status(vm, new_state)
             await self.db.flush()
-        
+
         return vm
 
     async def sync_all_vms(
@@ -448,8 +692,18 @@ class VMService:
             "Off": VMState.STOPPED,
             "Paused": VMState.PAUSED,
             "Saved": VMState.SUSPENDED,
+            "Starting": VMState.RUNNING,
+            "Stopping": VMState.STOPPED,
+            "Saving": VMState.SUSPENDED,
+            "Resuming": VMState.RUNNING,
+            "Reset": VMState.RUNNING,
+            "Pausing": VMState.PAUSED,
             "2": VMState.RUNNING,  # Certaines versions retournent des codes
             "3": VMState.STOPPED,
+            "4": VMState.STOPPED,    # Stopping
+            "6": VMState.SUSPENDED,  # Saving
+            "9": VMState.PAUSED,     # Pausing
+            "10": VMState.RUNNING,   # Starting
         }
         
         # Fonction helper pour formater le MAC address
@@ -531,6 +785,12 @@ class VMService:
                         if db_vm.state != new_state:
                             changes.append(f"state: {db_vm.state.value} → {new_state.value}")
                             db_vm.state = new_state
+
+                        # Corriger un VMStatus incohérent avec l'état Hyper-V
+                        old_status = db_vm.status
+                        self._correct_stale_status(db_vm, new_state)
+                        if db_vm.status != old_status:
+                            changes.append(f"status: {old_status.value} → {db_vm.status.value}")
                         
                         # S'assurer que l'ID Hyper-V est lié
                         db_vm.hypervisor_vm_id = hyperv_vm.get("id")

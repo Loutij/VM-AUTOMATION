@@ -27,9 +27,15 @@ interface DataTableProps<T> {
   searchable?: boolean;
   searchPlaceholder?: string;
   searchKeys?: (keyof T)[];
+  searchValue?: string;
+  onSearchChange?: (value: string) => void;
   pageSize?: number;
   actions?: (item: T) => ReactNode;
   onRowClick?: (item: T) => void;
+  selectable?: boolean;
+  selectedKeys?: Set<string>;
+  onSelectionChange?: (selectedKeys: Set<string>) => void;
+  bulkActions?: ReactNode;
 }
 
 type SortDirection = 'asc' | 'desc' | null;
@@ -44,11 +50,19 @@ export function DataTable<T extends object>({
   searchable = false,
   searchPlaceholder = 'Rechercher...',
   searchKeys = [],
+  searchValue,
+  onSearchChange,
   pageSize = 10,
   actions,
   onRowClick,
+  selectable = false,
+  selectedKeys,
+  onSelectionChange,
+  bulkActions,
 }: DataTableProps<T>) {
-  const [search, setSearch] = useState('');
+  const [internalSearch, setInternalSearch] = useState('');
+  const isControlled = searchValue !== undefined;
+  const search = isControlled ? searchValue : internalSearch;
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
   const [currentPage, setCurrentPage] = useState(1);
@@ -100,14 +114,46 @@ export function DataTable<T extends object>({
   };
 
   const getSortIcon = (key: string) => {
-    if (sortKey !== key) return <ChevronsUpDown size={14} className="text-dark-500" />;
-    if (sortDirection === 'asc') return <ChevronUp size={14} className="text-primary-500" />;
-    return <ChevronDown size={14} className="text-primary-500" />;
+    if (sortKey !== key) return <ChevronsUpDown size={14} className="text-gray-400 dark:text-dark-500" />;
+    if (sortDirection === 'asc') return <ChevronUp size={14} className="text-oto-500" />;
+    return <ChevronDown size={14} className="text-oto-500" />;
+  };
+
+  // Selection helpers
+  const allPageKeys = paginatedData.map(keyExtractor);
+  const allPageSelected = selectable && selectedKeys && allPageKeys.length > 0 && allPageKeys.every((k) => selectedKeys.has(k));
+  const somePageSelected = selectable && selectedKeys && allPageKeys.some((k) => selectedKeys.has(k));
+  const selectionCount = selectedKeys?.size ?? 0;
+
+  const toggleAll = () => {
+    if (!onSelectionChange || !selectedKeys) return;
+    const next = new Set(selectedKeys);
+    if (allPageSelected) {
+      allPageKeys.forEach((k) => next.delete(k));
+    } else {
+      allPageKeys.forEach((k) => next.add(k));
+    }
+    onSelectionChange(next);
+  };
+
+  const toggleOne = (key: string) => {
+    if (!onSelectionChange || !selectedKeys) return;
+    const next = new Set(selectedKeys);
+    if (next.has(key)) {
+      next.delete(key);
+    } else {
+      next.add(key);
+    }
+    onSelectionChange(next);
   };
 
   // Reset to page 1 when search changes
   const handleSearch = (value: string) => {
-    setSearch(value);
+    if (isControlled && onSearchChange) {
+      onSearchChange(value);
+    } else {
+      setInternalSearch(value);
+    }
     setCurrentPage(1);
   };
 
@@ -115,20 +161,37 @@ export function DataTable<T extends object>({
     <div className="card">
       {/* Search bar */}
       {searchable && (
-        <div className="p-4 border-b border-dark-700">
+        <div className="p-4 border-b border-light-200 dark:border-dark-700">
           <div className="relative max-w-sm">
             <Search
               size={18}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-dark-400"
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-dark-400"
             />
             <input
               type="text"
               value={search}
               onChange={(e) => handleSearch(e.target.value)}
               placeholder={searchPlaceholder}
-              className="w-full pl-10 pr-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-dark-100 placeholder-dark-400 focus:outline-none focus:border-primary-500 transition-colors"
+              className="w-full pl-10 pr-4 py-2 bg-light-100 dark:bg-dark-700 border border-light-300 dark:border-dark-600 rounded-lg text-gray-900 dark:text-dark-100 placeholder-gray-400 dark:placeholder-dark-400 focus:outline-none focus:ring-2 focus:ring-oto-500 focus:border-transparent transition-all"
             />
           </div>
+        </div>
+      )}
+
+      {/* Bulk actions bar */}
+      {selectable && selectionCount > 0 && bulkActions && (
+        <div className="px-4 py-3 bg-oto-50 dark:bg-oto-900/20 border-b border-oto-200 dark:border-oto-800/30 flex items-center gap-3">
+          <span className="text-sm font-medium text-oto-700 dark:text-oto-300">
+            {selectionCount} sélectionné{selectionCount > 1 ? 's' : ''}
+          </span>
+          <div className="h-4 w-px bg-oto-300 dark:bg-oto-700" />
+          {bulkActions}
+          <button
+            onClick={() => onSelectionChange?.(new Set())}
+            className="ml-auto text-sm text-gray-500 dark:text-dark-400 hover:text-gray-700 dark:hover:text-dark-200 transition-colors"
+          >
+            Tout désélectionner
+          </button>
         </div>
       )}
 
@@ -136,7 +199,18 @@ export function DataTable<T extends object>({
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
-            <tr className="text-left text-dark-400 text-sm border-b border-dark-700 bg-dark-800/50">
+            <tr className="text-left text-oto-700 dark:text-dark-400 text-sm border-b border-light-200 dark:border-dark-700 bg-oto-50 dark:bg-dark-800/50">
+              {selectable && (
+                <th className="px-4 py-3 w-10">
+                  <input
+                    type="checkbox"
+                    checked={allPageSelected}
+                    ref={(el) => { if (el) el.indeterminate = !allPageSelected && !!somePageSelected; }}
+                    onChange={toggleAll}
+                    className="w-4 h-4 rounded border-gray-300 dark:border-dark-500 text-oto-600 focus:ring-oto-500 cursor-pointer"
+                  />
+                </th>
+              )}
               {columns.map((column) => (
                 <th
                   key={String(column.key)}
@@ -146,13 +220,13 @@ export function DataTable<T extends object>({
                   {column.sortable ? (
                     <button
                       onClick={() => handleSort(String(column.key))}
-                      className="flex items-center gap-1 hover:text-white transition-colors"
+                      className="flex items-center gap-1 hover:text-oto-600 dark:hover:text-white transition-colors uppercase tracking-wide"
                     >
                       {column.header}
                       {getSortIcon(String(column.key))}
                     </button>
                   ) : (
-                    column.header
+                    <span className="uppercase tracking-wide">{column.header}</span>
                   )}
                 </th>
               ))}
@@ -163,15 +237,20 @@ export function DataTable<T extends object>({
             {isLoading ? (
               // Loading skeleton
               Array.from({ length: 5 }).map((_, i) => (
-                <tr key={i} className="border-b border-dark-700/50">
+                <tr key={i} className="border-b border-light-200 dark:border-dark-700/50">
+                  {selectable && (
+                    <td className="px-4 py-3">
+                      <div className="h-4 w-4 bg-light-200 dark:bg-dark-700 rounded animate-pulse" />
+                    </td>
+                  )}
                   {columns.map((column) => (
                     <td key={String(column.key)} className="px-4 py-3">
-                      <div className="h-5 bg-dark-700 rounded animate-pulse" />
+                      <div className="h-5 bg-light-200 dark:bg-dark-700 rounded animate-pulse" />
                     </td>
                   ))}
                   {actions && (
                     <td className="px-4 py-3">
-                      <div className="h-5 w-16 bg-dark-700 rounded animate-pulse" />
+                      <div className="h-5 w-16 bg-light-200 dark:bg-dark-700 rounded animate-pulse" />
                     </td>
                   )}
                 </tr>
@@ -179,26 +258,39 @@ export function DataTable<T extends object>({
             ) : paginatedData.length === 0 ? (
               <tr>
                 <td
-                  colSpan={columns.length + (actions ? 1 : 0)}
+                  colSpan={columns.length + (actions ? 1 : 0) + (selectable ? 1 : 0)}
                   className="px-4 py-12 text-center"
                 >
-                  <div className="flex flex-col items-center text-dark-400">
+                  <div className="flex flex-col items-center text-gray-400 dark:text-dark-400">
                     {emptyIcon}
                     <p className="mt-2">{emptyMessage}</p>
                   </div>
                 </td>
               </tr>
             ) : (
-              paginatedData.map((item) => (
+              paginatedData.map((item, index) => {
+                const itemKey = keyExtractor(item);
+                const isSelected = selectable && selectedKeys?.has(itemKey);
+                return (
                 <tr
-                  key={keyExtractor(item)}
+                  key={itemKey}
                   onClick={() => onRowClick?.(item)}
-                  className={`border-b border-dark-700/50 hover:bg-dark-800/50 transition-colors ${
+                  className={`border-b border-light-200 dark:border-dark-700/50 hover:bg-oto-50 dark:hover:bg-dark-800/50 transition-colors ${
                     onRowClick ? 'cursor-pointer' : ''
-                  }`}
+                  } ${isSelected ? 'bg-oto-50/50 dark:bg-oto-900/10' : index % 2 === 1 ? 'bg-light-50 dark:bg-dark-800/20' : ''}`}
                 >
+                  {selectable && (
+                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={isSelected || false}
+                        onChange={() => toggleOne(itemKey)}
+                        className="w-4 h-4 rounded border-gray-300 dark:border-dark-500 text-oto-600 focus:ring-oto-500 cursor-pointer"
+                      />
+                    </td>
+                  )}
                   {columns.map((column) => (
-                    <td key={String(column.key)} className="px-4 py-3 text-dark-200">
+                    <td key={String(column.key)} className="px-4 py-3 text-gray-700 dark:text-dark-200">
                       {column.render
                         ? column.render(item)
                         : String(item[column.key as keyof T] ?? '-')}
@@ -210,7 +302,8 @@ export function DataTable<T extends object>({
                     </td>
                   )}
                 </tr>
-              ))
+                );
+              })
             )}
           </tbody>
         </table>
@@ -218,8 +311,8 @@ export function DataTable<T extends object>({
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between px-4 py-3 border-t border-dark-700">
-          <p className="text-sm text-dark-400">
+        <div className="flex items-center justify-between px-4 py-3 border-t border-light-200 dark:border-dark-700">
+          <p className="text-sm text-gray-500 dark:text-dark-400">
             Affichage {(currentPage - 1) * pageSize + 1} -{' '}
             {Math.min(currentPage * pageSize, sortedData.length)} sur {sortedData.length}
           </p>
@@ -232,7 +325,7 @@ export function DataTable<T extends object>({
             >
               <ChevronLeft size={16} />
             </Button>
-            <span className="text-sm text-dark-300">
+            <span className="text-sm text-gray-600 dark:text-dark-300 font-medium">
               Page {currentPage} / {totalPages}
             </span>
             <Button

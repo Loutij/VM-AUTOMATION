@@ -288,45 +288,9 @@ class PostInstallService:
             start_type: Type de démarrage (Automatic, Manual, Disabled)
             ensure_running: Démarrer le service si non actif
         """
-        start_action = "Start-Service -Name $svc.Name -ErrorAction SilentlyContinue" if ensure_running else ""
-        
-        script = f"""
-        $svc = Get-Service -Name '{service_name}' -ErrorAction SilentlyContinue
-        
-        if (-not $svc) {{
-            @{{
-                ServiceName = '{service_name}'
-                Success = $false
-                Status = 'NotFound'
-                StartType = 'Unknown'
-                Error = 'Service not found'
-            }} | ConvertTo-Json
-            return
-        }}
-        
-        try {{
-            Set-Service -Name $svc.Name -StartupType '{start_type}'
-            {start_action}
-            
-            $svc = Get-Service -Name '{service_name}'
-            
-            @{{
-                ServiceName = $svc.Name
-                Success = $true
-                Status = $svc.Status.ToString()
-                StartType = $svc.StartType.ToString()
-                Error = $null
-            }} | ConvertTo-Json
-        }} catch {{
-            @{{
-                ServiceName = '{service_name}'
-                Success = $false
-                Status = $svc.Status.ToString()
-                StartType = $svc.StartType.ToString()
-                Error = $_.Exception.Message
-            }} | ConvertTo-Json
-        }}
-        """
+        # Script minifié pour éviter la limite de ligne de commande
+        start_cmd = ";Start-Service $s.Name -EA 0" if ensure_running else ""
+        script = f"""$s=Get-Service '{service_name}' -EA 0;if(-not $s){{@{{ServiceName='{service_name}';Success=$false;Status='NotFound';StartType='Unknown';Error='Not found'}}|ConvertTo-Json;return}};try{{Set-Service $s.Name -StartupType '{start_type}'{start_cmd};$s=Get-Service '{service_name}';@{{ServiceName=$s.Name;Success=$true;Status=$s.Status.ToString();StartType=$s.StartType.ToString();Error=$null}}|ConvertTo-Json}}catch{{@{{ServiceName='{service_name}';Success=$false;Status='';StartType='';Error=$_.Exception.Message}}|ConvertTo-Json}}"""
         
         logger.info(
             "post_install_configure_service",
@@ -463,74 +427,29 @@ class PostInstallService:
             vm_name: Nom de la VM
             credentials: (username, password)
         """
-        script = """
-        try {
-            # Vérifier si déjà installé
-            $sshd = Get-Service sshd -ErrorAction SilentlyContinue
-            
-            if (-not $sshd) {
-                Write-Host "Installation OpenSSH Server..."
-                
-                # Installer la fonctionnalité
-                Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 | Out-Null
-                
-                # Attendre que le service soit disponible
-                Start-Sleep -Seconds 5
-            }
-            
-            # Configurer et démarrer
-            Set-Service -Name sshd -StartupType Automatic
-            Start-Service sshd
-            
-            # Configurer le firewall
-            $rule = Get-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -ErrorAction SilentlyContinue
-            if (-not $rule) {
-                New-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -DisplayName "OpenSSH Server (sshd)" -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 | Out-Null
-            }
-            
-            $svc = Get-Service sshd
-            
-            @{
-                ServiceName = "sshd"
-                Success = $true
-                Status = $svc.Status.ToString()
-                StartType = $svc.StartType.ToString()
-                Error = $null
-            } | ConvertTo-Json
-            
-        } catch {
-            @{
-                ServiceName = "sshd"
-                Success = $false
-                Status = "Unknown"
-                StartType = "Unknown"
-                Error = $_.Exception.Message
-            } | ConvertTo-Json
-        }
-        """
+        # Script minifié pour éviter la limite de ligne de commande
+        script = """try{$s=Get-Service sshd -EA 0;if(-not $s){Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0|Out-Null;Start-Sleep 5};Set-Service sshd -StartupType Auto;Start-Service sshd;if(-not(Get-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -EA 0)){New-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -DisplayName "SSH" -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22|Out-Null};$v=Get-Service sshd;@{ServiceName="sshd";Success=$true;Status=$v.Status.ToString();StartType=$v.StartType.ToString();Error=$null}|ConvertTo-Json}catch{@{ServiceName="sshd";Success=$false;Status="";StartType="";Error=$_.Exception.Message}|ConvertTo-Json}"""
         
-        logger.info("post_install_installing_ssh", vm_name=vm_name)
+        logger.info("post_install_install_ssh", vm_name=vm_name)
         
-        result = await self.client.execute_in_vm(
-            vm_name, script, credentials, timeout=300
-        )
+        result = await self.client.execute_in_vm(vm_name, script, credentials, timeout=300)
         
         if not result.success:
             return ServiceConfigResult(
                 service_name="sshd",
                 success=False,
-                status="Unknown",
-                start_type="Unknown",
+                status="",
+                start_type="",
                 error=result.error,
             )
         
         data = result.output if isinstance(result.output, dict) else {}
         
         return ServiceConfigResult(
-            service_name="sshd",
+            service_name=data.get("ServiceName", "sshd"),
             success=data.get("Success", False),
-            status=data.get("Status", "Unknown"),
-            start_type=data.get("StartType", "Unknown"),
+            status=data.get("Status", ""),
+            start_type=data.get("StartType", ""),
             error=data.get("Error"),
         )
 

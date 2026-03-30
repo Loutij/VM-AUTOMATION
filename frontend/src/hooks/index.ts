@@ -14,3 +14,5 @@ export type {
   UseWebSocketOptions,
   UseWebSocketReturn,
 } from './useWebSocket';
+
+export { useKeyboardShortcuts } from './useKeyboardShortcuts';

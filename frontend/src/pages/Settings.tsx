@@ -19,11 +19,18 @@ import {
   HardDrive,
   Cpu,
   Database,
+  Mail,
+  Send,
+  Loader2,
+  Palette,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { Header } from '../components/layout';
 import { Button, Input, Select, Switch, useToast } from '../components/ui';
 import { healthApi, apiClient } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import { useTheme } from '../contexts/ThemeContext';
 import type { AppSettings, HealthCheck } from '../types';
 import { DEFAULT_SETTINGS } from '../types';
 
@@ -71,12 +78,12 @@ function SettingsSection({
   return (
     <div className="card p-6">
       <div className="flex items-start gap-4 mb-6">
-        <div className="w-10 h-10 bg-primary-600/20 rounded-lg flex items-center justify-center flex-shrink-0">
-          <Icon size={20} className="text-primary-500" />
+        <div className="w-10 h-10 bg-oto-100 dark:bg-primary-600/20 rounded-lg flex items-center justify-center flex-shrink-0">
+          <Icon size={20} className="text-oto-500" />
         </div>
         <div>
-          <h3 className="text-lg font-semibold text-white">{title}</h3>
-          {description && <p className="text-sm text-dark-400 mt-1">{description}</p>}
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{title}</h3>
+          {description && <p className="text-sm text-gray-500 dark:text-dark-400 mt-1">{description}</p>}
         </div>
       </div>
       <div className="space-y-4">{children}</div>
@@ -88,6 +95,7 @@ export function Settings() {
   const { settings, saveSettings, resetSettings } = useSettings();
   const { user } = useAuth();
   const { addToast } = useToast();
+  const { theme, setTheme, resolvedTheme } = useTheme();
   
   // États locaux pour les formulaires
   const [localSettings, setLocalSettings] = useState<AppSettings>(settings);
@@ -100,11 +108,38 @@ export function Settings() {
     confirm: '',
   });
   const [isChangingPassword, setIsChangingPassword] = useState(false);
+  
+  // États pour la configuration email
+  const [smtpConfig, setSmtpConfig] = useState<{
+    host: string;
+    port: number;
+    use_ssl: boolean;
+    user: string;
+    from_addr: string;
+    enabled: boolean;
+  } | null>(null);
+  const [isSendingTestEmail, setIsSendingTestEmail] = useState(false);
+  const [isLoadingSMTP, setIsLoadingSMTP] = useState(true);
 
   // Détecter les changements
   useEffect(() => {
     setHasChanges(JSON.stringify(localSettings) !== JSON.stringify(settings));
   }, [localSettings, settings]);
+
+  // Charger la configuration SMTP
+  useEffect(() => {
+    const loadSMTPConfig = async () => {
+      try {
+        const response = await apiClient.get('/settings/smtp');
+        setSmtpConfig(response.data);
+      } catch (error) {
+        console.error('Failed to load SMTP config:', error);
+      } finally {
+        setIsLoadingSMTP(false);
+      }
+    };
+    loadSMTPConfig();
+  }, []);
 
   // Mettre à jour un paramètre
   const updateSetting = <K extends keyof AppSettings>(
@@ -160,7 +195,7 @@ export function Settings() {
       addToast({
         type: health.status === 'healthy' ? 'success' : 'warning',
         title: health.status === 'healthy' ? 'API disponible' : 'API partiellement disponible',
-        message: `Base de données: ${health.database ? 'OK' : 'Erreur'}, Redis: ${health.redis ? 'OK' : 'Erreur'}`,
+        message: `Base de données: ${health.checks?.database?.status === 'healthy' ? 'OK' : 'Erreur'}, Redis: ${health.checks?.redis?.status === 'healthy' ? 'OK' : 'Erreur'}`,
       });
     } catch {
       setHealthStatus(null);
@@ -268,15 +303,45 @@ export function Settings() {
     }
   };
 
+  // Tester la configuration SMTP (envoi à l'email du user connecté)
+  const handleTestSmtpMe = async () => {
+    setIsSendingTestEmail(true);
+    try {
+      const response = await apiClient.post('/settings/smtp/test-me');
+
+      if (response.data.success) {
+        addToast({
+          type: 'success',
+          title: 'Email de test envoyé',
+          message: response.data.message,
+        });
+      } else {
+        addToast({
+          type: 'error',
+          title: 'Échec de l\'envoi',
+          message: response.data.message,
+        });
+      }
+    } catch (error: any) {
+      addToast({
+        type: 'error',
+        title: 'Erreur SMTP',
+        message: error.response?.data?.detail || 'Impossible d\'envoyer l\'email de test.',
+      });
+    } finally {
+      setIsSendingTestEmail(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-dark-900">
+    <div className="min-h-screen bg-light-100 dark:bg-dark-900">
       <Header title="Paramètres" />
       
       <div className="p-4 sm:p-6 max-w-4xl mx-auto">
         {/* Barre d'actions sticky */}
         {hasChanges && (
-          <div className="sticky top-0 z-10 mb-6 p-4 bg-primary-600/10 border border-primary-500/20 rounded-lg flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-2 text-primary-400">
+          <div className="sticky top-0 z-10 mb-6 p-4 bg-oto-100 dark:bg-primary-600/10 border border-oto-200 dark:border-primary-500/20 rounded-lg flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-2 text-oto-600 dark:text-primary-400">
               <AlertTriangle size={20} />
               <span>Vous avez des modifications non enregistrées</span>
             </div>
@@ -301,6 +366,77 @@ export function Settings() {
         )}
 
         <div className="space-y-6">
+          {/* Thème */}
+          <SettingsSection
+            icon={Palette}
+            title="Thème"
+            description="Personnalisez l'apparence de l'interface"
+          >
+            <div className="space-y-4">
+              {/* Affichage du thème actuel */}
+              <div className="flex items-center justify-between p-4 bg-light-100 dark:bg-dark-700/50 rounded-lg">
+                <div className="flex items-center gap-3">
+                  {resolvedTheme === 'dark' ? (
+                    <Moon size={20} className="text-oto-500" />
+                  ) : (
+                    <Sun size={20} className="text-yellow-500" />
+                  )}
+                  <div>
+                    <p className="font-medium text-gray-900 dark:text-white">
+                      Mode {resolvedTheme === 'dark' ? 'sombre' : 'clair'} actif
+                    </p>
+                    <p className="text-sm text-gray-500 dark:text-dark-400">
+                      {theme === 'system' ? 'Basé sur les préférences système' : 'Défini manuellement'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Sélection du thème */}
+              <div className="grid grid-cols-3 gap-3">
+                <button
+                  onClick={() => setTheme('light')}
+                  className={`p-4 rounded-lg border-2 transition-all text-center ${
+                    theme === 'light'
+                      ? 'border-oto-500 bg-oto-50 dark:bg-oto-500/10'
+                      : 'border-light-300 dark:border-dark-600 hover:border-oto-300'
+                  }`}
+                >
+                  <Sun size={24} className={`mx-auto mb-2 ${theme === 'light' ? 'text-oto-500' : 'text-gray-400'}`} />
+                  <span className={`text-sm font-medium ${theme === 'light' ? 'text-oto-600 dark:text-oto-400' : 'text-gray-600 dark:text-gray-400'}`}>
+                    Clair
+                  </span>
+                </button>
+                <button
+                  onClick={() => setTheme('dark')}
+                  className={`p-4 rounded-lg border-2 transition-all text-center ${
+                    theme === 'dark'
+                      ? 'border-oto-500 bg-oto-50 dark:bg-oto-500/10'
+                      : 'border-light-300 dark:border-dark-600 hover:border-oto-300'
+                  }`}
+                >
+                  <Moon size={24} className={`mx-auto mb-2 ${theme === 'dark' ? 'text-oto-500' : 'text-gray-400'}`} />
+                  <span className={`text-sm font-medium ${theme === 'dark' ? 'text-oto-600 dark:text-oto-400' : 'text-gray-600 dark:text-gray-400'}`}>
+                    Sombre
+                  </span>
+                </button>
+                <button
+                  onClick={() => setTheme('system')}
+                  className={`p-4 rounded-lg border-2 transition-all text-center ${
+                    theme === 'system'
+                      ? 'border-oto-500 bg-oto-50 dark:bg-oto-500/10'
+                      : 'border-light-300 dark:border-dark-600 hover:border-oto-300'
+                  }`}
+                >
+                  <Monitor size={24} className={`mx-auto mb-2 ${theme === 'system' ? 'text-oto-500' : 'text-gray-400'}`} />
+                  <span className={`text-sm font-medium ${theme === 'system' ? 'text-oto-600 dark:text-oto-400' : 'text-gray-600 dark:text-gray-400'}`}>
+                    Système
+                  </span>
+                </button>
+              </div>
+            </div>
+          </SettingsSection>
+
           {/* Paramètres généraux */}
           <SettingsSection
             icon={Globe}
@@ -317,17 +453,6 @@ export function Settings() {
               ]}
               helperText="La langue de l'interface utilisateur"
             />
-            <Select
-              label="Thème"
-              value={localSettings.theme}
-              onChange={(e) => updateSetting('theme', e.target.value as 'dark' | 'light' | 'system')}
-              options={[
-                { value: 'dark', label: 'Sombre' },
-                { value: 'light', label: 'Clair' },
-                { value: 'system', label: 'Automatique (système)' },
-              ]}
-              helperText="Apparence de l'application"
-            />
           </SettingsSection>
 
           {/* Notifications */}
@@ -342,7 +467,7 @@ export function Settings() {
               checked={localSettings.notifications.enabled}
               onChange={(checked) => updateNestedSetting('notifications', 'enabled', checked)}
             />
-            <div className={`space-y-4 pl-4 border-l-2 border-dark-700 ${!localSettings.notifications.enabled ? 'opacity-50 pointer-events-none' : ''}`}>
+            <div className={`space-y-4 pl-4 border-l-2 border-light-200 dark:border-dark-700 ${!localSettings.notifications.enabled ? 'opacity-50 pointer-events-none' : ''}`}>
               <Switch
                 label="Déploiement terminé"
                 description="Notification quand un déploiement est complété avec succès"
@@ -374,6 +499,109 @@ export function Settings() {
             </div>
           </SettingsSection>
 
+          {/* Notifications Email */}
+          <SettingsSection
+            icon={Mail}
+            title="Notifications Email"
+            description="Configuration SMTP pour les notifications de déploiement"
+          >
+            {isLoadingSMTP ? (
+              <div className="flex items-center gap-2 text-gray-500 dark:text-dark-400 py-4">
+                <Loader2 size={16} className="animate-spin" />
+                Chargement de la configuration...
+              </div>
+            ) : smtpConfig ? (
+              <div className="space-y-4">
+                {/* Statut */}
+                <div className="flex items-center justify-between p-4 bg-light-100 dark:bg-dark-700/50 rounded-lg">
+                  <div className="flex items-center gap-3">
+                    {smtpConfig.enabled ? (
+                      <CheckCircle size={20} className="text-green-500" />
+                    ) : (
+                      <XCircle size={20} className="text-gray-400 dark:text-dark-400" />
+                    )}
+                    <div>
+                      <p className="font-medium text-gray-900 dark:text-white">
+                        {smtpConfig.enabled ? 'Notifications email activées' : 'Notifications email désactivées'}
+                      </p>
+                      <p className="text-sm text-gray-500 dark:text-dark-400">
+                        {smtpConfig.host}:{smtpConfig.port} ({smtpConfig.use_ssl ? 'SSL' : 'STARTTLS'})
+                      </p>
+                    </div>
+                  </div>
+                  <span className={`px-2 py-1 rounded text-xs ${
+                    smtpConfig.enabled 
+                      ? 'bg-green-100 dark:bg-green-500/20 text-green-600 dark:text-green-400' 
+                      : 'bg-light-200 dark:bg-dark-600 text-gray-500 dark:text-dark-400'
+                  }`}>
+                    {smtpConfig.enabled ? 'Actif' : 'Inactif'}
+                  </span>
+                </div>
+
+                {/* Configuration actuelle */}
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div className="p-3 bg-light-100 dark:bg-dark-700/30 rounded">
+                    <span className="text-gray-500 dark:text-dark-400 block mb-1">Serveur SMTP</span>
+                    <span className="text-gray-900 dark:text-white font-mono">{smtpConfig.host}</span>
+                  </div>
+                  <div className="p-3 bg-light-100 dark:bg-dark-700/30 rounded">
+                    <span className="text-gray-500 dark:text-dark-400 block mb-1">Port</span>
+                    <span className="text-gray-900 dark:text-white font-mono">{smtpConfig.port}</span>
+                  </div>
+                  <div className="p-3 bg-light-100 dark:bg-dark-700/30 rounded">
+                    <span className="text-gray-500 dark:text-dark-400 block mb-1">Utilisateur</span>
+                    <span className="text-gray-900 dark:text-white font-mono">{smtpConfig.user || '-'}</span>
+                  </div>
+                  <div className="p-3 bg-light-100 dark:bg-dark-700/30 rounded">
+                    <span className="text-gray-500 dark:text-dark-400 block mb-1">Expéditeur</span>
+                    <span className="text-gray-900 dark:text-white font-mono">{smtpConfig.from_addr || '-'}</span>
+                  </div>
+                </div>
+
+                {/* Test SMTP (admin uniquement) */}
+                {user?.role === 'admin' && (
+                <div className="border-t border-light-200 dark:border-dark-700 pt-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-sm font-medium text-gray-700 dark:text-dark-200 flex items-center gap-2">
+                        <Send size={16} />
+                        Tester la configuration SMTP
+                      </h4>
+                      <p className="text-xs text-gray-500 dark:text-dark-400 mt-1">
+                        Un email de test sera envoyé à <strong>{user?.email}</strong>
+                      </p>
+                    </div>
+                    <Button
+                      onClick={handleTestSmtpMe}
+                      isLoading={isSendingTestEmail}
+                      disabled={!smtpConfig.user}
+                      variant="secondary"
+                      leftIcon={<Send size={16} />}
+                    >
+                      Test SMTP
+                    </Button>
+                  </div>
+                </div>
+                )}
+
+                {/* Info configuration */}
+                <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                  <p className="text-sm text-blue-400">
+                    <strong>Note :</strong> La configuration SMTP se fait via les variables d'environnement du serveur 
+                    (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_ENABLED). 
+                    Contactez votre administrateur pour modifier ces paramètres.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-4 text-gray-500 dark:text-dark-400">
+                <Mail size={24} className="mx-auto mb-2 opacity-50" />
+                <p>Configuration SMTP non disponible</p>
+                <p className="text-sm">Configurez les variables d'environnement SMTP sur le serveur</p>
+              </div>
+            )}
+          </SettingsSection>
+
           {/* Valeurs par défaut des déploiements */}
           <SettingsSection
             icon={Server}
@@ -391,23 +619,23 @@ export function Settings() {
                 leftIcon={<Cpu size={18} />}
               />
               <Input
-                label="Mémoire (Mo)"
+                label="Mémoire (Go)"
                 type="number"
                 min={512}
                 max={131072}
                 step={512}
-                value={localSettings.defaultDeployment.memory_mb}
-                onChange={(e) => updateNestedSetting('defaultDeployment', 'memory_mb', parseInt(e.target.value) || 4096)}
+                value={localSettings.defaultDeployment.ram_gb}
+                onChange={(e) => updateNestedSetting('defaultDeployment', 'ram_gb', parseInt(e.target.value) || 4)}
                 leftIcon={<Server size={18} />}
-                helperText={`${(localSettings.defaultDeployment.memory_mb / 1024).toFixed(1)} Go`}
+                helperText={`${localSettings.defaultDeployment.ram_gb} Go`}
               />
               <Input
                 label="Disque (Go)"
                 type="number"
                 min={20}
                 max={2048}
-                value={localSettings.defaultDeployment.disk_size_gb}
-                onChange={(e) => updateNestedSetting('defaultDeployment', 'disk_size_gb', parseInt(e.target.value) || 60)}
+                value={localSettings.defaultDeployment.disk_gb}
+                onChange={(e) => updateNestedSetting('defaultDeployment', 'disk_gb', parseInt(e.target.value) || 60)}
                 leftIcon={<HardDrive size={18} />}
               />
               <Input
@@ -463,7 +691,7 @@ export function Settings() {
             title="Connexion API"
             description="Vérifiez l'état de la connexion au serveur"
           >
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 bg-dark-700/50 rounded-lg">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 bg-light-100 dark:bg-dark-700/50 rounded-lg">
               <div className="flex items-center gap-3">
                 {healthStatus ? (
                   healthStatus.status === 'healthy' ? (
@@ -472,10 +700,10 @@ export function Settings() {
                     <AlertTriangle size={24} className="text-yellow-500" />
                   )
                 ) : (
-                  <XCircle size={24} className="text-dark-500" />
+                  <XCircle size={24} className="text-gray-400 dark:text-dark-500" />
                 )}
                 <div>
-                  <p className="font-medium text-white">
+                  <p className="font-medium text-gray-900 dark:text-white">
                     {healthStatus
                       ? healthStatus.status === 'healthy'
                         ? 'API connectée'
@@ -483,14 +711,15 @@ export function Settings() {
                       : 'Statut inconnu'}
                   </p>
                   {healthStatus && (
-                    <p className="text-sm text-dark-400">
-                      DB: {healthStatus.database ? '✓' : '✗'} | 
-                      Redis: {healthStatus.redis ? '✓' : '✗'} | 
-                      Hyperviseurs: {healthStatus.hypervisors?.length || 0}
+                    <p className="text-sm text-gray-500 dark:text-dark-400">
+                      DB: {healthStatus.checks?.database?.status === 'healthy' ? '✓' : '✗'} | 
+                      Redis: {healthStatus.checks?.redis?.status === 'healthy' ? '✓' : '✗'} | 
+                      Celery: {healthStatus.checks?.celery?.status === 'healthy' ? '✓' : '✗'}
                     </p>
                   )}
                 </div>
               </div>
+              {user?.role === 'admin' && (
               <Button
                 variant="secondary"
                 size="sm"
@@ -500,6 +729,7 @@ export function Settings() {
               >
                 Tester la connexion
               </Button>
+              )}
             </div>
           </SettingsSection>
 
@@ -510,18 +740,18 @@ export function Settings() {
             description="Gérez votre compte et votre sécurité"
           >
             {user && (
-              <div className="p-4 bg-dark-700/50 rounded-lg mb-4">
+              <div className="p-4 bg-light-100 dark:bg-dark-700/50 rounded-lg mb-4">
                 <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-primary-600/20 rounded-full flex items-center justify-center">
-                    <User size={24} className="text-primary-500" />
+                  <div className="w-12 h-12 bg-oto-100 dark:bg-primary-600/20 rounded-full flex items-center justify-center">
+                    <User size={24} className="text-oto-500" />
                   </div>
                   <div>
-                    <p className="font-medium text-white">{user.full_name || user.username}</p>
-                    <p className="text-sm text-dark-400">{user.email}</p>
-                    {user.is_superuser && (
-                      <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 bg-yellow-500/20 text-yellow-500 text-xs rounded">
+                    <p className="font-medium text-gray-900 dark:text-white">{user.full_name || user.username}</p>
+                    <p className="text-sm text-gray-500 dark:text-dark-400">{user.email}</p>
+                    {(user.role === 'admin' || user.is_superuser) && (
+                      <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 bg-purple-100 dark:bg-purple-500/20 text-purple-600 dark:text-purple-400 text-xs font-bold rounded">
                         <Shield size={12} />
-                        Administrateur
+                        Admin
                       </span>
                     )}
                   </div>
@@ -529,8 +759,8 @@ export function Settings() {
               </div>
             )}
             
-            <div className="border-t border-dark-700 pt-4">
-              <h4 className="text-sm font-medium text-dark-200 mb-4 flex items-center gap-2">
+            <div className="border-t border-light-200 dark:border-dark-700 pt-4">
+              <h4 className="text-sm font-medium text-gray-700 dark:text-dark-200 mb-4 flex items-center gap-2">
                 <Key size={16} />
                 Changer le mot de passe
               </h4>
@@ -602,7 +832,7 @@ export function Settings() {
                 </Button>
               </div>
             </div>
-            <p className="text-sm text-dark-400">
+            <p className="text-sm text-gray-500 dark:text-dark-400">
               La configuration exportée inclut vos préférences locales (thème, notifications, valeurs par défaut).
               Elle n'inclut pas les données sensibles comme les mots de passe.
             </p>
@@ -615,30 +845,30 @@ export function Settings() {
             description="Informations sur l'application"
           >
             <div className="space-y-3">
-              <div className="flex justify-between items-center py-2 border-b border-dark-700">
-                <span className="text-dark-400">Version</span>
-                <span className="text-white font-mono">1.0.0</span>
+              <div className="flex justify-between items-center py-2 border-b border-light-200 dark:border-dark-700">
+                <span className="text-gray-500 dark:text-dark-400">Version</span>
+                <span className="text-gray-900 dark:text-white font-mono">1.0.0</span>
               </div>
-              <div className="flex justify-between items-center py-2 border-b border-dark-700">
-                <span className="text-dark-400">Environnement</span>
-                <span className="text-white font-mono">{import.meta.env.MODE}</span>
+              <div className="flex justify-between items-center py-2 border-b border-light-200 dark:border-dark-700">
+                <span className="text-gray-500 dark:text-dark-400">Environnement</span>
+                <span className="text-gray-900 dark:text-white font-mono">{import.meta.env.MODE}</span>
               </div>
-              <div className="flex justify-between items-center py-2 border-b border-dark-700">
-                <span className="text-dark-400">API URL</span>
-                <span className="text-white font-mono text-sm">{import.meta.env.VITE_API_URL || '/api/v1'}</span>
+              <div className="flex justify-between items-center py-2 border-b border-light-200 dark:border-dark-700">
+                <span className="text-gray-500 dark:text-dark-400">API URL</span>
+                <span className="text-gray-900 dark:text-white font-mono text-sm">{import.meta.env.VITE_API_URL || '/api/v1'}</span>
               </div>
             </div>
           </SettingsSection>
 
           {/* Actions de réinitialisation */}
-          <div className="card p-6 border-red-500/20 bg-red-500/5">
+          <div className="card p-6 border-red-200 dark:border-red-500/20 bg-red-50 dark:bg-red-500/5">
             <div className="flex items-start gap-4">
-              <div className="w-10 h-10 bg-red-500/20 rounded-lg flex items-center justify-center flex-shrink-0">
+              <div className="w-10 h-10 bg-red-100 dark:bg-red-500/20 rounded-lg flex items-center justify-center flex-shrink-0">
                 <AlertTriangle size={20} className="text-red-500" />
               </div>
               <div className="flex-1">
-                <h3 className="text-lg font-semibold text-white">Zone de danger</h3>
-                <p className="text-sm text-dark-400 mt-1 mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Zone de danger</h3>
+                <p className="text-sm text-gray-500 dark:text-dark-400 mt-1 mb-4">
                   Ces actions sont irréversibles. Procédez avec précaution.
                 </p>
                 <Button

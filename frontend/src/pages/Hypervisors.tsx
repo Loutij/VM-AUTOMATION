@@ -33,6 +33,11 @@ interface HypervisorFormData {
   port: string;
   username: string;
   password: string;
+  // VMware-specific
+  datacenter: string;
+  cluster: string;
+  default_datastore: string;
+  default_resource_pool: string;
 }
 
 const defaultFormData: HypervisorFormData = {
@@ -42,6 +47,15 @@ const defaultFormData: HypervisorFormData = {
   port: '',
   username: '',
   password: '',
+  datacenter: '',
+  cluster: '',
+  default_datastore: 'datastore1',
+  default_resource_pool: '',
+};
+
+const DEFAULT_PORTS: Record<string, string> = {
+  hyperv: '5986',
+  vmware: '443',
 };
 
 export function Hypervisors() {
@@ -126,6 +140,10 @@ export function Hypervisors() {
         port: hypervisor.port?.toString() || '',
         username: hypervisor.username,
         password: '',
+        datacenter: hypervisor.datacenter || '',
+        cluster: hypervisor.cluster || '',
+        default_datastore: hypervisor.default_datastore || 'datastore1',
+        default_resource_pool: hypervisor.default_resource_pool || '',
       });
     } else {
       setSelectedHypervisor(null);
@@ -149,6 +167,13 @@ export function Hypervisors() {
       port: formData.port ? parseInt(formData.port) : undefined,
       username: formData.username,
       ...(formData.password && { password: formData.password }),
+      // VMware-specific fields
+      ...(formData.type === 'vmware' && {
+        datacenter: formData.datacenter || undefined,
+        cluster: formData.cluster || undefined,
+        default_datastore: formData.default_datastore || undefined,
+        default_resource_pool: formData.default_resource_pool || undefined,
+      }),
     };
 
     if (selectedHypervisor) {
@@ -174,10 +199,10 @@ export function Hypervisors() {
       sortable: true,
       render: (h) => (
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-primary-600/20 rounded-lg flex items-center justify-center">
-            <Server size={16} className="text-primary-500" />
+          <div className="w-8 h-8 bg-oto-100 dark:bg-primary-600/20 rounded-lg flex items-center justify-center">
+            <Server size={16} className="text-oto-500" />
           </div>
-          <span className="font-medium text-white">{h.name}</span>
+          <span className="font-medium text-gray-900 dark:text-white">{h.name}</span>
         </div>
       ),
     },
@@ -186,7 +211,9 @@ export function Hypervisors() {
       header: 'Type',
       sortable: true,
       render: (h) => (
-        <span className="px-2 py-1 bg-dark-700 rounded text-sm capitalize">{h.type}</span>
+        <span className="px-2 py-1 bg-light-200 dark:bg-dark-700 rounded text-sm text-gray-700 dark:text-gray-300">
+          {h.type === 'vmware' ? 'VMware ESXi' : 'Hyper-V'}
+        </span>
       ),
     },
     {
@@ -196,11 +223,11 @@ export function Hypervisors() {
       render: (h) => <span className="font-mono text-sm">{h.host}</span>,
     },
     {
-      key: 'is_connected',
+      key: 'is_active',
       header: 'Statut',
       render: (h) => (
         <div className="flex items-center gap-2">
-          {h.is_connected ? (
+          {h.is_active ? (
             <>
               <CheckCircle size={16} className="text-green-500" />
               <span className="text-green-500">Connecté</span>
@@ -246,12 +273,12 @@ export function Hypervisors() {
   );
 
   return (
-    <div className="min-h-screen bg-dark-900">
+    <div className="min-h-screen bg-light-100 dark:bg-dark-900">
       <Header title="Hyperviseurs" />
       <div className="p-4 sm:p-6">
         {/* Header actions */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-          <p className="text-dark-400 text-sm sm:text-base">
+          <p className="text-gray-500 dark:text-dark-400 text-sm sm:text-base">
             Gérez vos connexions aux serveurs Hyper-V et VMware
           </p>
           <div className="flex items-center gap-2 sm:gap-3">
@@ -263,7 +290,7 @@ export function Hypervisors() {
               className="flex-1 sm:flex-none"
             >
               <span className="hidden sm:inline">Actualiser</span>
-              <span className="sm:hidden">Refresh</span>
+              <span className="sm:hidden">Actualiser</span>
             </Button>
             <Button
               leftIcon={<Plus size={18} />}
@@ -301,7 +328,7 @@ export function Hypervisors() {
             searchKeys={['name', 'host']}
             actions={renderActions}
             emptyMessage="Aucun hyperviseur trouvé"
-            emptyIcon={<Server size={40} className="text-dark-500" />}
+            emptyIcon={<Server size={40} className="text-gray-400 dark:text-dark-500" />}
           />
         )}
 
@@ -336,12 +363,17 @@ export function Hypervisors() {
             <Select
               label="Type"
               value={formData.type}
-              onChange={(e) =>
-                setFormData({ ...formData, type: e.target.value as 'hyperv' | 'vmware' })
-              }
+              onChange={(e) => {
+                const newType = e.target.value as 'hyperv' | 'vmware';
+                setFormData({
+                  ...formData,
+                  type: newType,
+                  port: DEFAULT_PORTS[newType] || '',
+                });
+              }}
               options={[
                 { value: 'hyperv', label: 'Hyper-V' },
-                { value: 'vmware', label: 'VMware vSphere' },
+                { value: 'vmware', label: 'VMware ESXi' },
               ]}
               required
             />
@@ -349,7 +381,7 @@ export function Hypervisors() {
               label="Hôte"
               value={formData.host}
               onChange={(e) => setFormData({ ...formData, host: e.target.value })}
-              placeholder="192.168.1.100 ou hyperv.domain.local"
+              placeholder={formData.type === 'vmware' ? '192.168.1.100 ou vcenter.domain.local' : '192.168.1.100 ou hyperv.domain.local'}
               required
             />
             <Input
@@ -357,8 +389,8 @@ export function Hypervisors() {
               type="number"
               value={formData.port}
               onChange={(e) => setFormData({ ...formData, port: e.target.value })}
-              placeholder="5985 (WinRM) ou 443 (vSphere)"
-              helperText="Laissez vide pour utiliser le port par défaut"
+              placeholder={formData.type === 'vmware' ? '443 (vSphere)' : '5986 (WinRM)'}
+              helperText={`Par défaut : ${formData.type === 'vmware' ? '443' : '5986'}`}
             />
             <Input
               label="Utilisateur"
@@ -376,6 +408,43 @@ export function Hypervisors() {
               required={!selectedHypervisor}
               helperText={selectedHypervisor ? 'Laissez vide pour conserver le mot de passe actuel' : undefined}
             />
+
+            {/* VMware-specific fields */}
+            {formData.type === 'vmware' && (
+              <div className="space-y-4 pt-2 border-t border-gray-200 dark:border-dark-600">
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Configuration VMware
+                </p>
+                <Input
+                  label="Datacenter"
+                  value={formData.datacenter}
+                  onChange={(e) => setFormData({ ...formData, datacenter: e.target.value })}
+                  placeholder="ha-datacenter"
+                  helperText="Nom du datacenter vSphere"
+                />
+                <Input
+                  label="Cluster"
+                  value={formData.cluster}
+                  onChange={(e) => setFormData({ ...formData, cluster: e.target.value })}
+                  placeholder="MonCluster"
+                  helperText="Nom du cluster (optionnel pour ESXi standalone)"
+                />
+                <Input
+                  label="Datastore par défaut"
+                  value={formData.default_datastore}
+                  onChange={(e) => setFormData({ ...formData, default_datastore: e.target.value })}
+                  placeholder="datastore1"
+                  helperText="Datastore utilisé par défaut pour les VMs"
+                />
+                <Input
+                  label="Resource Pool"
+                  value={formData.default_resource_pool}
+                  onChange={(e) => setFormData({ ...formData, default_resource_pool: e.target.value })}
+                  placeholder="Resources"
+                  helperText="Resource pool (optionnel)"
+                />
+              </div>
+            )}
           </form>
         </Modal>
 

@@ -9,7 +9,7 @@ Broadcast des événements de déploiement, statuts VM, etc.
 import asyncio
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable
 from uuid import uuid4
@@ -48,6 +48,7 @@ class EventType(str, Enum):
     # Système
     SYSTEM_NOTIFICATION = "system.notification"
     SYSTEM_ERROR = "system.error"
+    NOTIFICATION = "notification"
 
 
 @dataclass
@@ -59,20 +60,27 @@ class WebSocketEvent:
     event_id: str = field(default_factory=lambda: str(uuid4()))
     
     def to_json(self) -> str:
-        """Sérialise l'événement en JSON."""
+        """Sérialise l'événement en JSON avec format compatible frontend."""
+        event_type_value = self.event_type.value
+        # Normaliser le type pour le frontend (deployment.progress -> deployment_progress)
+        frontend_type = event_type_value.replace(".", "_")
+        
         return json.dumps({
+            "type": frontend_type,
+            "payload": self.data,
             "event_id": self.event_id,
-            "event_type": self.event_type.value,
-            "data": self.data,
             "timestamp": self.timestamp,
         })
     
     def to_dict(self) -> dict[str, Any]:
         """Convertit en dictionnaire."""
+        event_type_value = self.event_type.value
+        frontend_type = event_type_value.replace(".", "_")
+        
         return {
+            "type": frontend_type,
+            "payload": self.data,
             "event_id": self.event_id,
-            "event_type": self.event_type.value,
-            "data": self.data,
             "timestamp": self.timestamp,
         }
 
@@ -128,6 +136,8 @@ class WebSocketManager:
         self._clients: dict[str, WebSocketClient] = {}
         self._rooms: dict[str, set[str]] = {}  # room_id -> set of client_ids
         self._event_handlers: dict[EventType, list[Callable]] = {}
+        self._listeners: list[Callable] = []  # Global event listeners (SSE, etc.)
+        self._heartbeat_tasks: dict[str, asyncio.Task] = {}  # client_id -> heartbeat task
         self._initialized = True
         
         logger.info("websocket_manager_initialized")
@@ -181,7 +191,11 @@ class WebSocketManager:
             },
         )
         await client.send(welcome_event)
-        
+
+        # Start server-initiated heartbeat for this client
+        task = asyncio.create_task(self._heartbeat_loop(client))
+        self._heartbeat_tasks[client_id] = task
+
         return client
     
     async def disconnect(self, client_id: str) -> None:
@@ -193,9 +207,14 @@ class WebSocketManager:
         """
         if client_id not in self._clients:
             return
-        
+
         client = self._clients.pop(client_id)
-        
+
+        # Cancel heartbeat task for this client
+        heartbeat_task = self._heartbeat_tasks.pop(client_id, None)
+        if heartbeat_task and not heartbeat_task.done():
+            heartbeat_task.cancel()
+
         # Retirer de toutes les rooms
         for room_id, members in list(self._rooms.items()):
             members.discard(client_id)
@@ -207,7 +226,32 @@ class WebSocketManager:
             client_id=client_id,
             total_clients=self.client_count,
         )
-    
+
+    async def _heartbeat_loop(self, client: WebSocketClient, interval: int = 30) -> None:
+        """
+        Send periodic pings to detect dead connections.
+
+        Runs as a background task for each connected client. If sending
+        fails, the client is disconnected and cleaned up.
+
+        Args:
+            client: The WebSocket client to ping
+            interval: Seconds between heartbeat pings
+        """
+        try:
+            while True:
+                await asyncio.sleep(interval)
+                try:
+                    await client.websocket.send_json({
+                        "action": "ping",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    })
+                except Exception:
+                    await self.disconnect(client.client_id)
+                    break
+        except asyncio.CancelledError:
+            pass
+
     async def broadcast(
         self,
         event: WebSocketEvent,
@@ -244,14 +288,21 @@ class WebSocketManager:
         # Nettoyer les clients déconnectés
         for client_id in failed_clients:
             await self.disconnect(client_id)
-        
+
+        # Notifier les listeners globaux (SSE, etc.)
+        for listener in list(self._listeners):
+            try:
+                await listener(event)
+            except Exception as e:
+                logger.warning("listener_notify_failed", error=str(e))
+
         logger.debug(
             "websocket_broadcast",
             event_type=event.event_type.value,
             sent_count=sent_count,
             failed_count=len(failed_clients),
         )
-        
+
         return sent_count
     
     async def send_to_client(
@@ -390,6 +441,29 @@ class WebSocketManager:
         client.subscriptions.difference_update(event_types)
         return True
     
+    def add_listener(self, listener: Callable) -> None:
+        """
+        Ajoute un listener global qui sera appelé à chaque broadcast.
+
+        Utilisé par les connexions SSE pour recevoir les événements.
+
+        Args:
+            listener: Coroutine prenant un WebSocketEvent en argument
+        """
+        self._listeners.append(listener)
+
+    def remove_listener(self, listener: Callable) -> None:
+        """
+        Retire un listener global.
+
+        Args:
+            listener: Le listener à retirer
+        """
+        try:
+            self._listeners.remove(listener)
+        except ValueError:
+            pass
+
     def get_stats(self) -> dict[str, Any]:
         """Retourne les statistiques du manager."""
         return {
@@ -404,6 +478,11 @@ class WebSocketManager:
 
 # Instance singleton globale
 ws_manager = WebSocketManager()
+
+
+def get_ws_manager() -> WebSocketManager:
+    """Return the global WebSocketManager singleton."""
+    return ws_manager
 
 
 # ============================================================================
@@ -482,4 +561,35 @@ async def emit_system_notification(
         },
     )
     
+    await ws_manager.broadcast(event)
+
+
+async def emit_notification(
+    title: str,
+    message: str,
+    notification_type: str = "info",
+    data: dict[str, Any] | None = None,
+) -> None:
+    """
+    Émet une notification utilisateur visible dans le dashboard.
+
+    Le frontend écoute les messages de type "notification" avec un payload
+    conforme à NotificationPayload {id, type, title, message}.
+
+    Args:
+        title: Titre de la notification
+        message: Message de notification
+        notification_type: Type (info, success, warning, error)
+        data: Données additionnelles
+    """
+    event = WebSocketEvent(
+        event_type=EventType.NOTIFICATION,
+        data={
+            "id": str(uuid4()),
+            "type": notification_type,
+            "title": title,
+            "message": message,
+            **(data or {}),
+        },
+    )
     await ws_manager.broadcast(event)

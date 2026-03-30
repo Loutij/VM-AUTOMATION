@@ -1,292 +1,176 @@
 # Installation Automatique Windows - Guide Technique
 
-## Architecture
+## Methode de deploiement : DISM
+
+Le systeme utilise **DISM** (Deployment Image Servicing and Management) comme methode principale de deploiement Windows. L'image WIM est appliquee directement sur le VHDX offline, evitant le boot ISO et le prompt "Press any key".
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                  ISO Windows Original (5 GB)                 │
-│                 Stocké UNE FOIS sur l'hyperviseur           │
-│                 Partagé par toutes les VMs                   │
-│                 Ex: C:\HyperV\ISOs\WinSrv2022_FR.iso        │
-└─────────────────────────────────────────────────────────────┘
-                              +
-┌─────────────────────────────────────────────────────────────┐
-│                  ISO OEMDRV (~400 KB)                        │
-│                 Généré DYNAMIQUEMENT par déploiement        │
-│                 Contient uniquement autounattend.xml        │
-│                 Label obligatoire: "OEMDRV"                  │
-└─────────────────────────────────────────────────────────────┘
+1. Creer VHDX vide (dynamique)
+2. Monter VHDX sur l'hote Hyper-V
+3. Partitionner (GPT: EFI + MSR + Windows)
+4. Appliquer image WIM via DISM (~90 secondes)
+5. Injecter autounattend.xml + setup.ps1 via RunOnce
+6. Demonter VHDX
+7. Demarrer la VM → OOBE automatique
 ```
 
-## Pourquoi OEMDRV ?
+### Avantages par rapport au boot ISO
 
-Windows Setup recherche automatiquement `autounattend.xml` dans cet ordre :
-1. Registre (HKLM)
-2. Disquette (non supporté Gen2)
-3. **Lecteur amovible avec label "OEMDRV"** ← Notre méthode
-4. Média d'installation (DVD Windows)
-5. Dossier \Sources du média
+- Pas de "Press any key to boot from CD or DVD"
+- Deploiement plus rapide (~90s vs ~15min)
+- Pas besoin de monter 2 DVDs (ISO Windows + OEMDRV)
+- Pas besoin d'envoyer des touches clavier via WMI
 
-## Génération de l'ISO OEMDRV
+## Selection automatique du template unattend
 
-### Depuis Linux (genisoimage)
+Le systeme selectionne automatiquement le bon template XML selon l'OS :
 
-```bash
-# 1. Créer le dossier avec autounattend.xml
-mkdir -p /tmp/oemdrv_content
-cp autounattend.xml /tmp/oemdrv_content/
+| OS | Template | Compte admin |
+|----|----------|-------------|
+| Windows 10 | `windows_10.xml` | `Admin` (+ Administrateur active) |
+| Windows 11 | `windows_11.xml` | `Admin` (+ Administrateur active) |
+| Windows Server 2019 | `windows_server_2019.xml` | `Administrateur` |
+| Windows Server 2022 | `windows_server_2022.xml` | `Administrateur` |
 
-# 2. Créer l'ISO avec le label OEMDRV (OBLIGATOIRE)
-genisoimage -V "OEMDRV" -J -r -o /tmp/oemdrv.iso /tmp/oemdrv_content/
+La selection est faite par `_select_windows_unattend()` dans `src/domain/template_engine.py` :
 
-# Résultat: ~374 KB
+```python
+def _select_windows_unattend(self, template_name, windows_edition):
+    name_lower = (template_name or "").lower()
+    if "11" in name_lower:
+        return "windows_11.xml"
+    if "10" in name_lower:
+        return "windows_10.xml"
+    if "2019" in name_lower:
+        return "windows_server_2019.xml"
+    return "windows_server_2022.xml"
 ```
 
-### Depuis Windows (oscdimg - nécessite Windows ADK)
+## Differences Win10/11 vs Server
 
-```powershell
-# Si Windows ADK installé
-$oscdimg = "C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg\oscdimg.exe"
-& $oscdimg -l"OEMDRV" -j1 C:\temp\oemdrv_content C:\HyperV\ISOs\oemdrv.iso
+### Windows 10/11 (editions client)
+
+- Le compte built-in `Administrateur` est **desactive par defaut**
+- Le template cree un compte `Admin` avec mot de passe
+- `FirstLogonCommands` active le built-in Administrateur en fallback :
+  ```xml
+  <CommandLine>cmd /c net user Administrateur "password" /active:yes &amp; net user Administrator "password" /active:yes</CommandLine>
+  ```
+- Les credentials tentent `Admin` en premier, puis `Administrateur`/`Administrator`
+
+### Windows Server (2019/2022)
+
+- Le compte built-in `Administrateur` est **active par defaut**
+- Le template utilise `<AdministratorPassword>` directement
+- AutoLogon sur `Administrateur`
+
+## Activation RDP (3 niveaux redondants)
+
+Le RDP est active a 3 niveaux pour garantir l'acces :
+
+### 1. Specialize pass (unattend)
+```xml
+<RunSynchronous>
+  <RunSynchronousCommand>
+    <Path>reg add "HKLM\System\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f</Path>
+  </RunSynchronousCommand>
+</RunSynchronous>
 ```
 
-## Configuration VM Hyper-V
-
-### PowerShell - Configurer les 2 DVDs
-
-```powershell
-$VMName = "MaVM"
-$WinISO = "C:\HyperV\ISOs\WinSrv2022_FR.iso"
-$OemISO = "C:\HyperV\ISOs\oemdrv.iso"
-
-# Supprimer DVDs existants
-Get-VMDvdDrive -VMName $VMName | Remove-VMDvdDrive
-
-# Ajouter DVD 1: Windows (boot)
-Add-VMDvdDrive -VMName $VMName -ControllerNumber 0 -ControllerLocation 1 -Path $WinISO
-
-# Ajouter DVD 2: OEMDRV (autounattend)
-Add-VMDvdDrive -VMName $VMName -ControllerNumber 0 -ControllerLocation 2 -Path $OemISO
-
-# Configurer boot sur DVD Windows
-$dvd = Get-VMDvdDrive -VMName $VMName | Where-Object { $_.Path -like "*WinSrv*" }
-Set-VMFirmware -VMName $VMName -FirstBootDevice $dvd
+### 2. FirstLogonCommands (unattend)
+```xml
+<CommandLine>cmd /c reg add ... &amp; netsh advfirewall firewall set rule group="Remote Desktop" new enable=Yes &amp; netsh advfirewall firewall set rule group="Bureau a distance" new enable=Yes &amp; reg add ... UserAuthentication ... /d 0</CommandLine>
 ```
 
-### Problème "Press any key to boot from CD or DVD"
-
-Windows attend une touche au boot. Solution : envoyer des touches via WMI.
-
-```powershell
-$vm = Get-WmiObject -Namespace "root\virtualization\v2" -Class "Msvm_ComputerSystem" | 
-      Where-Object { $_.ElementName -eq $VMName }
-$keyboard = $vm.GetRelated("Msvm_Keyboard")
-
-# Envoyer Enter (scancode 0x1C down, 0x9C up) en boucle
-for ($i = 0; $i -lt 30; $i++) {
-    $keyboard.TypeScancodes(@(0x1C, 0x9C)) | Out-Null
-    Start-Sleep -Milliseconds 500
-}
+### 3. Post-configuration Python (PowerShell Direct)
+```python
+rdp_script = """
+Set-ItemProperty -Path 'HKLM:\\...\\Terminal Server' -Name "fDenyTSConnections" -Value 0
+Set-ItemProperty -Path 'HKLM:\\...\\RDP-Tcp' -Name "UserAuthentication" -Value 0
+Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
+Enable-NetFirewallRule -DisplayGroup "Bureau a distance" -ErrorAction SilentlyContinue
+"""
 ```
 
-## Template autounattend.xml (Windows Server 2022)
+> **Note** : Les deux groupes firewall (FR: "Bureau a distance", EN: "Remote Desktop") sont toujours configures pour supporter les deux langues.
+
+## Templates unattend.xml
+
+Les templates sont dans `templates/unattend/` et utilisent Jinja2 :
+
+### Variables disponibles
+
+| Variable | Description | Defaut |
+|----------|-------------|--------|
+| `hostname` | Nom de la machine | (obligatoire) |
+| `admin_password` | Mot de passe admin | `TempP@ss123!` |
+| `timezone` | Fuseau horaire | `Romance Standard Time` |
+| `locale` | Locale d'installation | `fr-FR` |
+| `product_key` | Cle de licence Windows | (optionnel) |
+| `organization` | Nom de l'organisation | `VM Automation` |
+| `domain_name` | Domaine AD a joindre | (optionnel) |
+| `domain_username` | Compte AD pour jointure | (optionnel) |
+| `domain_password` | Mot de passe AD | (optionnel) |
+| `domain_ou` | OU cible pour la VM | (optionnel) |
+
+### Structure d'un template
 
 ```xml
-<?xml version="1.0" encoding="utf-8"?>
-<unattend xmlns="urn:schemas-microsoft-com:unattend" 
-          xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+<unattend>
+  <!-- Phase WindowsPE: Partitionnement + Selection image -->
+  <settings pass="windowsPE">
+    <!-- Locale, partitions GPT/UEFI, selection image WIM par index -->
+  </settings>
 
-<!-- Phase WindowsPE: Partitionnement + Sélection image -->
-<settings pass="windowsPE">
-  <component name="Microsoft-Windows-International-Core-WinPE" 
-             processorArchitecture="amd64" 
-             publicKeyToken="31bf3856ad364e35" 
-             language="neutral" versionScope="nonSxS">
-    <SetupUILanguage><UILanguage>fr-FR</UILanguage></SetupUILanguage>
-    <InputLocale>fr-FR</InputLocale>
-    <SystemLocale>fr-FR</SystemLocale>
-    <UILanguage>fr-FR</UILanguage>
-    <UserLocale>fr-FR</UserLocale>
-  </component>
-  
-  <component name="Microsoft-Windows-Setup" 
-             processorArchitecture="amd64" 
-             publicKeyToken="31bf3856ad364e35" 
-             language="neutral" versionScope="nonSxS">
-    
-    <!-- Partitionnement GPT/UEFI -->
-    <DiskConfiguration>
-      <Disk wcm:action="add">
-        <DiskID>0</DiskID>
-        <WillWipeDisk>true</WillWipeDisk>
-        <CreatePartitions>
-          <CreatePartition wcm:action="add">
-            <Order>1</Order><Size>300</Size><Type>EFI</Type>
-          </CreatePartition>
-          <CreatePartition wcm:action="add">
-            <Order>2</Order><Size>128</Size><Type>MSR</Type>
-          </CreatePartition>
-          <CreatePartition wcm:action="add">
-            <Order>3</Order><Extend>true</Extend><Type>Primary</Type>
-          </CreatePartition>
-        </CreatePartitions>
-        <ModifyPartitions>
-          <ModifyPartition wcm:action="add">
-            <Order>1</Order><PartitionID>1</PartitionID>
-            <Format>FAT32</Format><Label>System</Label>
-          </ModifyPartition>
-          <ModifyPartition wcm:action="add">
-            <Order>2</Order><PartitionID>2</PartitionID>
-          </ModifyPartition>
-          <ModifyPartition wcm:action="add">
-            <Order>3</Order><PartitionID>3</PartitionID>
-            <Format>NTFS</Format><Label>Windows</Label><Letter>C</Letter>
-          </ModifyPartition>
-        </ModifyPartitions>
-      </Disk>
-    </DiskConfiguration>
-    
-    <!-- Sélection image par INDEX (pas par nom!) -->
-    <!-- Index 1: Standard Core, Index 2: Standard Desktop -->
-    <!-- Index 3: Datacenter Core, Index 4: Datacenter Desktop -->
-    <ImageInstall>
-      <OSImage>
-        <InstallFrom>
-          <MetaData wcm:action="add">
-            <Key>/IMAGE/INDEX</Key>
-            <Value>2</Value>  <!-- Standard avec GUI -->
-          </MetaData>
-        </InstallFrom>
-        <InstallTo>
-          <DiskID>0</DiskID>
-          <PartitionID>3</PartitionID>
-        </InstallTo>
-      </OSImage>
-    </ImageInstall>
-    
-    <UserData>
-      <AcceptEula>true</AcceptEula>
-      <FullName>Admin</FullName>
-      <Organization>{{ organization }}</Organization>
-    </UserData>
-  </component>
-</settings>
+  <!-- Phase Specialize: Nom machine, timezone, RDP -->
+  <settings pass="specialize">
+    <!-- ComputerName, TimeZone, activation RDP registre -->
+  </settings>
 
-<!-- Phase Specialize: Nom machine, timezone -->
-<settings pass="specialize">
-  <component name="Microsoft-Windows-Shell-Setup" 
-             processorArchitecture="amd64" 
-             publicKeyToken="31bf3856ad364e35" 
-             language="neutral" versionScope="nonSxS">
-    <ComputerName>{{ hostname }}</ComputerName>
-    <TimeZone>Romance Standard Time</TimeZone>
-  </component>
-</settings>
-
-<!-- Phase OOBE: Mot de passe admin, autologon -->
-<settings pass="oobeSystem">
-  <component name="Microsoft-Windows-Shell-Setup" 
-             processorArchitecture="amd64" 
-             publicKeyToken="31bf3856ad364e35" 
-             language="neutral" versionScope="nonSxS">
-    <OOBE>
-      <HideEULAPage>true</HideEULAPage>
-      <HideLocalAccountScreen>true</HideLocalAccountScreen>
-      <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
-      <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
-      <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
-      <ProtectYourPC>3</ProtectYourPC>
-    </OOBE>
-    <UserAccounts>
-      <AdministratorPassword>
-        <Value>{{ admin_password }}</Value>
-        <PlainText>true</PlainText>
-      </AdministratorPassword>
-    </UserAccounts>
-    <AutoLogon>
-      <Enabled>true</Enabled>
-      <Username>Administrateur</Username>
-      <Password>
-        <Value>{{ admin_password }}</Value>
-        <PlainText>true</PlainText>
-      </Password>
-      <LogonCount>3</LogonCount>
-    </AutoLogon>
-  </component>
-</settings>
+  <!-- Phase OOBE: Mot de passe admin, autologon, FirstLogonCommands -->
+  <settings pass="oobeSystem">
+    <!-- Admin password, AutoLogon, RDP firewall, services -->
+  </settings>
 </unattend>
 ```
 
-## Workflow Déploiement Complet
+## Methode alternative : ISO OEMDRV
 
-```
-1. Interface Web: User configure hostname, IP, password, etc.
-                           │
-                           ▼
-2. Backend: Rendre template Jinja2 → autounattend.xml
-                           │
-                           ▼
-3. Backend: Créer ISO OEMDRV (genisoimage, ~374 KB)
-                           │
-                           ▼
-4. Backend: Transférer ISO OEMDRV vers Hyper-V (SMB)
-                           │
-                           ▼
-5. Backend: Créer VM + attacher 2 DVDs (WinRM/PowerShell)
-            - DVD 1: ISO Windows (partagé)
-            - DVD 2: ISO OEMDRV (unique à cette VM)
-                           │
-                           ▼
-6. Backend: Démarrer VM + envoyer touche Enter (WMI)
-                           │
-                           ▼
-7. Windows: Installation 100% automatique (~15 min)
-                           │
-                           ▼
-8. Backend: Détecter fin installation via Heartbeat
-                           │
-                           ▼
-9. Backend: Post-config via WinRM (si nécessaire)
+Pour les cas ou DISM n'est pas disponible (pas d'acces au fichier WIM), la methode ISO OEMDRV reste supportee :
+
+1. Generer `autounattend.xml` via Jinja2
+2. Creer une ISO avec le label `OEMDRV` (genisoimage)
+3. Monter 2 DVDs : ISO Windows + ISO OEMDRV
+4. Booter la VM sur le DVD Windows
+5. Windows detecte automatiquement l'autounattend.xml sur OEMDRV
+
+```bash
+genisoimage -V "OEMDRV" -J -r -o /tmp/oemdrv.iso /tmp/oemdrv_content/
 ```
 
-## Monitoring Installation
-
-### Détecter si Windows est démarré
-
-```powershell
-$hb = Get-VMIntegrationService -VMName $VMName | 
-      Where-Object { $_.Name -eq "Heartbeat" }
-
-if ($hb.PrimaryStatusDescription -eq "OK") {
-    Write-Output "Windows démarré et opérationnel"
-}
-```
-
-### Capturer screenshot VM (debug)
-
-```powershell
-$vm = Get-WmiObject -Namespace "root\virtualization\v2" -Class "Msvm_ComputerSystem" | 
-      Where-Object { $_.ElementName -eq $VMName }
-$vmms = Get-WmiObject -Namespace "root\virtualization\v2" -Class "Msvm_VirtualSystemManagementService"
-$result = $vmms.GetVirtualSystemThumbnailImage($vm, 640, 480)
-
-# $result.ImageData contient l'image en format RGB565 brut
-```
-
-## Fichiers Importants
+## Fichiers cles
 
 | Fichier | Description |
 |---------|-------------|
-| `src/domain/template_engine.py` | Génération autounattend.xml via Jinja2 |
-| `templates/unattend/windows_server_2022.xml` | Template de base |
-| `src/integrations/hypervisors/hyperv_client.py` | Client Hyper-V |
-| `src/common/powershell.py` | Exécution PowerShell via WinRM |
+| `src/domain/template_engine.py` | Selection et rendu des templates (Jinja2) |
+| `src/domain/deployment_service.py` | Logique de deploiement DISM + post-config |
+| `src/integrations/hypervisors/hyperv_client.py` | `deploy_with_dism()`, PowerShell Direct |
+| `templates/unattend/windows_10.xml` | Template Windows 10 |
+| `templates/unattend/windows_11.xml` | Template Windows 11 |
+| `templates/unattend/windows_server_2019.xml` | Template Server 2019 |
+| `templates/unattend/windows_server_2022.xml` | Template Server 2022 |
 
-## Erreurs Courantes
+## Deploiement Linux
 
-| Erreur | Cause | Solution |
-|--------|-------|----------|
-| "Press any key to boot" bloqué | Aucune touche envoyée | Envoyer Enter via WMI TypeScancodes |
-| autounattend.xml non détecté | Label ISO != "OEMDRV" | Recréer ISO avec `-V "OEMDRV"` |
-| "The boot loader failed" | ISO corrompu ou mauvais format | Vérifier ISO avec `file` et bootloader EFI |
-| Sélection d'image demandée | Mauvais nom d'image | Utiliser `/IMAGE/INDEX` au lieu de `/IMAGE/NAME` |
+Les templates Linux sont dans `templates/preseed/` et `templates/cloud-init/` :
+
+| OS | Methode | Fichier |
+|----|---------|---------|
+| Debian 12 | Preseed | `templates/preseed/debian_12.cfg` |
+| Debian 13 | Preseed | `templates/preseed/debian_13.cfg` |
+| Ubuntu 24.04 | Autoinstall | `templates/cloud-init/ubuntu_autoinstall.yaml` |
+| Generique | Cloud-init | `templates/cloud-init/debian_cloud_init.yaml` |
+
+Le deploiement Linux utilise l'ISO + preseed/cloud-init, pas DISM.
+
+*Derniere mise a jour : 2026-03-05*

@@ -16,6 +16,83 @@ from src.common.logging import get_logger
 
 logger = get_logger(__name__)
 
+
+def _decode_powershell_output(raw_bytes: bytes) -> str:
+    """
+    Décode la sortie PowerShell avec plusieurs encodages possibles.
+    
+    Windows PowerShell peut utiliser différents encodages selon la configuration :
+    - UTF-8 (moderne)
+    - UTF-16 (Windows natif, avec ou sans BOM)
+    - cp1252 (Windows Western Europe)
+    - cp850 (DOS/Console)
+    - latin-1 (fallback)
+    
+    Args:
+        raw_bytes: Bytes bruts de la sortie PowerShell
+        
+    Returns:
+        Chaîne décodée correctement
+    """
+    if not raw_bytes:
+        return ""
+    
+    # Détecter le BOM UTF-16 (FE FF pour BE ou FF FE pour LE)
+    if len(raw_bytes) >= 2:
+        bom = raw_bytes[:2]
+        if bom == b'\xff\xfe':  # UTF-16 LE BOM
+            try:
+                return raw_bytes[2:].decode('utf-16-le').strip()
+            except UnicodeDecodeError:
+                pass
+        elif bom == b'\xfe\xff':  # UTF-16 BE BOM
+            try:
+                return raw_bytes[2:].decode('utf-16-be').strip()
+            except UnicodeDecodeError:
+                pass
+    
+    # Détecter le BOM UTF-8 (EF BB BF)
+    if len(raw_bytes) >= 3 and raw_bytes[:3] == b'\xef\xbb\xbf':
+        try:
+            return raw_bytes[3:].decode('utf-8').strip()
+        except UnicodeDecodeError:
+            pass
+    
+    # Détecter UTF-16 sans BOM (caractères alternés avec null bytes)
+    # Si la longueur est paire et qu'on a beaucoup de null bytes, c'est probablement UTF-16
+    if len(raw_bytes) >= 4 and len(raw_bytes) % 2 == 0:
+        null_count = raw_bytes.count(b'\x00')
+        null_ratio = null_count / len(raw_bytes)
+        # Si plus de 20% de null bytes, c'est probablement UTF-16
+        if null_ratio > 0.2:
+            try:
+                decoded = raw_bytes.decode('utf-16-le')
+                # Vérifier que ça ressemble à du texte valide
+                if any(word in decoded.lower() for word in ['error', 'failed', 'success', 'dism', 'windows', 'image', 'applying', 'deployment']):
+                    return decoded.strip()
+            except UnicodeDecodeError:
+                pass
+    
+    # Liste des encodages à essayer dans l'ordre de priorité
+    encodings = ['utf-8', 'utf-16-le', 'utf-16', 'cp1252', 'cp850', 'latin-1']
+    
+    for encoding in encodings:
+        try:
+            decoded = raw_bytes.decode(encoding)
+            # Vérifier que le décodage n'a pas produit de caractères de remplacement
+            # et qu'il ne contient pas trop de caractères non-ASCII suspects (comme des caractères chinois mal décodés)
+            if '\ufffd' not in decoded:
+                # Vérifier si le texte semble être du texte mal décodé (beaucoup de caractères non-ASCII isolés)
+                ascii_ratio = sum(1 for c in decoded if ord(c) < 128) / len(decoded) if decoded else 0
+                # Si c'est principalement de l'ASCII ou du texte français/anglais normal, c'est bon
+                if ascii_ratio > 0.7 or any(word in decoded.lower() for word in ['error', 'failed', 'success', 'dism', 'windows', 'image', 'applying', 'deployment']):
+                    return decoded.strip()
+        except (UnicodeDecodeError, LookupError):
+            continue
+    
+    # Fallback final avec remplacement des caractères invalides
+    return raw_bytes.decode('utf-8', errors='replace').strip()
+
 # Essayer d'importer winrm (optionnel pour le développement sur Linux)
 try:
     import winrm
@@ -64,23 +141,26 @@ class PowerShellExecutor:
         password: str,
         use_ssl: bool = True,
         port: int | None = None,
+        verify_ssl: bool = False,
     ) -> None:
         """
         Initialise l'exécuteur PowerShell.
-        
+
         Args:
             host: Adresse de l'hôte Windows
             username: Nom d'utilisateur (format DOMAIN\\user ou user@domain)
             password: Mot de passe
             use_ssl: Utiliser HTTPS (port 5986) au lieu de HTTP (port 5985)
             port: Port personnalisé (optionnel)
+            verify_ssl: Valider le certificat SSL du serveur (défaut: False)
         """
         self.host = host
         self.username = username
         self.password = password
         self.use_ssl = use_ssl
         self.port = port or (5986 if use_ssl else 5985)
-        
+        self.verify_ssl = verify_ssl
+
         self._session: Any = None
 
     @property
@@ -98,11 +178,12 @@ class PowerShellExecutor:
         
         if self._session is None:
             transport = "ssl" if self.use_ssl else "ntlm"
+            cert_validation = "validate" if self.verify_ssl else "ignore"
             self._session = winrm.Session(
                 self.endpoint,
                 auth=(self.username, self.password),
                 transport=transport,
-                server_cert_validation="ignore" if self.use_ssl else None,
+                server_cert_validation=cert_validation if self.use_ssl else None,
             )
             logger.debug(
                 "winrm_session_created",
@@ -144,18 +225,12 @@ class PowerShellExecutor:
         try:
             session = self._get_session()
             
-            # Encoder le script en base64 pour éviter les problèmes d'encodage
-            import base64
-            encoded_script = base64.b64encode(
-                script.encode("utf-16-le")
-            ).decode("ascii")
-            
-            # Exécuter avec -EncodedCommand
+            # Exécuter le script via pywinrm (gère l'encodage en interne)
             result = session.run_ps(script)
             
             ps_result = PowerShellResult(
-                stdout=result.std_out.decode("utf-8", errors="replace").strip(),
-                stderr=result.std_err.decode("utf-8", errors="replace").strip(),
+                stdout=_decode_powershell_output(result.std_out),
+                stderr=_decode_powershell_output(result.std_err),
                 exit_code=result.status_code,
                 success=result.status_code == 0,
             )
@@ -195,28 +270,69 @@ class PowerShellExecutor:
     ) -> PowerShellResult:
         """
         Exécute un script PowerShell de manière asynchrone.
-        
+
         Utilise un thread pool pour ne pas bloquer l'event loop.
-        
+
         Args:
             script: Script PowerShell à exécuter
             timeout: Timeout en secondes
-            
+
         Returns:
             PowerShellResult
         """
         timeout = timeout or settings.vm_creation_timeout
-        
+
         loop = asyncio.get_event_loop()
-        
+
         try:
             result = await asyncio.wait_for(
-                loop.run_in_executor(None, self.execute, script, timeout),
+                loop.run_in_executor(None, self.execute, script, None),
                 timeout=timeout,
             )
             return result
         except asyncio.TimeoutError:
             raise PowerShellTimeoutError(timeout, script[:200])
+
+    async def execute_with_retry(
+        self,
+        script: str,
+        timeout: int | None = None,
+        max_retries: int = 3,
+        initial_delay: float = 2.0,
+    ) -> PowerShellResult:
+        """
+        Exécute un script PowerShell avec retry automatique sur erreurs de connexion.
+
+        Ne retry que sur les erreurs de connexion WinRM (pas les erreurs de script).
+
+        Args:
+            script: Script PowerShell à exécuter
+            timeout: Timeout en secondes
+            max_retries: Nombre maximum de tentatives
+            initial_delay: Délai initial entre les tentatives (en secondes)
+
+        Returns:
+            PowerShellResult
+        """
+        from src.common.resilience import retry_with_backoff
+
+        # Only retry on connection-level errors, not script failures
+        connection_errors = (
+            PowerShellError,
+            ConnectionError,
+            OSError,
+            TimeoutError,
+        )
+
+        async def _attempt() -> PowerShellResult:
+            return await self.execute_async(script, timeout)
+
+        return await retry_with_backoff(
+            func=_attempt,
+            max_retries=max_retries,
+            initial_delay=initial_delay,
+            retryable_exceptions=connection_errors,
+        )
 
     def test_connection(self) -> bool:
         """

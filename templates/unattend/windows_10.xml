@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<unattend xmlns="urn:schemas-microsoft-com:unattend">
+<unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
     <!-- =================================================================== -->
     <!-- Windows 10 Pro - Unattended Installation Template                   -->
     <!-- Variables Jinja2: {{ variable_name }}                               -->
@@ -140,6 +140,11 @@
                     <Group>Remote Desktop</Group>
                     <Profile>all</Profile>
                 </FirewallGroup>
+                <FirewallGroup wcm:action="add" wcm:keyValue="BureauADistance">
+                    <Active>true</Active>
+                    <Group>Bureau à distance</Group>
+                    <Profile>all</Profile>
+                </FirewallGroup>
             </FirewallGroups>
         </component>
 
@@ -214,13 +219,13 @@
                 <LocalAccounts>
                     <LocalAccount wcm:action="add">
                         <Password>
-                            <Value>{{ admin_password | default('TempP@ss123!') }}</Value>
+                            <Value>{{ admin_password | default('tooroto') }}</Value>
                             <PlainText>true</PlainText>
                         </Password>
                         <Description>Local Administrator</Description>
-                        <DisplayName>{{ admin_username | default('Admin') }}</DisplayName>
+                        <DisplayName>{{ admin_username | default('otoroot') }}</DisplayName>
                         <Group>Administrators</Group>
-                        <Name>{{ admin_username | default('Admin') }}</Name>
+                        <Name>{{ admin_username | default('otoroot') }}</Name>
                     </LocalAccount>
                     {% for user in local_users | default([]) %}
                     <LocalAccount wcm:action="add">
@@ -239,36 +244,48 @@
 
             <AutoLogon>
                 <Password>
-                    <Value>{{ admin_password | default('TempP@ss123!') }}</Value>
+                    <Value>{{ admin_password | default('tooroto') }}</Value>
                     <PlainText>true</PlainText>
                 </Password>
                 <Enabled>true</Enabled>
                 <LogonCount>1</LogonCount>
-                <Username>{{ admin_username | default('Admin') }}</Username>
+                <Username>{{ admin_username | default('otoroot') }}</Username>
             </AutoLogon>
 
             <!-- Script de premier démarrage -->
             <FirstLogonCommands>
-                <!-- Activer WinRM -->
+                <!-- Activer le compte Administrateur built-in (désactivé par défaut sur Win10/11) -->
                 <SynchronousCommand wcm:action="add">
                     <Order>1</Order>
+                    <CommandLine>cmd /c net user Administrateur "{{ admin_password | default('tooroto') }}" /active:yes &amp; net user Administrator "{{ admin_password | default('tooroto') }}" /active:yes</CommandLine>
+                    <Description>Enable built-in Administrator account</Description>
+                </SynchronousCommand>
+                <!-- Activer WinRM -->
+                <SynchronousCommand wcm:action="add">
+                    <Order>2</Order>
                     <CommandLine>powershell -Command "Enable-PSRemoting -Force -SkipNetworkProfileCheck"</CommandLine>
                     <Description>Enable PowerShell Remoting</Description>
                 </SynchronousCommand>
                 <SynchronousCommand wcm:action="add">
-                    <Order>2</Order>
+                    <Order>3</Order>
                     <CommandLine>powershell -Command "winrm quickconfig -quiet"</CommandLine>
                     <Description>Quick configure WinRM</Description>
                 </SynchronousCommand>
+                <!-- Activer RDP explicitement (registre + firewall FR/EN + désactiver NLA) -->
+                <SynchronousCommand wcm:action="add">
+                    <Order>4</Order>
+                    <CommandLine>powershell -Command "Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0; Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name 'UserAuthentication' -Value 0; Enable-NetFirewallRule -DisplayGroup 'Remote Desktop' -ErrorAction SilentlyContinue; Enable-NetFirewallRule -DisplayGroup 'Bureau à distance' -ErrorAction SilentlyContinue"</CommandLine>
+                    <Description>Enable Remote Desktop with firewall rules</Description>
+                </SynchronousCommand>
                 <!-- Désactiver auto-logon après premier démarrage -->
                 <SynchronousCommand wcm:action="add">
-                    <Order>3</Order>
+                    <Order>5</Order>
                     <CommandLine>reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v AutoAdminLogon /t REG_SZ /d 0 /f</CommandLine>
                     <Description>Disable Auto Logon</Description>
                 </SynchronousCommand>
                 {% if join_domain %}
                 <SynchronousCommand wcm:action="add">
-                    <Order>4</Order>
+                    <Order>6</Order>
                     <CommandLine>powershell -Command "Add-Computer -DomainName '{{ domain_name }}' -Credential (New-Object PSCredential('{{ domain_user }}', (ConvertTo-SecureString '{{ domain_password }}' -AsPlainText -Force))) -OUPath '{{ domain_ou | default('') }}' -Restart"</CommandLine>
                     <Description>Join Active Directory Domain</Description>
                 </SynchronousCommand>
@@ -280,6 +297,12 @@
                     <Description>Callback to automation server</Description>
                 </SynchronousCommand>
                 {% endif %}
+                <!-- Signal VM-Automation que le setup est terminé -->
+                <SynchronousCommand wcm:action="add">
+                    <Order>99</Order>
+                    <CommandLine>cmd /c mkdir C:\VM-Automation 2>nul &amp; echo ready > C:\VM-Automation\ready.flag</CommandLine>
+                    <Description>Create VM-Automation ready flag</Description>
+                </SynchronousCommand>
             </FirstLogonCommands>
         </component>
 

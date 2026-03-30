@@ -6,13 +6,13 @@ Endpoints CRUD pour la gestion des hyperviseurs.
 """
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, Field
 
-from src.api.dependencies import DbSession, Pagination
+from src.api.dependencies import CurrentUser, DbSession, Pagination, RequireAdmin
 from src.common.logging import get_logger
 from src.domain.models import HypervisorType
 from src.domain.vm_service import VMService
@@ -31,11 +31,15 @@ class HypervisorBase(BaseModel):
     """Schéma de base pour un hyperviseur."""
 
     name: str = Field(..., min_length=1, max_length=100, description="Nom de l'hyperviseur")
-    hypervisor_type: str = Field(..., pattern="^(hyperv|vmware)$", description="Type d'hyperviseur")
+    type: str = Field(..., pattern="^(hyperv|vmware|esxi)$", description="Type d'hyperviseur")
     host: str = Field(..., min_length=1, max_length=255, description="Adresse de l'hôte")
-    port: int = Field(default=5985, ge=1, le=65535, description="Port de connexion")
-    use_ssl: bool = Field(default=False, description="Utiliser SSL")
+    port: int = Field(default=5986, ge=1, le=65535, description="Port de connexion")
+    use_ssl: bool = Field(default=True, description="Utiliser SSL")
     username: str = Field(..., min_length=1, max_length=100, description="Nom d'utilisateur")
+    datacenter: str | None = Field(None, max_length=255, description="Datacenter vSphere (VMware)")
+    cluster: str | None = Field(None, max_length=255, description="Cluster vSphere (VMware)")
+    default_datastore: str | None = Field(None, max_length=255, description="Datastore par défaut (VMware)")
+    default_resource_pool: str | None = Field(None, max_length=255, description="Resource pool par défaut (VMware)")
 
 
 class HypervisorCreate(HypervisorBase):
@@ -54,6 +58,10 @@ class HypervisorUpdate(BaseModel):
     username: str | None = Field(None, min_length=1, max_length=100)
     password: str | None = Field(None, min_length=1)
     is_active: bool | None = None
+    datacenter: str | None = None
+    cluster: str | None = None
+    default_datastore: str | None = None
+    default_resource_pool: str | None = None
 
 
 class HypervisorResponse(BaseModel):
@@ -61,12 +69,17 @@ class HypervisorResponse(BaseModel):
 
     id: UUID
     name: str
-    hypervisor_type: str
+    type: str
     host: str
     port: int
     use_ssl: bool
     username: str
     is_active: bool
+    vm_count: int = Field(default=0, description="Nombre de VMs sur cet hyperviseur")
+    datacenter: str | None = None
+    cluster: str | None = None
+    default_datastore: str | None = None
+    default_resource_pool: str | None = None
     created_at: datetime
     updated_at: datetime | None = None
 
@@ -74,17 +87,22 @@ class HypervisorResponse(BaseModel):
         from_attributes = True
 
     @classmethod
-    def model_validate(cls, obj, **kwargs):
-        """Convertit le modèle ORM en réponse avec mapping type -> hypervisor_type."""
+    def model_validate(cls, obj, vm_count: int = 0, **kwargs):
+        """Convertit le modèle ORM en réponse."""
         return cls(
             id=obj.id,
             name=obj.name,
-            hypervisor_type=obj.type.value if hasattr(obj.type, 'value') else str(obj.type),
+            type=obj.type.value if hasattr(obj.type, 'value') else str(obj.type),
             host=obj.host,
             port=obj.port,
             use_ssl=obj.use_ssl,
             username=obj.username,
             is_active=obj.is_active,
+            vm_count=vm_count,
+            datacenter=getattr(obj, 'datacenter', None),
+            cluster=getattr(obj, 'cluster', None),
+            default_datastore=getattr(obj, 'default_datastore', None),
+            default_resource_pool=getattr(obj, 'default_resource_pool', None),
             created_at=obj.created_at,
             updated_at=obj.updated_at,
         )
@@ -121,6 +139,7 @@ class ConnectionTestResult(BaseModel):
 async def list_hypervisors(
     db: DbSession,
     pagination: Pagination,
+    current_user: RequireAdmin,
     is_active: Annotated[bool | None, Query(description="Filtrer par statut actif")] = None,
     hypervisor_type: Annotated[str | None, Query(description="Filtrer par type")] = None,
 ) -> HypervisorList:
@@ -136,11 +155,23 @@ async def list_hypervisors(
     service = VMService(db)
     hypervisors = await service.list_hypervisors()
     
-    # Filtrage simple (à améliorer avec requêtes DB)
+    # Récupérer le nombre de VMs par hyperviseur
+    vm_counts: dict[str, int] = {}
+    try:
+        all_vms = await service.list_vms()
+        for vm in all_vms:
+            hv_id = str(vm.hypervisor_id)
+            vm_counts[hv_id] = vm_counts.get(hv_id, 0) + 1
+    except Exception as e:
+        logger.warning("failed_to_count_vms", error=str(e))
+    
+    # TODO: Deplacer le filtrage en DB — VMService.list_hypervisors() ne supporte pas
+    # encore les parametres is_active/hypervisor_type. Ajouter ces filtres au service
+    # pour eviter de charger tous les hyperviseurs en memoire avant de filtrer.
     if is_active is not None:
         hypervisors = [h for h in hypervisors if h.is_active == is_active]
     if hypervisor_type:
-        hypervisors = [h for h in hypervisors if h.hypervisor_type.value == hypervisor_type]
+        hypervisors = [h for h in hypervisors if h.type.value == hypervisor_type]
     
     # Pagination simple
     total = len(hypervisors)
@@ -149,7 +180,10 @@ async def list_hypervisors(
     items = hypervisors[start:end]
     
     return HypervisorList(
-        items=[HypervisorResponse.model_validate(h) for h in items],
+        items=[
+            HypervisorResponse.model_validate(h, vm_count=vm_counts.get(str(h.id), 0)) 
+            for h in items
+        ],
         total=total,
         page=pagination.page,
         page_size=pagination.page_size,
@@ -166,20 +200,24 @@ async def list_hypervisors(
 async def create_hypervisor(
     db: DbSession,
     hypervisor: HypervisorCreate,
+    current_user: RequireAdmin,
 ) -> HypervisorResponse:
     """Crée un nouvel hyperviseur."""
     logger.info(
         "creating_hypervisor",
         name=hypervisor.name,
-        hypervisor_type=hypervisor.hypervisor_type,
+        hypervisor_type=hypervisor.type,
         host=hypervisor.host,
     )
-    
+
     service = VMService(db)
-    
-    # Mapper le type
-    hv_type = HypervisorType.HYPERV if hypervisor.hypervisor_type == "hyperv" else HypervisorType.VMWARE
-    
+
+    # Mapper le type (esxi est un alias pour vmware)
+    type_str = hypervisor.type
+    if type_str == "esxi":
+        type_str = "vmware"
+    hv_type = HypervisorType.HYPERV if type_str == "hyperv" else HypervisorType.VMWARE
+
     created = await service.create_hypervisor(
         name=hypervisor.name,
         host=hypervisor.host,
@@ -188,6 +226,10 @@ async def create_hypervisor(
         password=hypervisor.password,
         use_ssl=hypervisor.use_ssl,
         port=hypervisor.port,
+        datacenter=hypervisor.datacenter,
+        cluster=hypervisor.cluster,
+        default_datastore=hypervisor.default_datastore,
+        default_resource_pool=hypervisor.default_resource_pool,
     )
     
     await db.commit()
@@ -204,6 +246,7 @@ async def create_hypervisor(
 async def get_hypervisor(
     db: DbSession,
     hypervisor_id: UUID,
+    current_user: CurrentUser,
 ) -> HypervisorResponse:
     """Récupère un hyperviseur par son ID."""
     logger.info("getting_hypervisor", hypervisor_id=str(hypervisor_id))
@@ -224,6 +267,7 @@ async def update_hypervisor(
     db: DbSession,
     hypervisor_id: UUID,
     hypervisor: HypervisorUpdate,
+    current_user: RequireAdmin,
 ) -> HypervisorResponse:
     """Met à jour un hyperviseur existant."""
     logger.info(
@@ -238,7 +282,12 @@ async def update_hypervisor(
     # Appliquer les mises à jour
     update_data = hypervisor.model_dump(exclude_unset=True)
     for field, value in update_data.items():
-        setattr(existing, field, value)
+        if field == "password":
+            # Chiffrer le mot de passe avant de le stocker
+            from src.common.crypto import encrypt_password
+            existing.password_encrypted = encrypt_password(value)
+        else:
+            setattr(existing, field, value)
     
     await db.commit()
     await db.refresh(existing)
@@ -255,6 +304,7 @@ async def update_hypervisor(
 async def delete_hypervisor(
     db: DbSession,
     hypervisor_id: UUID,
+    current_user: RequireAdmin,
 ) -> None:
     """Supprime un hyperviseur."""
     logger.info("deleting_hypervisor", hypervisor_id=str(hypervisor_id))
@@ -275,6 +325,7 @@ async def delete_hypervisor(
 async def test_hypervisor_connection(
     db: DbSession,
     hypervisor_id: UUID,
+    current_user: RequireAdmin,
 ) -> ConnectionTestResult:
     """Teste la connexion à un hyperviseur."""
     logger.info("testing_hypervisor_connection", hypervisor_id=str(hypervisor_id))
@@ -310,7 +361,8 @@ async def test_hypervisor_connection(
 async def list_hypervisor_vms(
     db: DbSession,
     hypervisor_id: UUID,
-) -> list[dict]:
+    current_user: CurrentUser,
+) -> list[dict[str, Any]]:  # TODO: Remplacer par un modele Pydantic (ex: HypervisorVMInfo)
     """Liste les VMs directement depuis l'hyperviseur."""
     logger.info("listing_hypervisor_vms", hypervisor_id=str(hypervisor_id))
     
@@ -330,7 +382,8 @@ async def list_hypervisor_vms(
 async def list_hypervisor_switches(
     db: DbSession,
     hypervisor_id: UUID,
-) -> list[dict]:
+    current_user: CurrentUser,
+) -> list[dict[str, Any]]:  # TODO: Remplacer par un modele Pydantic (ex: VirtualSwitchInfo)
     """Liste les switches virtuels de l'hyperviseur."""
     logger.info("listing_hypervisor_switches", hypervisor_id=str(hypervisor_id))
     
@@ -382,6 +435,7 @@ async def create_hypervisor_switch(
     db: DbSession,
     hypervisor_id: UUID,
     switch_data: SwitchCreate,
+    current_user: RequireAdmin,
 ) -> SwitchResponse:
     """Crée un switch virtuel sur l'hyperviseur."""
     logger.info(
@@ -420,6 +474,7 @@ async def delete_hypervisor_switch(
     db: DbSession,
     hypervisor_id: UUID,
     switch_name: str,
+    current_user: RequireAdmin,
 ) -> None:
     """Supprime un switch virtuel."""
     logger.info(
@@ -442,7 +497,8 @@ async def delete_hypervisor_switch(
 async def list_physical_adapters(
     db: DbSession,
     hypervisor_id: UUID,
-) -> list[dict]:
+    current_user: CurrentUser,
+) -> list[dict[str, Any]]:  # TODO: Remplacer par un modele Pydantic (ex: PhysicalAdapterInfo)
     """Liste les adaptateurs réseau physiques de l'hyperviseur."""
     logger.info("listing_physical_adapters", hypervisor_id=str(hypervisor_id))
     
@@ -474,6 +530,7 @@ class ISOInfo(BaseModel):
 async def list_hypervisor_isos(
     db: DbSession,
     hypervisor_id: UUID,
+    current_user: CurrentUser,
     path: Annotated[str | None, Query(description="Chemin personnalisé (optionnel)")] = None,
 ) -> list[ISOInfo]:
     """Liste les fichiers ISO disponibles sur l'hyperviseur."""
@@ -514,15 +571,37 @@ class StorageLocation(BaseModel):
 async def list_storage_locations(
     db: DbSession,
     hypervisor_id: UUID,
+    current_user: CurrentUser,
     min_free_gb: Annotated[int, Query(description="Espace libre minimum en Go")] = 50,
 ) -> list[StorageLocation]:
     """Liste les emplacements de stockage disponibles sur l'hyperviseur."""
     logger.info("listing_storage_locations", hypervisor_id=str(hypervisor_id))
-    
+
     service = VMService(db)
+
+    # Vérifier le type d'hyperviseur
+    hypervisor = await service.get_hypervisor(hypervisor_id)
+    if hypervisor.type == HypervisorType.VMWARE:
+        # Pour VMware, lister les datastores
+        client = await service._get_hypervisor_client(hypervisor_id)
+        datastores = await client.list_datastores()
+        locations = []
+        for ds in datastores:
+            locations.append(StorageLocation(
+                drive_letter=ds.get("name", ""),
+                path=f"[{ds.get('name', '')}]",
+                total_gb=ds.get("capacity_gb", 0),
+                free_gb=ds.get("free_gb", 0),
+                used_gb=ds.get("capacity_gb", 0) - ds.get("free_gb", 0),
+                percent_free=ds.get("percent_free", 0),
+                is_default=ds.get("name") == getattr(hypervisor, "default_datastore", None),
+                is_recommended=False,
+            ))
+        return locations
+
     client = await service._get_hypervisor_client(hypervisor_id)
-    
-    # Récupérer les disques avec espace libre
+
+    # Récupérer les disques avec espace libre (Hyper-V via PowerShell)
     script = f'''
         $minFree = {min_free_gb}
         Get-PSDrive -PSProvider FileSystem | 
@@ -556,10 +635,13 @@ async def list_storage_locations(
     locations = []
     max_free = max(d.get("FreeGB", 0) for d in data) if data else 0
     
+    # Déterminer la lettre du lecteur configuré (ex: "D" depuis "D:\\HyperV\\...")
+    configured_drive = client.vhdx_path[0] if len(client.vhdx_path) >= 2 and client.vhdx_path[1] == ":" else "D"
+
     for disk in data:
         drive = disk.get("DriveLetter", "")
         free_gb = disk.get("FreeGB", 0)
-        
+
         locations.append(StorageLocation(
             drive_letter=drive,
             path=f"{drive}:\\HyperV\\VirtualHardDisks",
@@ -567,11 +649,118 @@ async def list_storage_locations(
             free_gb=free_gb,
             used_gb=disk.get("UsedGB", 0),
             percent_free=disk.get("PercentFree", 0),
-            is_default=(drive == "C"),
+            is_default=(drive.upper() == configured_drive.upper()),
             is_recommended=(free_gb == max_free and free_gb >= min_free_gb),
         ))
     
     return locations
+
+
+class DiskSpaceInfo(BaseModel):
+    """Informations sur l'espace disque."""
+
+    drive_letter: str = Field(..., description="Lettre du lecteur")
+    total_gb: float = Field(..., description="Espace total en Go")
+    free_gb: float = Field(..., description="Espace libre en Go")
+    used_gb: float = Field(..., description="Espace utilisé en Go")
+    percent_used: float = Field(..., description="Pourcentage utilisé")
+
+
+@router.get(
+    "/{hypervisor_id}/disk-space",
+    response_model=DiskSpaceInfo,
+    summary="Vérifier l'espace disque",
+    description="Vérifie l'espace disque disponible sur le lecteur de stockage configuré.",
+)
+async def check_disk_space(
+    db: DbSession,
+    hypervisor_id: UUID,
+    current_user: CurrentUser,
+    path: Annotated[str | None, Query(description="Chemin à vérifier (défaut: temp_path)")] = None,
+) -> DiskSpaceInfo:
+    """Vérifie l'espace disque sur l'hyperviseur."""
+    service = VMService(db)
+    client = await service._get_hypervisor_client(hypervisor_id)
+    data = await client.check_disk_space(path=path)
+    return DiskSpaceInfo(**data)
+
+
+# =============================================================================
+# VHDX orphelins
+# =============================================================================
+
+
+class OrphanVhdxInfo(BaseModel):
+    """Informations sur un fichier VHDX orphelin."""
+
+    path: str = Field(..., description="Chemin complet du fichier VHDX")
+    size_gb: float = Field(..., description="Taille en Go")
+    last_modified: str = Field(..., description="Date de dernière modification")
+    parent_folder: str = Field("", description="Dossier parent")
+
+
+class OrphanVhdxResponse(BaseModel):
+    """Résultat du scan de VHDX orphelins."""
+
+    orphans: list[OrphanVhdxInfo]
+    total_count: int
+    total_size_gb: float
+    deleted: bool = False
+
+
+@router.get(
+    "/{hypervisor_id}/orphan-vhdx",
+    response_model=OrphanVhdxResponse,
+    summary="Lister les VHDX orphelins",
+    description="Trouve les fichiers VHDX qui ne sont attachés à aucune VM.",
+)
+async def list_orphan_vhdx(
+    db: DbSession,
+    hypervisor_id: UUID,
+    current_user: CurrentUser,
+) -> OrphanVhdxResponse:
+    """Liste les VHDX orphelins sur l'hyperviseur."""
+    service = VMService(db)
+    client = await service._get_hypervisor_client(hypervisor_id)
+    orphans = await client.find_orphan_vhdx(delete=False)
+
+    total_gb = sum(o.get("size_gb", 0) for o in orphans)
+    return OrphanVhdxResponse(
+        orphans=[OrphanVhdxInfo(**o) for o in orphans],
+        total_count=len(orphans),
+        total_size_gb=round(total_gb, 2),
+        deleted=False,
+    )
+
+
+@router.delete(
+    "/{hypervisor_id}/orphan-vhdx",
+    response_model=OrphanVhdxResponse,
+    summary="Supprimer les VHDX orphelins",
+    description="Supprime les fichiers VHDX qui ne sont attachés à aucune VM. IRRÉVERSIBLE.",
+)
+async def delete_orphan_vhdx(
+    db: DbSession,
+    hypervisor_id: UUID,
+    current_user: RequireAdmin,
+) -> OrphanVhdxResponse:
+    """Supprime les VHDX orphelins sur l'hyperviseur."""
+    service = VMService(db)
+    client = await service._get_hypervisor_client(hypervisor_id)
+
+    # D'abord scanner pour avoir la liste avant suppression
+    orphans = await client.find_orphan_vhdx(delete=False)
+    total_gb = sum(o.get("size_gb", 0) for o in orphans)
+
+    if orphans:
+        await client.find_orphan_vhdx(delete=True)
+
+    return OrphanVhdxResponse(
+        orphans=[OrphanVhdxInfo(**o) for o in orphans],
+        total_count=len(orphans),
+        total_size_gb=round(total_gb, 2),
+        deleted=True,
+    )
 
 
 # =============================================================================
@@ -617,6 +806,7 @@ class SyncResult(BaseModel):
 async def sync_hypervisor_vms(
     db: DbSession,
     hypervisor_id: UUID,
+    current_user: RequireAdmin,
     options: SyncOptions | None = None,
 ) -> SyncResult:
     """Synchronise les VMs de l'hyperviseur avec la base de données."""
@@ -658,3 +848,42 @@ async def sync_hypervisor_vms(
             marked_missing=0,
             errors=[f"Erreur de synchronisation: {str(e)}"],
         )
+
+
+# =============================================================================
+# Endpoints VMware / ESXi
+# =============================================================================
+
+
+@router.get(
+    "/{hypervisor_id}/datastores",
+    summary="Lister les datastores (VMware)",
+    description="Liste les datastores disponibles sur l'hyperviseur VMware.",
+)
+async def list_datastores(
+    db: DbSession,
+    hypervisor_id: UUID,
+    current_user: CurrentUser,
+) -> list[dict[str, Any]]:
+    """Liste les datastores VMware/ESXi."""
+    logger.info("listing_datastores", hypervisor_id=str(hypervisor_id))
+    service = VMService(db)
+    client = await service._get_hypervisor_client(hypervisor_id)
+    return await client.list_datastores()
+
+
+@router.get(
+    "/{hypervisor_id}/resource-pools",
+    summary="Lister les resource pools (VMware)",
+    description="Liste les resource pools disponibles sur l'hyperviseur VMware.",
+)
+async def list_resource_pools(
+    db: DbSession,
+    hypervisor_id: UUID,
+    current_user: CurrentUser,
+) -> list[dict[str, Any]]:
+    """Liste les resource pools VMware/ESXi."""
+    logger.info("listing_resource_pools", hypervisor_id=str(hypervisor_id))
+    service = VMService(db)
+    client = await service._get_hypervisor_client(hypervisor_id)
+    return await client.list_resource_pools()

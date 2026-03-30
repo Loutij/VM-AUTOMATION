@@ -77,7 +77,7 @@ async def get_current_user(
         return {
             "user_id": user_id,
             "username": payload.get("username", ""),
-            "roles": payload.get("roles", []),
+            "role": payload.get("role", "user"),
         }
         
     except jwt.ExpiredSignatureError:
@@ -124,26 +124,32 @@ OptionalUser = Annotated[dict | None, Depends(get_optional_user)]
 def require_role(required_role: str):
     """
     Dependency factory pour vérifier qu'un utilisateur a un rôle spécifique.
-    
+
     Usage:
         @router.post("/admin/action")
         async def admin_action(user: CurrentUser = Depends(require_role("admin"))):
             ...
     """
     async def role_checker(user: CurrentUser) -> dict:
-        if required_role not in user.get("roles", []):
+        user_role = user.get("role", "user")
+        if user_role != required_role:
             logger.warning(
                 "insufficient_permissions",
                 user_id=user.get("user_id"),
                 required_role=required_role,
+                user_role=user_role,
             )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Role '{required_role}' required",
+                detail=f"Rôle '{required_role}' requis",
             )
         return user
-    
+
     return role_checker
+
+
+# Alias pratiques
+RequireAdmin = Annotated[dict, Depends(require_role("admin"))]
 
 
 # =============================================================================

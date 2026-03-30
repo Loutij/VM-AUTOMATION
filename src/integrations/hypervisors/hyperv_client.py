@@ -6,6 +6,7 @@ Client pour l'interaction avec les hôtes Hyper-V via PowerShell/WinRM.
 """
 
 import json
+import re
 from typing import Any
 
 from src.common.config import settings
@@ -18,6 +19,7 @@ from src.common.exceptions import (
 )
 from src.common.logging import get_logger
 from src.common.powershell import (
+    WINRM_AVAILABLE,
     PowerShellExecutor,
     PowerShellResult,
     create_powershell_executor,
@@ -37,6 +39,32 @@ from src.integrations.hypervisors.base import (
 )
 
 logger = get_logger(__name__)
+
+
+def _escape_ps(value: str) -> str:
+    """Escape value for safe use in PowerShell single-quoted strings."""
+    if not isinstance(value, str):
+        value = str(value)
+    # In single-quoted PowerShell strings, only single quotes need doubling
+    # But we also sanitize for use in double-quoted contexts
+    value = value.replace("'", "''")
+    # Remove null bytes and control characters (except newline/tab)
+    value = ''.join(c for c in value if c in ('\n', '\t', '\r') or (ord(c) >= 32))
+    return value
+
+
+def _validate_hostname(hostname: str) -> str:
+    """Validate and return hostname, raise if invalid."""
+    if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9\-]{0,14}$', hostname):
+        raise ValueError(f"Invalid hostname: {hostname!r}")
+    return hostname
+
+
+def _validate_path(path: str) -> str:
+    """Validate Windows file path."""
+    if not re.match(r'^[A-Z]:\\[\w\\\.\-\s]+$', path, re.IGNORECASE):
+        raise ValueError(f"Invalid path: {path!r}")
+    return path
 
 
 class HyperVClient(BaseHypervisor):
@@ -81,6 +109,8 @@ class HyperVClient(BaseHypervisor):
         self.vm_path = settings.hyperv_vm_path
         self.vhdx_path = settings.hyperv_vhdx_path
         self.iso_path = settings.hyperv_iso_path
+        self.temp_path = settings.hyperv_temp_path
+        self.unattend_path = settings.hyperv_unattend_path
 
     async def _execute(
         self,
@@ -91,38 +121,72 @@ class HyperVClient(BaseHypervisor):
         return await self._executor.execute_async(script, timeout)
 
     def _parse_json_output(self, output: str) -> Any:
-        """Parse la sortie JSON d'une commande PowerShell."""
+        """Parse la sortie JSON d'une commande PowerShell.
+
+        Supporte les JSON imbriqués en utilisant un compteur de profondeur
+        au lieu d'une regex simple qui ne gère que les objets plats.
+        """
         if not output or not output.strip():
             return None
-        
+
         text = output.strip()
-        
-        # Essayer de parser directement
+
+        # Essayer de parser le texte entier directement
         try:
             return json.loads(text)
         except json.JSONDecodeError:
             pass
-        
-        # Essayer d'extraire le JSON d'un bloc { ... } ou [ ... ]
-        import re
-        
-        # Chercher un objet JSON {...}
-        obj_match = re.search(r'\{[^{}]*\}', text, re.DOTALL)
-        if obj_match:
-            try:
-                return json.loads(obj_match.group(0))
-            except json.JSONDecodeError:
-                pass
-        
-        # Chercher un tableau JSON [...]
-        arr_match = re.search(r'\[[^\[\]]*\]', text, re.DOTALL)
-        if arr_match:
-            try:
-                return json.loads(arr_match.group(0))
-            except json.JSONDecodeError:
-                pass
-        
-        # Dernière tentative: chercher la dernière ligne qui ressemble à du JSON
+
+        # Chercher un objet/tableau JSON avec gestion des imbrications
+        start = text.find('{')
+        arr_start = text.find('[')
+        # Prendre le premier trouvé
+        if start == -1 or (arr_start != -1 and arr_start < start):
+            start = arr_start
+        if start == -1:
+            # Dernière tentative: chercher la dernière ligne qui ressemble à du JSON
+            for line in reversed(text.split('\n')):
+                line = line.strip()
+                if line.startswith('{') or line.startswith('['):
+                    try:
+                        return json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+            logger.warning(
+                "json_parse_error",
+                output=text[:200],
+                error="No valid JSON found",
+            )
+            return None
+
+        bracket = text[start]
+        close_bracket = '}' if bracket == '{' else ']'
+        depth = 0
+        in_string = False
+        escape_next = False
+        for i, c in enumerate(text[start:], start):
+            if escape_next:
+                escape_next = False
+                continue
+            if c == '\\' and in_string:
+                escape_next = True
+                continue
+            if c == '"' and not escape_next:
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if c == bracket:
+                depth += 1
+            elif c == close_bracket:
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(text[start:i + 1])
+                    except json.JSONDecodeError:
+                        break
+
+        # Fallback: chercher la dernière ligne qui ressemble à du JSON
         for line in reversed(text.split('\n')):
             line = line.strip()
             if line.startswith('{') or line.startswith('['):
@@ -130,7 +194,7 @@ class HyperVClient(BaseHypervisor):
                     return json.loads(line)
                 except json.JSONDecodeError:
                     continue
-        
+
         logger.warning(
             "json_parse_error",
             output=text[:200],
@@ -218,7 +282,7 @@ class HyperVClient(BaseHypervisor):
         $result = @()
         Get-VM | ForEach-Object {
             $vm = $_
-            $nic = Get-VMNetworkAdapter -VM $vm -ErrorAction SilentlyContinue | Select-Object -First 1
+            $nic = Get-VMNetworkAdapter -VMName $vm.Name -ErrorAction SilentlyContinue | Select-Object -First 1
             
             # Récupérer les IPs non-link-local
             $allIps = @()
@@ -289,10 +353,11 @@ class HyperVClient(BaseHypervisor):
     async def get_vm(self, vm_id: str) -> VMInfo | None:
         """Récupère les informations d'une VM par son nom ou ID."""
         # Essayer par nom d'abord, puis par VMID
+        safe_id = _escape_ps(vm_id)
         script = f"""
-        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        $vm = Get-VM -Name '{safe_id}' -ErrorAction SilentlyContinue
         if (-not $vm) {{
-            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{safe_id}' }}
         }}
         if ($vm) {{
             $vm | Select-Object @{{N='id';E={{$_.VMId.ToString()}}}},
@@ -336,8 +401,14 @@ class HyperVClient(BaseHypervisor):
             path=data.get("Path"),
         )
 
-    async def create_vm(self, specs: VMSpecs) -> VMInfo:
-        """Crée une nouvelle VM avec les spécifications données."""
+    async def create_vm(self, specs: VMSpecs, force: bool = False) -> VMInfo:
+        """
+        Crée une nouvelle VM avec les spécifications données.
+        
+        Args:
+            specs: Spécifications de la VM
+            force: Si True, supprime la VM existante avant de créer (pour retry)
+        """
         
         # Construire les chemins VM et VHDX
         # Si vhdx_path est spécifié, on utilise le même répertoire pour tout (VM + VHDX)
@@ -364,17 +435,39 @@ class HyperVClient(BaseHypervisor):
             ram_gb=specs.ram_gb,
             disk_gb=specs.disk_gb,
             generation=specs.generation,
+            force=force,
         )
         
         # Script de création de VM
-        script = f"""
-        $ErrorActionPreference = 'Stop'
-        
-        # Nettoyer les fichiers orphelins si présents
+        if force:
+            force_cleanup = f"""
+        # Supprimer la VM existante si force=True
+        $existingVm = Get-VM -Name '{specs.name}' -ErrorAction SilentlyContinue
+        if ($existingVm) {{
+            Write-Warning "VM existante détectée, suppression forcée: {specs.name}"
+            # Arrêter la VM si elle est en cours d'exécution
+            if ($existingVm.State -eq 'Running') {{
+                Stop-VM -VM $existingVm -Force -ErrorAction SilentlyContinue
+            }}
+            # Supprimer la VM et ses disques
+            Remove-VM -VM $existingVm -Force -ErrorAction Stop
+            # Attendre un peu pour que la suppression soit complète
+            Start-Sleep -Seconds 2
+        }}
+        """
+        else:
+            force_cleanup = f"""
+        # Vérifier que la VM n'existe pas déjà (si force=False)
         $existingVm = Get-VM -Name '{specs.name}' -ErrorAction SilentlyContinue
         if ($existingVm) {{
             throw "Une VM avec le nom '{specs.name}' existe déjà. Supprimez-la d'abord."
         }}
+        """
+        
+        script = f"""
+        $ErrorActionPreference = 'Stop'
+        
+        {force_cleanup}
         
         # Vérifier si un VHDX orphelin existe et le supprimer
         $vhdxPath = '{vhdx_path}'
@@ -392,14 +485,21 @@ class HyperVClient(BaseHypervisor):
             -NewVHDSizeBytes {specs.disk_gb}GB `
             -SwitchName '{specs.network_switch}'
         
+        # Fix VHD permissions for Hyper-V Virtual Machine service (SID S-1-5-83-0)
+        $acl = Get-Acl '{vhdx_path}'
+        $sid = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-83-0")
+        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($sid, "FullControl", "Allow")
+        $acl.AddAccessRule($rule)
+        Set-Acl -Path '{vhdx_path}' -AclObject $acl
+
         # Configurer le processeur
-        Set-VMProcessor -VM $vm -Count {specs.cpu_count}
+        Set-VMProcessor -VMName $vm.Name -Count {specs.cpu_count}
         
         # Configurer le VLAN si spécifié
-        {f"Set-VMNetworkAdapterVlan -VM $vm -Access -VlanId {specs.vlan_id}" if specs.vlan_id else ""}
+        {f"Set-VMNetworkAdapterVlan -VMName $vm.Name -Access -VlanId {specs.vlan_id}" if specs.vlan_id else ""}
         
         # Ajouter un lecteur DVD si ISO spécifié
-        {f"Add-VMDvdDrive -VM $vm -Path '{specs.iso_path}'" if specs.iso_path else "Add-VMDvdDrive -VM $vm"}
+        {f"Add-VMDvdDrive -VMName $vm.Name -Path '{specs.iso_path}'" if specs.iso_path else "Add-VMDvdDrive -VMName $vm.Name"}
         
         # Retourner les infos de la VM créée
         $vm | Select-Object @{{N='id';E={{$_.VMId.ToString()}}}},
@@ -449,24 +549,25 @@ class HyperVClient(BaseHypervisor):
             vm_id=vm_id,
             delete_disks=delete_disks,
         )
-        
+
+        safe_id = _escape_ps(vm_id)
         script = f"""
         $ErrorActionPreference = 'Stop'
-        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        $vm = Get-VM -Name '{safe_id}' -ErrorAction SilentlyContinue
         if (-not $vm) {{
-            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{safe_id}' }}
         }}
-        
+
         if (-not $vm) {{
             # VM n'existe pas sur l'hyperviseur - considéré comme un succès
-            Write-Output "VM not found on hypervisor (already deleted or never created): {vm_id}"
+            Write-Output "VM not found on hypervisor (already deleted or never created): {safe_id}"
             exit 0
         }}
         
         # Arrêter la VM si elle tourne ou dans un état intermédiaire
         if ($vm.State -ne 'Off') {{
             try {{
-                Stop-VM -VM $vm -Force -TurnOff -ErrorAction SilentlyContinue
+                Stop-VM -VMName $vm.Name -Force -TurnOff -ErrorAction SilentlyContinue
                 Start-Sleep -Seconds 2
             }} catch {{
                 Write-Warning "Could not stop VM: $_"
@@ -476,12 +577,12 @@ class HyperVClient(BaseHypervisor):
         {"# Récupérer les chemins des disques avant suppression" if delete_disks else ""}
         {'''$disks = @()
         try {
-            $disks = Get-VMHardDiskDrive -VM $vm -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Path
+            $disks = Get-VMHardDiskDrive -VMName $vm.Name -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Path
         } catch { }''' if delete_disks else ""}
         
         # Supprimer la VM
         try {{
-            Remove-VM -VM $vm -Force
+            Remove-VM -VMName $vm.Name -Force
         }} catch {{
             Write-Warning "Error removing VM: $_"
             throw
@@ -507,13 +608,14 @@ class HyperVClient(BaseHypervisor):
 
     async def start_vm(self, vm_id: str) -> bool:
         """Démarre une VM."""
+        safe_id = _escape_ps(vm_id)
         script = f"""
-        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        $vm = Get-VM -Name '{safe_id}' -ErrorAction SilentlyContinue
         if (-not $vm) {{
-            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{safe_id}' }}
         }}
         if ($vm) {{
-            Start-VM -VM $vm
+            Start-VM -VMName $vm.Name
             Write-Output "VM started"
         }} else {{
             throw "VM not found"
@@ -531,14 +633,14 @@ class HyperVClient(BaseHypervisor):
     async def stop_vm(self, vm_id: str, force: bool = False) -> bool:
         """Arrête une VM."""
         force_param = "-TurnOff" if force else ""
-        
+        safe_id = _escape_ps(vm_id)
         script = f"""
-        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        $vm = Get-VM -Name '{safe_id}' -ErrorAction SilentlyContinue
         if (-not $vm) {{
-            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{safe_id}' }}
         }}
         if ($vm) {{
-            Stop-VM -VM $vm -Force {force_param}
+            Stop-VM -VMName $vm.Name -Force {force_param}
             Write-Output "VM stopped"
         }} else {{
             throw "VM not found"
@@ -556,14 +658,14 @@ class HyperVClient(BaseHypervisor):
     async def restart_vm(self, vm_id: str, force: bool = False) -> bool:
         """Redémarre une VM."""
         force_param = "-Force" if force else ""
-        
+        safe_id = _escape_ps(vm_id)
         script = f"""
-        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        $vm = Get-VM -Name '{safe_id}' -ErrorAction SilentlyContinue
         if (-not $vm) {{
-            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{safe_id}' }}
         }}
         if ($vm) {{
-            Restart-VM -VM $vm {force_param}
+            Restart-VM -VMName $vm.Name {force_param}
             Write-Output "VM restarted"
         }} else {{
             throw "VM not found"
@@ -580,10 +682,11 @@ class HyperVClient(BaseHypervisor):
 
     async def get_vm_state(self, vm_id: str) -> str | None:
         """Récupère l'état d'une VM."""
+        safe_id = _escape_ps(vm_id)
         script = f"""
-        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        $vm = Get-VM -Name '{safe_id}' -ErrorAction SilentlyContinue
         if (-not $vm) {{
-            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{safe_id}' }}
         }}
         if ($vm) {{
             Write-Output $vm.State
@@ -714,6 +817,163 @@ class HyperVClient(BaseHypervisor):
         logger.info("hyperv_isos_listed", count=len(data), path=iso_folder)
         return data
 
+    async def check_disk_space(
+        self,
+        path: str | None = None,
+        required_gb: float = 0,
+    ) -> dict[str, Any]:
+        """
+        Vérifie l'espace disque disponible sur l'hyperviseur.
+
+        Args:
+            path: Chemin à vérifier (par défaut: temp_path configuré).
+                  La lettre de lecteur est extraite automatiquement.
+            required_gb: Espace requis en Go. Si > 0, lève une erreur si insuffisant.
+
+        Returns:
+            Dict avec total_gb, free_gb, used_gb, percent_used, drive_letter.
+        """
+        check_path = path or self.temp_path
+        # Extraire la lettre de lecteur (ex: "D" depuis "D:\\HyperV\\Temp")
+        drive_letter = check_path[0] if len(check_path) >= 2 and check_path[1] == ":" else "C"
+
+        script = f"""
+        $drive = Get-PSDrive -Name '{drive_letter}' -ErrorAction Stop
+        $totalGB = [math]::Round(($drive.Used + $drive.Free) / 1GB, 2)
+        $freeGB = [math]::Round($drive.Free / 1GB, 2)
+        $usedGB = [math]::Round($drive.Used / 1GB, 2)
+        $pctUsed = if ($totalGB -gt 0) {{ [math]::Round(($usedGB / $totalGB) * 100, 1) }} else {{ 0 }}
+        @{{
+            drive_letter = '{drive_letter}'
+            total_gb = $totalGB
+            free_gb = $freeGB
+            used_gb = $usedGB
+            percent_used = $pctUsed
+        }} | ConvertTo-Json
+        """
+
+        result = await self._execute(script, timeout=30)
+        if not result.success:
+            logger.warning("hyperv_disk_space_check_failed", error=result.stderr, path=check_path)
+            return {"drive_letter": drive_letter, "total_gb": 0, "free_gb": 0, "used_gb": 0, "percent_used": 0}
+
+        data = self._parse_json_output(result.stdout) or {}
+
+        free_gb = float(data.get("free_gb", 0))
+        if required_gb > 0 and free_gb < required_gb:
+            raise VMOperationError(
+                check_path,
+                "check_disk_space",
+                f"Espace disque insuffisant sur {drive_letter}: "
+                f"{free_gb:.1f} Go disponible, {required_gb:.1f} Go requis",
+            )
+
+        logger.info(
+            "hyperv_disk_space_checked",
+            drive=drive_letter,
+            free_gb=free_gb,
+            required_gb=required_gb,
+        )
+        return data
+
+    async def find_orphan_vhdx(
+        self,
+        paths: list[str] | None = None,
+        delete: bool = False,
+    ) -> list[dict[str, Any]]:
+        """
+        Trouve les fichiers VHDX qui ne sont attachés à aucune VM.
+
+        Args:
+            paths: Dossiers à scanner (défaut: vhdx_path + vm_path).
+            delete: Si True, supprime les orphelins trouvés.
+
+        Returns:
+            Liste de dicts avec path, size_gb, last_modified pour chaque orphelin.
+        """
+        default_paths = [self.vhdx_path, self.vm_path]
+        # Toujours scanner l'ancien emplacement C:\ pour trouver les orphelins hérités
+        for legacy in ["C:\\HyperV\\VirtualHardDisks", "C:\\HyperV\\VirtualMachines"]:
+            if legacy not in default_paths:
+                default_paths.append(legacy)
+        scan_paths = paths or default_paths
+        ps_paths = ", ".join(f"'{_escape_ps(p)}'" for p in scan_paths)
+
+        script = f"""
+        $ErrorActionPreference = 'Stop'
+        $scanPaths = @({ps_paths})
+
+        # 1. Récupérer tous les VHDX attachés à des VMs
+        $attachedVhdx = @{{}}
+        Get-VM | Get-VMHardDiskDrive | ForEach-Object {{
+            if ($_.Path) {{ $attachedVhdx[$_.Path.ToLower()] = $true }}
+        }}
+
+        # 2. Scanner les dossiers
+        $orphans = @()
+        foreach ($dir in $scanPaths) {{
+            if (-not (Test-Path $dir)) {{ continue }}
+            Get-ChildItem -Path $dir -Filter '*.vhdx' -Recurse -ErrorAction SilentlyContinue | ForEach-Object {{
+                if (-not $attachedVhdx.ContainsKey($_.FullName.ToLower())) {{
+                    $orphans += [PSCustomObject]@{{
+                        path          = $_.FullName
+                        size_gb       = [math]::Round($_.Length / 1GB, 2)
+                        size_bytes    = $_.Length
+                        last_modified = $_.LastWriteTime.ToString('yyyy-MM-ddTHH:mm:ss')
+                        parent_folder = $_.DirectoryName
+                    }}
+                }}
+            }}
+        }}
+
+        # 3. Suppression si demandée
+        $deleted = $false
+        {"" if not delete else '''
+        foreach ($o in $orphans) {
+            Remove-Item $o.path -Force -ErrorAction SilentlyContinue
+        }
+        $deleted = $true
+        '''}
+
+        @{{
+            orphans       = $orphans
+            total_count   = $orphans.Count
+            total_size_gb = [math]::Round(($orphans | Measure-Object -Property size_bytes -Sum).Sum / 1GB, 2)
+            deleted       = $deleted
+        }} | ConvertTo-Json -Depth 3
+        """
+
+        result = await self._execute(script, timeout=120)
+        if not result.success:
+            logger.warning("hyperv_orphan_vhdx_scan_failed", error=result.stderr)
+            return []
+
+        data = self._parse_json_output(result.stdout) or {}
+        orphans = data.get("orphans", [])
+        if isinstance(orphans, dict):
+            orphans = [orphans]
+
+        total_gb = data.get("total_size_gb", 0)
+        logger.info(
+            "hyperv_orphan_vhdx_found",
+            count=len(orphans),
+            total_size_gb=total_gb,
+            deleted=delete,
+        )
+        return orphans
+
+    async def ensure_paths_exist(self) -> None:
+        """Crée les dossiers de stockage sur l'hyperviseur s'ils n'existent pas."""
+        paths = [self.vm_path, self.vhdx_path, self.iso_path, self.temp_path, self.unattend_path]
+        conditions = " ".join(
+            f"if (-not (Test-Path '{_escape_ps(p)}')) {{ New-Item -ItemType Directory -Path '{_escape_ps(p)}' -Force | Out-Null }}"
+            for p in paths
+        )
+        script = f"$ErrorActionPreference = 'Stop'\n{conditions}\nWrite-Output 'PATHS_OK'"
+        result = await self._execute(script, timeout=30)
+        if not result.success or "PATHS_OK" not in (result.stdout or ""):
+            logger.warning("hyperv_ensure_paths_failed", error=result.stderr)
+
     async def create_switch(
         self,
         name: str,
@@ -824,17 +1084,21 @@ class HyperVClient(BaseHypervisor):
 
     async def mount_iso(self, vm_id: str, iso_path: str) -> bool:
         """Monte une ISO sur le lecteur DVD d'une VM."""
+        safe_id = _escape_ps(vm_id)
+        safe_iso = _escape_ps(iso_path)
         script = f"""
-        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        $vm = Get-VM -Name '{safe_id}' -ErrorAction SilentlyContinue
         if (-not $vm) {{
-            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{safe_id}' }}
         }}
         if ($vm) {{
-            $dvd = Get-VMDvdDrive -VM $vm
+            # Attacher l'ISO d'installation au slot explicite (Controller 0, Location 1)
+            # Le seed ISO ira sur (0, 2) via _create_and_attach_seed_iso
+            $dvd = Get-VMDvdDrive -VMName $vm.Name | Where-Object {{ $_.ControllerNumber -eq 0 -and $_.ControllerLocation -eq 1 }}
             if (-not $dvd) {{
-                Add-VMDvdDrive -VM $vm -Path '{iso_path}'
+                Add-VMDvdDrive -VMName $vm.Name -ControllerNumber 0 -ControllerLocation 1 -Path '{safe_iso}'
             }} else {{
-                Set-VMDvdDrive -VMDvdDrive $dvd[0] -Path '{iso_path}'
+                Set-VMDvdDrive -VMName $vm.Name -ControllerNumber 0 -ControllerLocation 1 -Path '{safe_iso}'
             }}
             Write-Output "ISO mounted"
         }} else {{
@@ -850,23 +1114,147 @@ class HyperVClient(BaseHypervisor):
         logger.info("hyperv_iso_mounted", vm_id=vm_id, iso_path=iso_path)
         return True
 
+    async def remaster_iso_with_preseed(
+        self,
+        original_iso_path: str,
+        preseed_file_path: str,
+        vm_name: str = "",
+    ) -> str:
+        """
+        Remaster a Debian netinst ISO to embed a preseed.cfg file.
+
+        Two WinRM calls:
+        1. Extract ISO, inject preseed, modify boot configs
+        2. Rebuild ISO using oscdimg.exe (Windows ADK)
+
+        Returns:
+            The absolute path to the remastered ISO on the Hyper-V host.
+        """
+        safe_original = _escape_ps(original_iso_path)
+        safe_preseed = _escape_ps(preseed_file_path)
+        safe_vm = _escape_ps(vm_name or "preseed")
+        work_dir = f"{self.temp_path}\\Remaster\\{safe_vm}"
+        remastered_iso = f"{self.temp_path}\\Remaster\\{safe_vm}_preseed.iso"
+
+        # ── Step 1: Extract ISO, inject preseed, modify boot configs ──
+        extract_script = f"""
+        $ErrorActionPreference = 'Stop'
+        $origIso = '{safe_original}'
+        $isoDir  = '{_escape_ps(work_dir)}\\iso_content'
+        $preseed = '{safe_preseed}'
+
+        if (Test-Path $isoDir) {{ Remove-Item $isoDir -Recurse -Force }}
+        New-Item -ItemType Directory -Path $isoDir -Force | Out-Null
+
+        $mountResult = Mount-DiskImage -ImagePath $origIso -PassThru
+        $driveLetter = ($mountResult | Get-Volume).DriveLetter
+        if (-not $driveLetter) {{ throw "Could not mount original ISO" }}
+        try {{
+            Copy-Item -Path "$($driveLetter):\\*" -Destination $isoDir -Recurse -Force
+            Get-ChildItem -Path $isoDir -Recurse | ForEach-Object {{
+                $_.Attributes = $_.Attributes -band (-bnot [System.IO.FileAttributes]::ReadOnly)
+            }}
+        }} finally {{
+            Dismount-DiskImage -ImagePath $origIso | Out-Null
+        }}
+
+        Copy-Item -Path $preseed -Destination (Join-Path $isoDir 'preseed.cfg') -Force
+
+        $txtCfg = "$isoDir\\isolinux\\txt.cfg"
+        if (Test-Path $txtCfg) {{
+            $c = Get-Content $txtCfg -Raw
+            $c = $c -replace '(append\\s+.*?)(?=\\r?\\n)', '$1 auto=true priority=critical preseed/file=/cdrom/preseed.cfg'
+            Set-Content -Path $txtCfg -Value $c -NoNewline
+        }}
+
+        $grubCfg = "$isoDir\\boot\\grub\\grub.cfg"
+        if (Test-Path $grubCfg) {{
+            $c = Get-Content $grubCfg -Raw
+            $c = $c -replace '(linux\\s+/install[.a-z]*/vmlinuz\\s+.*?)(?=\\r?\\n)', '$1 auto=true priority=critical preseed/file=/cdrom/preseed.cfg'
+            # Set timeout and default entry for automated install (entry 1 = text Install)
+            $c = "set timeout=3`nset default=1`n" + $c
+            Set-Content -Path $grubCfg -Value $c -NoNewline
+        }}
+
+        Write-Output "EXTRACT_OK"
+        """
+
+        result = await self._execute(extract_script, timeout=300)
+        if not result.success or "EXTRACT_OK" not in (result.stdout or ""):
+            raise VMOperationError(
+                vm_name, "remaster_iso",
+                f"Failed to extract/patch ISO: {result.stderr}",
+            )
+
+        # ── Step 2: Rebuild ISO with oscdimg.exe ──
+        iso_dir_path = f"{work_dir}\\iso_content"
+        rebuild_script = f"""
+        $ErrorActionPreference = 'Stop'
+        $isoDir    = '{_escape_ps(iso_dir_path)}'
+        $outputIso = '{_escape_ps(remastered_iso)}'
+        $oscdimg   = '{_escape_ps(settings.oscdimg_path)}'
+
+        if (Test-Path $outputIso) {{ Remove-Item $outputIso -Force }}
+
+        if (-not (Test-Path $oscdimg)) {{ throw "oscdimg.exe not found at: $oscdimg" }}
+
+        $bootBin = "$isoDir\\isolinux\\isolinux.bin"
+        $efiBoot = "$isoDir\\boot\\grub\\efi.img"
+
+        if ((Test-Path $bootBin) -and (Test-Path $efiBoot)) {{
+            # Use Joliet + ISO 9660 (-j1) instead of UDF (-u2).
+            # UDF is not readable by GRUB EFI in Hyper-V Gen2.
+            # -j1 provides Joliet long names (used by Linux kernel) + ISO 9660 8.3 fallback.
+            # GRUB EFI reads ISO 9660 layer for search --file (short names OK for .disk/id/).
+            & $oscdimg -m -o -j1 -lDebian -bootdata:"2#p0,e,b$bootBin#pEF,e,b$efiBoot" $isoDir $outputIso
+        }} elseif (Test-Path $bootBin) {{
+            & $oscdimg -m -o -j1 -lDebian -b"$bootBin" $isoDir $outputIso
+        }} else {{
+            & $oscdimg -m -o -j1 -lDebian $isoDir $outputIso
+        }}
+
+        if ($LASTEXITCODE -ne 0) {{ throw "oscdimg failed with exit code $LASTEXITCODE" }}
+        if (-not (Test-Path $outputIso)) {{ throw "Remastered ISO not created" }}
+
+        $size = (Get-Item $outputIso).Length
+        Write-Output "REMASTERED:$($outputIso):$size"
+        """
+
+        result = await self._execute(rebuild_script, timeout=600)
+        if not result.success or "REMASTERED:" not in (result.stdout or ""):
+            raise VMOperationError(
+                vm_name, "remaster_iso",
+                f"Failed to rebuild ISO: {result.stderr}",
+            )
+
+        logger.info(
+            "hyperv_iso_remastered",
+            vm_name=vm_name,
+            original_iso=original_iso_path,
+            remastered_iso=remastered_iso,
+            output=result.stdout.strip(),
+        )
+
+        return remastered_iso
+
     async def unmount_iso(self, vm_id: str, unmount_all: bool = True) -> bool:
         """
         Démonte les ISOs des lecteurs DVD.
-        
+
         Args:
             vm_id: ID ou nom de la VM
             unmount_all: Si True, démonte tous les lecteurs DVD. Sinon, juste le premier.
         """
+        safe_id = _escape_ps(vm_id)
         if unmount_all:
             script = f"""
-            $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+            $vm = Get-VM -Name '{safe_id}' -ErrorAction SilentlyContinue
             if (-not $vm) {{
-                $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+                $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{safe_id}' }}
             }}
             if ($vm) {{
                 $count = 0
-                Get-VMDvdDrive -VM $vm | ForEach-Object {{
+                Get-VMDvdDrive -VMName $vm.Name | ForEach-Object {{
                     if ($_.Path) {{
                         Set-VMDvdDrive -VMName $vm.Name -ControllerNumber $_.ControllerNumber -ControllerLocation $_.ControllerLocation -Path $null
                         $count++
@@ -879,12 +1267,12 @@ class HyperVClient(BaseHypervisor):
             """
         else:
             script = f"""
-            $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+            $vm = Get-VM -Name '{safe_id}' -ErrorAction SilentlyContinue
             if (-not $vm) {{
-                $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+                $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{safe_id}' }}
             }}
             if ($vm) {{
-                $dvd = Get-VMDvdDrive -VM $vm | Select-Object -First 1
+                $dvd = Get-VMDvdDrive -VMName $vm.Name | Select-Object -First 1
                 if ($dvd -and $dvd.Path) {{
                     Set-VMDvdDrive -VMDvdDrive $dvd -Path $null
                 }}
@@ -905,22 +1293,23 @@ class HyperVClient(BaseHypervisor):
     async def enable_guest_services(self, vm_id: str) -> bool:
         """
         Active le Guest Service Interface (copie de fichiers hôte -> VM).
-        
+
         Args:
             vm_id: ID ou nom de la VM
         """
+        safe_id = _escape_ps(vm_id)
         script = f"""
-        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        $vm = Get-VM -Name '{safe_id}' -ErrorAction SilentlyContinue
         if (-not $vm) {{
-            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{safe_id}' }}
         }}
         if ($vm) {{
             # Rechercher le service Guest (nom peut varier selon la langue)
-            $guestSvc = Get-VMIntegrationService -VM $vm | Where-Object {{ 
+            $guestSvc = Get-VMIntegrationService -VMName $vm.Name | Where-Object {{ 
                 $_.Name -like "*invit*" -or $_.Name -like "*Guest*" 
             }}
             if ($guestSvc) {{
-                Enable-VMIntegrationService -VM $vm -Name $guestSvc.Name
+                Enable-VMIntegrationService -VMName $vm.Name -Name $guestSvc.Name
                 Write-Output "Guest Service enabled: $($guestSvc.Name)"
             }} else {{
                 Write-Output "Guest Service not found"
@@ -945,33 +1334,34 @@ class HyperVClient(BaseHypervisor):
     ) -> bool:
         """
         Configure le premier périphérique de boot d'une VM Gen2.
-        
+
         Args:
             vm_id: ID ou nom de la VM
             device_type: Type de périphérique (HardDrive, DVD, Network)
         """
+        safe_id = _escape_ps(vm_id)
         script = f"""
-        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        $vm = Get-VM -Name '{safe_id}' -ErrorAction SilentlyContinue
         if (-not $vm) {{
-            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{safe_id}' }}
         }}
         if ($vm) {{
             if ($vm.Generation -eq 2) {{
                 $device = $null
                 switch ('{device_type}') {{
                     'HardDrive' {{ 
-                        $device = Get-VMHardDiskDrive -VM $vm | Select-Object -First 1
+                        $device = Get-VMHardDiskDrive -VMName $vm.Name | Select-Object -First 1
                     }}
                     'DVD' {{ 
-                        $device = Get-VMDvdDrive -VM $vm | Select-Object -First 1
+                        $device = Get-VMDvdDrive -VMName $vm.Name | Select-Object -First 1
                     }}
                     'Network' {{ 
-                        $device = Get-VMNetworkAdapter -VM $vm | Select-Object -First 1
+                        $device = Get-VMNetworkAdapter -VMName $vm.Name | Select-Object -First 1
                     }}
                 }}
                 
                 if ($device) {{
-                    Set-VMFirmware -VM $vm -FirstBootDevice $device
+                    Set-VMFirmware -VMName $vm.Name -FirstBootDevice $device
                     Write-Output "First boot device set to {device_type}"
                 }} else {{
                     throw "Device type {device_type} not found"
@@ -1063,32 +1453,60 @@ class HyperVClient(BaseHypervisor):
         boot_order: list[str],
     ) -> bool:
         """Configure l'ordre de boot d'une VM Gen2."""
-        # Mapping des noms de périphériques vers les objets PowerShell
-        # boot_order peut contenir: "DVD", "HardDrive", "Network", "File"
-        
+        escaped_vm_id = _escape_ps(vm_id)
+
+        # Mapping des noms simplifiés vers les types réels Hyper-V
+        # BootType possibles : HardDiskDrive, DvdDrive, NetworkAdapter, File
+        type_map = {
+            "DVD": "Dvd",
+            "HardDrive": "HardDisk",
+            "Network": "Network",
+            "File": "File",
+        }
+        # Construire les filtres PowerShell
+        filters = []
+        for device in boot_order:
+            pattern = type_map.get(device, device)
+            filters.append(
+                f"$dev = $allBoot | Where-Object {{ $_.Device -is [Microsoft.HyperV.PowerShell.{pattern}Drive] -or $_.BootType.ToString() -match '{pattern}' }} | Select-Object -First 1\n"
+                f"if ($dev) {{ $bootDevices += $dev }}"
+            )
+        filters_ps = "\n".join(filters)
+
         script = f"""
-        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        $vm = Get-VM -Name '{escaped_vm_id}' -ErrorAction SilentlyContinue
         if (-not $vm) {{
-            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{escaped_vm_id}' }}
         }}
-        if ($vm) {{
-            if ($vm.Generation -eq 2) {{
-                $bootDevices = @()
-                {"".join([f'''
-                $dev = Get-VMFirmware -VM $vm | Select-Object -ExpandProperty BootOrder | Where-Object {{ $_.BootType -like '*{device}*' }} | Select-Object -First 1
-                if ($dev) {{ $bootDevices += $dev }}
-                ''' for device in boot_order])}
-                
-                if ($bootDevices.Count -gt 0) {{
-                    Set-VMFirmware -VM $vm -BootOrder $bootDevices
-                }}
-                Write-Output "Boot order configured"
+        if (-not $vm) {{ throw "VM not found: {escaped_vm_id}" }}
+
+        if ($vm.Generation -eq 2) {{
+            $fw = Get-VMFirmware -VMName $vm.Name
+            $allBoot = $fw.BootOrder
+            $bootDevices = @()
+
+            # Récupérer les devices DVD, HDD, Network par type réel
+            {filters_ps}
+
+            if ($bootDevices.Count -gt 0) {{
+                Set-VMFirmware -VMName $vm.Name -BootOrder $bootDevices
+                Write-Output "Boot order set: $($bootDevices.Count) devices"
             }} else {{
-                # Gen1 VMs use BIOS boot order
-                Write-Output "Gen1 VM - BIOS boot order not modified"
+                # Fallback: mettre le DVD en premier directement
+                $dvd = Get-VMDvdDrive -VMName $vm.Name | Select-Object -First 1
+                $hdd = Get-VMHardDiskDrive -VMName $vm.Name | Select-Object -First 1
+                $net = Get-VMNetworkAdapter -VMName $vm.Name | Select-Object -First 1
+                $order = @()
+                if ($dvd) {{ $order += $dvd }}
+                if ($hdd) {{ $order += $hdd }}
+                if ($net) {{ $order += $net }}
+                if ($order.Count -gt 0) {{
+                    Set-VMFirmware -VMName $vm.Name -FirstBootDevice $order[0]
+                }}
+                Write-Output "Boot order set via FirstBootDevice (fallback)"
             }}
         }} else {{
-            throw "VM not found"
+            Write-Output "Gen1 VM - BIOS boot order not modified"
         }}
         """
         
@@ -1133,7 +1551,7 @@ class HyperVClient(BaseHypervisor):
         # Étape 1: Créer le dossier et le VHDX
         script_create = f"""
         $vmName = '{vm_id}'
-        $unattendDir = 'C:\\HyperV\\Unattend'
+        $unattendDir = '{self.unattend_path}'
         $vhdxPath = "$unattendDir\\${{vmName}}_unattend.vhdx"
         
         # Créer le dossier s'il n'existe pas
@@ -1151,18 +1569,26 @@ class HyperVClient(BaseHypervisor):
         }}
         
         if ($vm.State -eq 'Running') {{
-            Stop-VM -VM $vm -Force -TurnOff
+            Stop-VM -VMName $vm.Name -Force -TurnOff
             Start-Sleep -Seconds 2
         }}
         
         # Supprimer l'ancien disque unattend s'il existe
-        Get-VMHardDiskDrive -VM $vm | Where-Object {{ $_.Path -like '*unattend*' }} | Remove-VMHardDiskDrive -ErrorAction SilentlyContinue
+        Get-VMHardDiskDrive -VMName $vm.Name | Where-Object {{ $_.Path -like '*unattend*' }} | Remove-VMHardDiskDrive -ErrorAction SilentlyContinue
         if (Test-Path $vhdxPath) {{
             Remove-Item $vhdxPath -Force
         }}
         
         # Créer le VHDX
         New-VHD -Path $vhdxPath -SizeBytes 50MB -Dynamic | Out-Null
+
+        # Fix VHD permissions for Hyper-V Virtual Machine service (SID S-1-5-83-0)
+        $acl = Get-Acl $vhdxPath
+        $sid = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-83-0")
+        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($sid, "FullControl", "Allow")
+        $acl.AddAccessRule($rule)
+        Set-Acl -Path $vhdxPath -AclObject $acl
+
         $disk = Mount-VHD -Path $vhdxPath -Passthru
         $disk | Initialize-Disk -PartitionStyle MBR
         $partition = $disk | New-Partition -UseMaximumSize -AssignDriveLetter
@@ -1208,7 +1634,9 @@ class HyperVClient(BaseHypervisor):
         """
         result = await self._execute(script_first, timeout=30)
         if not result.success:
-            await self._execute(f"Dismount-VHD -Path '{vhdx_path}' -ErrorAction SilentlyContinue")
+            dismount_result = await self._execute(f"Dismount-VHD -Path '{vhdx_path}' -ErrorAction SilentlyContinue")
+            if not dismount_result.success:
+                logger.warning("vhd_dismount_failed", path=vhdx_path, error=dismount_result.stderr)
             raise VMOperationError(vm_id, "inject_unattend_write_chunk1", result.stderr)
         
         # Ajouter les chunks suivants
@@ -1220,7 +1648,9 @@ class HyperVClient(BaseHypervisor):
             """
             result = await self._execute(script_append, timeout=30)
             if not result.success:
-                await self._execute(f"Dismount-VHD -Path '{vhdx_path}' -ErrorAction SilentlyContinue")
+                dismount_result = await self._execute(f"Dismount-VHD -Path '{vhdx_path}' -ErrorAction SilentlyContinue")
+                if not dismount_result.success:
+                    logger.warning("vhd_dismount_failed", path=vhdx_path, error=dismount_result.stderr)
                 raise VMOperationError(vm_id, f"inject_unattend_write_chunk{i}", result.stderr)
         
         # Décoder le base64 et créer le fichier final
@@ -1240,7 +1670,9 @@ class HyperVClient(BaseHypervisor):
         result = await self._execute(script_decode, timeout=30)
         
         if not result.success:
-            await self._execute(f"Dismount-VHD -Path '{vhdx_path}' -ErrorAction SilentlyContinue")
+            dismount_result = await self._execute(f"Dismount-VHD -Path '{vhdx_path}' -ErrorAction SilentlyContinue")
+            if not dismount_result.success:
+                logger.warning("vhd_dismount_failed", path=vhdx_path, error=dismount_result.stderr)
             raise VMOperationError(vm_id, "inject_unattend_decode", result.stderr)
         
         logger.debug("hyperv_unattend_file_written", vm_id=vm_id)
@@ -1251,8 +1683,10 @@ class HyperVClient(BaseHypervisor):
         $vhdxPath = '{vhdx_path}'
         
         # Démonter le VHD
-        Dismount-VHD -Path $vhdxPath
-        
+        Dismount-VHD -Path $vhdxPath -ErrorAction Stop
+        $mounted = Get-VHD -Path $vhdxPath -ErrorAction SilentlyContinue
+        if ($mounted.Attached) {{ Write-Error "VHD still mounted after dismount: $vhdxPath" }}
+
         # Récupérer la VM
         $vm = Get-VM -Name $vmName -ErrorAction SilentlyContinue
         if (-not $vm) {{
@@ -1260,12 +1694,12 @@ class HyperVClient(BaseHypervisor):
         }}
         
         # Attacher le disque unattend à la VM
-        Add-VMHardDiskDrive -VM $vm -Path $vhdxPath -ControllerType SCSI -ControllerNumber 0 -ControllerLocation 2
+        Add-VMHardDiskDrive -VMName $vm.Name -Path $vhdxPath -ControllerType SCSI -ControllerNumber 0 -ControllerLocation 2
         
         # Configurer le boot order: DVD en premier
-        $dvd = Get-VMDvdDrive -VM $vm | Select-Object -First 1
+        $dvd = Get-VMDvdDrive -VMName $vm.Name | Select-Object -First 1
         if ($dvd) {{
-            Set-VMFirmware -VM $vm -FirstBootDevice $dvd
+            Set-VMFirmware -VMName $vm.Name -FirstBootDevice $dvd
         }}
         
         Write-Output "Unattend disk attached and boot order configured"
@@ -1316,7 +1750,7 @@ class HyperVClient(BaseHypervisor):
         # Étape 1: Préparer les dossiers et copier l'ISO
         script_prepare = f"""
         $sourceIso = '{source_iso}'
-        $tempDir = 'C:\\HyperV\\Temp\\ISO_Build'
+        $tempDir = '{self.temp_path}\\ISO_Build'
         $isoContentDir = "$tempDir\\ISOContent"
         
         # Nettoyer et créer les dossiers
@@ -1388,12 +1822,12 @@ class HyperVClient(BaseHypervisor):
         if not output_iso:
             import os
             base_name = source_iso.rsplit('\\', 1)[-1].rsplit('.', 1)[0]
-            output_iso = f"C:\\HyperV\\ISOs\\{base_name}_AUTO.iso"
+            output_iso = f"{self.iso_path}\\{base_name}_AUTO.iso"
         
         script_create_iso = f"""
         $isoContentDir = '{iso_content_dir}'
         $outputIso = '{output_iso}'
-        $oscdimg = "C:\\Program Files (x86)\\Windows Kits\\10\\Assessment and Deployment Kit\\Deployment Tools\\amd64\\Oscdimg\\oscdimg.exe"
+        $oscdimg = "{settings.oscdimg_path}"
         $efisys = "$isoContentDir\\efi\\microsoft\\boot\\efisys.bin"
         $etfsboot = "$isoContentDir\\boot\\etfsboot.com"
         
@@ -1436,6 +1870,253 @@ class HyperVClient(BaseHypervisor):
         logger.info("hyperv_custom_iso_created", output_iso=created_iso)
         return created_iso
 
+    async def inject_linux_config(
+        self,
+        vm_name: str,
+        config_content: str,
+        config_type: str,
+        vm_path: str | None = None,
+    ) -> bool:
+        """
+        Injecte une configuration Linux non-interactive via une ISO secondaire attachée à la VM.
+
+        Crée une ISO temporaire contenant le fichier de configuration avec le nom
+        et la structure appropriés, puis l'attache comme lecteur DVD à la VM.
+
+        Pour preseed: /preseed.cfg sur l'ISO (label: PRESEED)
+        Pour kickstart: /ks.cfg sur l'ISO (label: KSCONFIG)
+        Pour autoinstall: /autoinstall/user-data + /autoinstall/meta-data sur l'ISO (label: CIDATA)
+        Pour cloud-init: /user-data + /meta-data sur l'ISO (label: cidata)
+
+        Args:
+            vm_name: Nom de la VM
+            config_content: Contenu du fichier de configuration
+            config_type: Type de configuration ("preseed", "kickstart", "autoinstall", "cloud-init")
+            vm_path: Chemin de stockage de la VM (optionnel, utilise self.vm_path par défaut)
+
+        Returns:
+            True si succès
+        """
+        logger.info(
+            "hyperv_inject_linux_config_start",
+            vm_name=vm_name,
+            config_type=config_type,
+            content_length=len(config_content),
+        )
+
+        # Valider le type de configuration
+        valid_types = ("preseed", "kickstart", "autoinstall", "cloud-init")
+        if config_type not in valid_types:
+            logger.error(
+                "hyperv_inject_linux_config_invalid_type",
+                config_type=config_type,
+                valid_types=valid_types,
+            )
+            return False
+
+        # Déterminer le label ISO et la structure des fichiers selon le type
+        type_config = {
+            "preseed": {"label": "PRESEED", "files": [("preseed.cfg", config_content)]},
+            "kickstart": {"label": "KSCONFIG", "files": [("ks.cfg", config_content)]},
+            "autoinstall": {
+                "label": "CIDATA",
+                "files": [
+                    ("autoinstall\\user-data", config_content),
+                    ("autoinstall\\meta-data", ""),
+                ],
+            },
+            "cloud-init": {
+                "label": "cidata",
+                "files": [
+                    ("user-data", config_content),
+                    ("meta-data", ""),
+                ],
+            },
+        }
+
+        cfg = type_config[config_type]
+        label = cfg["label"]
+        resolved_vm_path = vm_path or self.vm_path
+
+        escaped_vm_name = _escape_ps(vm_name)
+        escaped_label = _escape_ps(label)
+        escaped_vm_path = _escape_ps(resolved_vm_path)
+
+        # Encoder les contenus en Base64 pour éviter les limites de longueur WinRM
+        import base64
+        file_write_commands = ""
+        for file_path, content in cfg["files"]:
+            escaped_file_path = _escape_ps(file_path)
+            # Créer le sous-dossier si nécessaire (ex: autoinstall/)
+            if "\\" in file_path:
+                subdir = file_path.rsplit("\\", 1)[0]
+                escaped_subdir = _escape_ps(subdir)
+                file_write_commands += f"""
+New-Item -Path "$srcFolder\\{escaped_subdir}" -ItemType Directory -Force | Out-Null
+"""
+            if content:
+                # Encoder en Base64 pour passer le contenu sans limite de taille
+                b64 = base64.b64encode(content.encode("utf-8")).decode("ascii")
+                file_write_commands += f"""
+$bytes = [System.Convert]::FromBase64String('{b64}')
+[System.IO.File]::WriteAllBytes("$srcFolder\\{escaped_file_path}", $bytes)
+"""
+            else:
+                # Fichier vide (meta-data)
+                file_write_commands += f"""
+[System.IO.File]::WriteAllText("$srcFolder\\{escaped_file_path}", '', [System.Text.Encoding]::UTF8)
+"""
+
+        try:
+            script = f"""
+$isoPath = '{escaped_vm_path}\\{escaped_vm_name}_seed.iso'
+$srcFolder = "$env:TEMP\\{escaped_vm_name}_seed"
+
+# Nettoyer et créer le dossier temporaire
+if (Test-Path $srcFolder) {{ Remove-Item $srcFolder -Recurse -Force }}
+New-Item -Path $srcFolder -ItemType Directory -Force | Out-Null
+
+# Écrire les fichiers de configuration (décodage Base64)
+{file_write_commands}
+
+# Créer l'ISO via l'objet COM IMAPI2FS
+$fsi = New-Object -ComObject IMAPI2FS.MsftFileSystemImage
+$fsi.FileSystemsToCreate = 3  # FsiFileSystemISO9660 | FsiFileSystemJoliet
+$fsi.VolumeName = '{escaped_label}'
+$item = $fsi.Root
+$item.AddTree($srcFolder, $false)
+$ri = $fsi.CreateResultImage()
+$istream = $ri.ImageStream
+
+# Écrire le IStream COM dans un fichier via Marshal
+$isoDir = [System.IO.Path]::GetDirectoryName($isoPath)
+if (-not (Test-Path $isoDir)) {{
+    New-Item -Path $isoDir -ItemType Directory -Force | Out-Null
+}}
+if (Test-Path $isoPath) {{ Remove-Item $isoPath -Force }}
+
+Add-Type -TypeDefinition @"
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
+public class IStreamWriter {{
+    public static void Save(object comStream, string path) {{
+        IStream s = (IStream)comStream;
+        using (FileStream fs = new FileStream(path, FileMode.Create, FileAccess.Write)) {{
+            byte[] buf = new byte[65536];
+            while (true) {{
+                int read = 0;
+                IntPtr p = Marshal.AllocHGlobal(4);
+                try {{
+                    s.Read(buf, buf.Length, p);
+                    read = Marshal.ReadInt32(p);
+                }} finally {{
+                    Marshal.FreeHGlobal(p);
+                }}
+                if (read == 0) break;
+                fs.Write(buf, 0, read);
+            }}
+        }}
+    }}
+}}
+"@
+[IStreamWriter]::Save($istream, $isoPath)
+
+# Attacher l'ISO à la VM comme lecteur DVD
+Add-VMDvdDrive -VMName '{escaped_vm_name}' -Path $isoPath
+
+# Nettoyer le dossier temporaire
+Remove-Item -Path $srcFolder -Recurse -Force
+
+Write-Output "ISO seed créée et attachée: $isoPath"
+"""
+
+            result = await self._execute(script, timeout=120)
+
+            if not result.success:
+                logger.error(
+                    "hyperv_inject_linux_config_failed",
+                    vm_name=vm_name,
+                    config_type=config_type,
+                    error=result.stderr,
+                )
+                return False
+
+            logger.info(
+                "hyperv_inject_linux_config_complete",
+                vm_name=vm_name,
+                config_type=config_type,
+            )
+            return True
+
+        except Exception as e:
+            logger.error(
+                "hyperv_inject_linux_config_error",
+                vm_name=vm_name,
+                config_type=config_type,
+                error=str(e),
+            )
+            return False
+
+
+    async def configure_linux_vm(self, vm_name: str) -> bool:
+        """
+        Configure les paramètres de la VM pour un système Linux.
+
+        - Définit le modèle Secure Boot sur 'MicrosoftUEFICertificateAuthority' (requis pour Linux sur Gen2)
+        - Active les Guest Services (services d'intégration)
+        - Configure l'ordre de boot : DVD en premier, puis disque dur
+
+        Args:
+            vm_name: Nom de la VM
+
+        Returns:
+            True si succès
+        """
+        logger.info("hyperv_configure_linux_vm_start", vm_name=vm_name)
+
+        escaped_vm_name = _escape_ps(vm_name)
+
+        script = f"""
+# Configurer Secure Boot pour Linux (template Microsoft UEFI CA)
+Set-VMFirmware -VMName '{escaped_vm_name}' -SecureBootTemplate 'MicrosoftUEFICertificateAuthority'
+
+# Activer les Guest Services (services d'intégration)
+Enable-VMIntegrationService -VMName '{escaped_vm_name}' -Name 'Guest Service Interface'
+
+# Configurer l'ordre de boot : DVD en premier, puis disque dur
+$dvd = Get-VMDvdDrive -VMName '{escaped_vm_name}' | Select-Object -First 1
+$hdd = Get-VMHardDiskDrive -VMName '{escaped_vm_name}' | Select-Object -First 1
+if ($dvd -and $hdd) {{
+    Set-VMFirmware -VMName '{escaped_vm_name}' -BootOrder $dvd, $hdd
+}}
+
+Write-Output "VM configurée pour Linux"
+"""
+
+        try:
+            result = await self._execute(script, timeout=60)
+
+            if not result.success:
+                logger.error(
+                    "hyperv_configure_linux_vm_failed",
+                    vm_name=vm_name,
+                    error=result.stderr,
+                )
+                return False
+
+            logger.info("hyperv_configure_linux_vm_complete", vm_name=vm_name)
+            return True
+
+        except Exception as e:
+            logger.error(
+                "hyperv_configure_linux_vm_error",
+                vm_name=vm_name,
+                error=str(e),
+            )
+            return False
+
     async def remove_unattend_disk(self, vm_id: str) -> bool:
         """
         Supprime le disque unattend d'une VM après l'installation.
@@ -1453,7 +2134,7 @@ class HyperVClient(BaseHypervisor):
             $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq $vmName }}
         }}
         if ($vm) {{
-            $unattendDisk = Get-VMHardDiskDrive -VM $vm | Where-Object {{ $_.Path -like '*unattend*' }}
+            $unattendDisk = Get-VMHardDiskDrive -VMName $vm.Name | Where-Object {{ $_.Path -like '*unattend*' }}
             if ($unattendDisk) {{
                 $diskPath = $unattendDisk.Path
                 Remove-VMHardDiskDrive -VMHardDiskDrive $unattendDisk
@@ -1485,6 +2166,7 @@ class HyperVClient(BaseHypervisor):
         vhd_path: str,
         image_index: int = 2,
         unattend_content: str | None = None,
+        admin_username: str | None = None,
     ) -> bool:
         """
         Déploie Windows sur une VM via DISM (sans installation interactive).
@@ -1522,6 +2204,8 @@ class HyperVClient(BaseHypervisor):
         
         # Démonter si déjà monté
         Dismount-VHD -Path $vhdPath -ErrorAction SilentlyContinue
+        $vhdCheck = Get-VHD -Path $vhdPath -ErrorAction SilentlyContinue
+        if ($vhdCheck.Attached) {{ Write-Warning "VHD still mounted after pre-cleanup dismount: $vhdPath" }}
         Dismount-DiskImage -ImagePath $isoPath -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 2
         
@@ -1577,36 +2261,192 @@ class HyperVClient(BaseHypervisor):
         )
         
         # Étape 2: Appliquer l'image Windows avec DISM
+        # Forcer l'encodage UTF-8 pour éviter les problèmes d'encodage avec DISM
         script_dism = f"""
-        Dism /Apply-Image /ImageFile:{iso_drive}:\\sources\\install.wim /Index:{image_index} /ApplyDir:{win_drive}:\\
-        if ($LASTEXITCODE -eq 0) {{
+        $ErrorActionPreference = 'Continue'
+        $ProgressPreference = 'SilentlyContinue'
+        
+        # Forcer l'encodage de la console en UTF-8 pour capturer correctement la sortie DISM
+        [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+        $OutputEncoding = [System.Text.Encoding]::UTF8
+        chcp 65001 | Out-Null
+        
+        # Capturer la sortie de DISM en redirigeant vers stdout/stderr
+        # Utiliser try/catch pour capturer les erreurs sans arrêter le script
+        $dismOutput = ""
+        $dismError = ""
+        $exitCode = 0
+        
+        try {{
+            # Exécuter DISM directement (plus fiable que Start-Process via WinRM)
+            $dismResult = Dism /Apply-Image /ImageFile:{iso_drive}:\\sources\\install.wim /Index:{image_index} /ApplyDir:{win_drive}:\\ 2>&1
+            $exitCode = $LASTEXITCODE
+            
+            # Capturer la sortie
+            $dismOutput = $dismResult | Out-String
+        }} catch {{
+            $exitCode = $LASTEXITCODE
+            $dismError = $_.Exception.Message
+            $dismOutput = $_.Exception.Message
+        }}
+        
+        # Vérifier le code de sortie ET la présence du message de succès dans la sortie
+        # DISM retourne 0 en cas de succès, mais on vérifie aussi le message pour être sûr
+        $hasSuccessMessage = ($dismOutput -match "op.*ration a r.*ussi" -or 
+                             $dismOutput -match "operation completed successfully" -or
+                             $dismOutput -match "100\.0%" -or
+                             $dismOutput -match "100%")
+        
+        # Si le code de sortie est 0 OU si on a le message de succès, c'est un succès
+        if ($exitCode -eq 0 -or $hasSuccessMessage) {{
+            # TOUJOURS écrire DISM_SUCCESS si on détecte un succès
             Write-Output "DISM_SUCCESS"
+            # Afficher la sortie pour le logging
+            if ($dismOutput) {{
+                Write-Output $dismOutput
+            }}
         }} else {{
-            throw "DISM failed with exit code $LASTEXITCODE"
+            $errorMsg = "DISM failed with exit code $exitCode"
+            if ($dismError) {{
+                $errorMsg += ": $dismError"
+            }}
+            if ($dismOutput) {{
+                $errorMsg += " Output: $dismOutput"
+            }}
+            throw $errorMsg
         }}
         """
         
         result = await self._execute(script_dism, timeout=600)
-        if not result.success or "DISM_SUCCESS" not in (result.stdout or ""):
-            # Nettoyer en cas d'erreur
-            await self._execute(f"Dismount-DiskImage -ImagePath '{iso_path}' -ErrorAction SilentlyContinue")
-            await self._execute(f"Dismount-VHD -Path '{vhd_path}' -ErrorAction SilentlyContinue")
-            raise VMOperationError(vm_id, "deploy_dism_apply", result.stderr or result.stdout)
+        
+        # Privilégier la présence de "DISM_SUCCESS" dans stdout/stderr plutôt que result.success
+        # DISM peut réussir même si PowerShell retourne un code non-zéro à cause d'avertissements
+        stdout_content = result.stdout or ""
+        stderr_content = result.stderr or ""
+        
+        # Combiner stdout et stderr pour la recherche (DISM peut écrire dans l'un ou l'autre)
+        combined_output = f"{stdout_content}\n{stderr_content}".lower()
+        stdout_lower = stdout_content.lower()
+        stderr_lower = stderr_content.lower()
+        
+        # Vérifier si DISM_SUCCESS est présent (insensible à la casse, dans stdout ou stderr)
+        has_dism_success = (
+            "dism_success" in stdout_lower or
+            "dism_success" in stderr_lower
+        )
+        
+        if has_dism_success:
+            # Succès confirmé, continuer
+            logger.debug("dism_success_confirmed", vm_id=vm_id)
+        else:
+            # DISM_SUCCESS absent - vérifier si c'est vraiment un échec
+            # Chercher aussi les messages de succès dans la sortie (gestion encodage)
+            # Patterns pour détecter les messages de succès mal encodés
+            success_patterns = [
+                "100.0%",  # Progression complète
+                "100%",  # Progression complète (variante)
+                "opération a réussi",  # Message français correct
+                "operation completed successfully",  # Message anglais
+                "l'op",  # Début du message français (pour détecter "L'opération")
+                "rï¿½ussi",  # "réussi" mal encodé (UTF-8 mal interprété)
+                "rÃ©ussi",  # "réussi" mal encodé (autre variante)
+                "rÃ©ussi",  # "réussi" mal encodé (encodage Windows)
+                "rÃ©ussi",  # "réussi" mal encodé (ISO-8859-1)
+            ]
+            
+            # Vérifier dans stdout et stderr
+            has_success_indicator = False
+            for pattern in success_patterns:
+                if pattern in combined_output:
+                    has_success_indicator = True
+                    break
+            
+            # Vérification supplémentaire : "L'op" suivi de "réussi" (même mal encodé)
+            if not has_success_indicator:
+                if "l'op" in combined_output:
+                    # Chercher "réussi" ou ses variantes mal encodées
+                    reussi_patterns = ["réussi", "rï¿½ussi", "rÃ©ussi", "rÃ©ussi"]
+                    for reussi_pattern in reussi_patterns:
+                        if reussi_pattern in combined_output:
+                            has_success_indicator = True
+                            break
+            
+            # Vérification finale : présence de "100%" ou "100.0%" dans la sortie
+            if not has_success_indicator:
+                has_success_indicator = (
+                    "100.0%" in stdout_content or
+                    "100%" in stdout_content or
+                    "100.0%" in stderr_content or
+                    "100%" in stderr_content
+                )
+            
+            if has_success_indicator:
+                # Message de succès détecté mais DISM_SUCCESS manquant - c'est un problème de script
+                logger.warning(
+                    "dism_success_marker_missing_but_success_detected",
+                    vm_id=vm_id,
+                    stdout_preview=stdout_content[:300] if stdout_content else None,
+                    stderr_preview=stderr_content[:300] if stderr_content else None,
+                )
+                # Continuer quand même car on a détecté le succès
+            elif not result.success:
+                # Pas de succès détecté et result.success = False : vérifier une dernière fois
+                # Si on a "100%" ou "100.0%" quelque part, c'est probablement un succès
+                final_check = (
+                    "100.0%" in combined_output or
+                    "100%" in combined_output
+                )
+                
+                if final_check:
+                    # On a la progression complète, considérer comme succès malgré result.success = False
+                    logger.warning(
+                        "dism_success_detected_via_progress",
+                        vm_id=vm_id,
+                        result_success=result.success,
+                    )
+                else:
+                    # Vraiment aucun indicateur de succès : échec réel
+                    await self._execute(f"Dismount-DiskImage -ImagePath '{iso_path}' -ErrorAction SilentlyContinue")
+                    dismount_result = await self._execute(f"Dismount-VHD -Path '{vhd_path}' -ErrorAction SilentlyContinue")
+                    if not dismount_result.success:
+                        logger.warning("vhd_dismount_failed", path=vhd_path, error=dismount_result.stderr)
+                    raise VMOperationError(vm_id, "deploy_dism_apply", result.stderr or result.stdout)
+            else:
+                # DISM_SUCCESS absent, pas de message de succès, mais result.success = True
+                # Situation ambiguë - logger et continuer avec avertissement
+                logger.warning(
+                    "dism_ambiguous_result",
+                    vm_id=vm_id,
+                    stdout_preview=stdout_content[:300] if stdout_content else None,
+                    stderr_preview=stderr_content[:300] if stderr_content else None,
+                    result_success=result.success,
+                )
         
         logger.debug("hyperv_dism_image_applied", vm_id=vm_id)
         
         # Étape 3: Configuration complète pour automatiser l'OOBE
         # Extraction du mot de passe admin depuis le unattend_content
-        admin_password = "Admin123!"  # Valeur par défaut
+        admin_password = settings.default_admin_password.get_secret_value()  # Valeur par défaut
+        # Déterminer le nom d'utilisateur admin (Admin pour Win10/11, Administrateur pour Server)
+        effective_admin_username = admin_username or "otoroot"
+        is_client_os = effective_admin_username.lower() == "admin"
+
         if unattend_content:
             import re
             import base64
-            
+
             # Essayer d'extraire le mot de passe du unattend.xml
+            # Format Server: <AdministratorPassword><Value>...</Value>
             pwd_match = re.search(
                 r'<AdministratorPassword>\s*<Value>([^<]+)</Value>',
                 unattend_content
             )
+            if not pwd_match:
+                # Format Client (Win10/11): <LocalAccounts><LocalAccount><Password><Value>...</Value>
+                pwd_match = re.search(
+                    r'<Password>\s*<Value>([^<]+)</Value>',
+                    unattend_content
+                )
             if pwd_match:
                 admin_password = pwd_match.group(1)
             
@@ -1656,7 +2496,7 @@ class HyperVClient(BaseHypervisor):
             await self._execute(script_unattend, timeout=60)
             logger.debug("hyperv_dism_unattend_written", vm_id=vm_id)
         
-        # Étape 3b: Configurer le registre offline pour bypass OOBE
+        # Étape 3b: Configurer le registre offline pour bypass OOBE + RunOnce pour setup
         script_registry = f"""
         $winDrive = '{win_drive}:'
         $softwareHive = "$winDrive\\Windows\\System32\\config\\SOFTWARE"
@@ -1683,13 +2523,25 @@ class HyperVClient(BaseHypervisor):
         $setupKey = "HKLM\\OFFLINE_SW\\Microsoft\\Windows\\CurrentVersion\\Setup"
         reg add $setupKey /v UnattendFile /t REG_SZ /d "C:\\Windows\\Panther\\unattend.xml" /f
         
-        # AutoLogon configuration
+        # AutoLogon configuration - utiliser le bon compte selon l'OS
         $winlogonKey = "HKLM\\OFFLINE_SW\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon"
         reg add $winlogonKey /v AutoAdminLogon /t REG_SZ /d "1" /f
-        reg add $winlogonKey /v DefaultUserName /t REG_SZ /d "Administrator" /f
+        reg add $winlogonKey /v DefaultUserName /t REG_SZ /d "{effective_admin_username}" /f
         reg add $winlogonKey /v DefaultPassword /t REG_SZ /d "{admin_password}" /f
         reg add $winlogonKey /v AutoLogonCount /t REG_DWORD /d 5 /f
         
+        # Activer RDP directement dans le registre offline (avant le premier boot)
+        # Cela garantit que RDP est actif même si setup.ps1 ou FirstLogonCommands échouent
+        $termSrvKey = "HKLM\\OFFLINE_SYS\\ControlSet001\\Control\\Terminal Server"
+        reg add $termSrvKey /v fDenyTSConnections /t REG_DWORD /d 0 /f
+        $rdpTcpKey = "HKLM\\OFFLINE_SYS\\ControlSet001\\Control\\Terminal Server\\WinStations\\RDP-Tcp"
+        reg add $rdpTcpKey /v UserAuthentication /t REG_DWORD /d 0 /f
+
+        # RunOnce - Exécuter le script de configuration VM-Automation au premier boot
+        # Cette clé s'exécute automatiquement après le logon de l'utilisateur
+        $runOnceKey = "HKLM\\OFFLINE_SW\\Microsoft\\Windows\\CurrentVersion\\RunOnce"
+        reg add $runOnceKey /v "VM-Automation-Setup" /t REG_SZ /d "powershell.exe -ExecutionPolicy Bypass -File C:\\VM-Automation\\setup.ps1" /f
+
         # Décharger les ruches
         [gc]::Collect()
         Start-Sleep -Seconds 2
@@ -1709,69 +2561,274 @@ class HyperVClient(BaseHypervisor):
                 error=result.stderr,
             )
         
-        # Étape 3c: Créer SetupComplete.cmd pour finaliser la configuration au premier boot
-        setup_complete_content = f"""@echo off
-REM ============================================
-REM SetupComplete.cmd - Post-OOBE Configuration
-REM ============================================
-echo [%date% %time%] SetupComplete starting >> C:\\Windows\\Setup\\Scripts\\setup.log
+        # Étape 3c: Créer le script VM-Automation pour configurer Windows au premier boot
+        # Ce script est exécuté par RunOnce après le logon automatique
+        setup_ps1_content = f"""# =============================================================================
+# VM-Automation Setup Script
+# Exécuté automatiquement au premier boot via RunOnce
+# =============================================================================
+$ErrorActionPreference = 'Continue'
+$logFile = "C:\\VM-Automation\\setup.log"
 
-REM Activer le compte Administrator et définir le mot de passe
-net user Administrator "{admin_password}" /active:yes >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
+# Créer le dossier de log s'il n'existe pas
+if (-not (Test-Path "C:\\VM-Automation")) {{
+    New-Item -ItemType Directory -Path "C:\\VM-Automation" -Force | Out-Null
+}}
 
-REM Configurer le profil réseau sur Privé (pour activer la découverte)
-powershell -Command "Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private" >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
+function Write-Log {{
+    param([string]$Message)
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    "$timestamp - $Message" | Out-File -FilePath $logFile -Append -Encoding UTF8
+    Write-Host $Message
+}}
 
-REM Activer la découverte réseau et le partage
-netsh advfirewall firewall set rule group="Network Discovery" new enable=Yes >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
-netsh advfirewall firewall set rule group="File and Printer Sharing" new enable=Yes >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
+Write-Log "=========================================="
+Write-Log "VM-Automation Setup Starting..."
+Write-Log "=========================================="
 
-REM Configurer WinRM
-powershell -Command "Enable-PSRemoting -Force -SkipNetworkProfileCheck" >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
-powershell -Command "Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value '*' -Force" >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
-powershell -Command "winrm quickconfig -quiet" >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
-powershell -Command "Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False" >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
+try {{
+    # 1. Configurer les comptes admin selon le type d'OS
+    Write-Log "Configuring admin accounts (admin_username={effective_admin_username}, is_client_os={'true' if is_client_os else 'false'})..."
 
-REM Activer RDP
-reg add "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
-netsh advfirewall firewall set rule group="remote desktop" new enable=Yes >> C:\\Windows\\Setup\\Scripts\\setup.log 2>&1
+    # Toujours activer et configurer Administrateur (FR) et Administrator (EN)
+    $result = net user Administrateur "{admin_password}" /active:yes 2>&1
+    Write-Log "Administrateur account result: $result"
+    $result = net user Administrator "{admin_password}" /active:yes 2>&1
+    Write-Log "Administrator account result: $result"
 
-REM Marquer la configuration comme terminée
-echo SETUP_COMPLETE > C:\\Windows\\Setup\\Scripts\\setup_done.flag
+    # Pour Windows 10/11 : créer le compte Admin s'il n'existe pas déjà
+    if ("{effective_admin_username}" -ne "Administrateur" -and "{effective_admin_username}" -ne "Administrator") {{
+        $userExists = net user "{effective_admin_username}" 2>&1
+        if ($LASTEXITCODE -ne 0) {{
+            Write-Log "Creating {effective_admin_username} account..."
+            net user "{effective_admin_username}" "{admin_password}" /add /active:yes 2>&1
+            net localgroup Administrators "{effective_admin_username}" /add 2>&1
+            net localgroup Administrateurs "{effective_admin_username}" /add 2>&1
+            Write-Log "{effective_admin_username} account created and added to Administrators"
+        }} else {{
+            Write-Log "{effective_admin_username} account already exists, setting password..."
+            net user "{effective_admin_username}" "{admin_password}" 2>&1
+        }}
+    }}
+    
+    # 2. Configurer le profil réseau en Privé
+    Write-Log "Setting network profile to Private..."
+    Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private -ErrorAction SilentlyContinue
+    Write-Log "Network profile configured"
+    
+    # 3. Configurer WinRM pour PowerShell Direct
+    Write-Log "Configuring WinRM..."
+    Enable-PSRemoting -Force -SkipNetworkProfileCheck -ErrorAction SilentlyContinue
+    Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value '*' -Force -ErrorAction SilentlyContinue
+    winrm quickconfig -quiet 2>&1 | Out-Null
+    Write-Log "WinRM configured"
+    
+    # 4. Activer RDP + désactiver NLA + firewall FR/EN
+    Write-Log "Enabling Remote Desktop..."
+    Set-ItemProperty -Path 'HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server' -Name "fDenyTSConnections" -Value 0 -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path 'HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp' -Name "UserAuthentication" -Value 0 -ErrorAction SilentlyContinue
+    Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
+    Enable-NetFirewallRule -DisplayGroup "Bureau a distance" -ErrorAction SilentlyContinue
+    # Fallback netsh pour les cas où Enable-NetFirewallRule échoue
+    netsh advfirewall firewall set rule group="Remote Desktop" new enable=Yes 2>&1 | Out-Null
+    netsh advfirewall firewall set rule group="Bureau a distance" new enable=Yes 2>&1 | Out-Null
+    Write-Log "Remote Desktop enabled (NLA disabled, firewall FR+EN)"
 
-echo [%date% %time%] SetupComplete finished >> C:\\Windows\\Setup\\Scripts\\setup.log
+    # 4b. Pour Windows Home/Home N : installer RDPWrap pour activer le serveur RDP
+    $editionId = (Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion' -ErrorAction SilentlyContinue).EditionID
+    Write-Log "Windows EditionID: $editionId"
+    if ($editionId -match "Core") {{
+        Write-Log "Windows Home detected - installing RDPWrap for RDP support..."
+        try {{
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            $rdpWrapUrl = "https://github.com/stascorp/rdpwrap/releases/download/v1.6.2/RDPWrap-v1.6.2.zip"
+            $zipPath = "C:\\RDPWrap.zip"
+            $extractPath = "C:\\RDPWrap"
+            Invoke-WebRequest -Uri $rdpWrapUrl -OutFile $zipPath -UseBasicParsing -ErrorAction Stop
+            Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+            $installer = Get-ChildItem $extractPath -Filter "RDPWInst.exe" -Recurse | Select-Object -First 1
+            if ($installer) {{
+                & $installer.FullName -i 2>&1 | Out-Null
+                Write-Log "RDPWrap installed"
+            }}
+            # Update with community INI for latest Windows builds
+            net stop TermService /y 2>&1 | Out-Null
+            Start-Sleep 2
+            $iniUrl = "https://raw.githubusercontent.com/sebaxakerhtc/rdpwrap.ini/master/rdpwrap.ini"
+            $iniPath = "C:\\Program Files\\RDP Wrapper\\rdpwrap.ini"
+            Invoke-WebRequest -Uri $iniUrl -OutFile $iniPath -UseBasicParsing -ErrorAction Stop
+            Write-Log "Updated rdpwrap.ini from community"
+            net start TermService 2>&1 | Out-Null
+            Start-Sleep 3
+            $listener = Get-NetTCPConnection -LocalPort 3389 -ErrorAction SilentlyContinue
+            Write-Log "RDP listeners after RDPWrap: $($listener.Count)"
+            Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+        }} catch {{
+            Write-Log "RDPWrap install error: $($_.Exception.Message)"
+        }}
+    }}
+    
+    # 5. Activer la découverte réseau et le partage
+    Write-Log "Enabling Network Discovery..."
+    netsh advfirewall firewall set rule group="Network Discovery" new enable=Yes 2>&1 | Out-Null
+    netsh advfirewall firewall set rule group="File and Printer Sharing" new enable=Yes 2>&1 | Out-Null
+    # Aussi avec les noms français
+    netsh advfirewall firewall set rule group="Découverte de réseau" new enable=Yes 2>&1 | Out-Null
+    netsh advfirewall firewall set rule group="Partage de fichiers et d'imprimantes" new enable=Yes 2>&1 | Out-Null
+    Write-Log "Network Discovery enabled"
+    
+    # 6. Configurer le pare-feu pour autoriser les connexions
+    Write-Log "Configuring firewall..."
+    # Ne pas désactiver complètement le pare-feu, juste autoriser les règles nécessaires
+    New-NetFirewallRule -DisplayName "WinRM HTTP" -Direction Inbound -Protocol TCP -LocalPort 5985 -Action Allow -ErrorAction SilentlyContinue
+    New-NetFirewallRule -DisplayName "WinRM HTTPS" -Direction Inbound -Protocol TCP -LocalPort 5986 -Action Allow -ErrorAction SilentlyContinue
+    Write-Log "Firewall configured"
+    
+    # 7. Créer le fichier flag de succès
+    Write-Log "Creating success flag..."
+    "READY" | Out-File -FilePath "C:\\VM-Automation\\ready.flag" -Encoding UTF8
+    Write-Log "Success flag created at C:\\VM-Automation\\ready.flag"
+    
+    Write-Log "=========================================="
+    Write-Log "VM-Automation Setup Complete!"
+    Write-Log "=========================================="
+    
+}} catch {{
+    Write-Log "ERROR: $($_.Exception.Message)"
+    Write-Log "Stack: $($_.ScriptStackTrace)"
+}}
+
+# Garder la fenêtre ouverte quelques secondes pour voir les logs
+Start-Sleep -Seconds 3
 """
         
-        # Encoder et écrire SetupComplete.cmd
+        # Encoder et écrire setup.ps1 dans C:\VM-Automation
         import base64
-        setup_b64 = base64.b64encode(setup_complete_content.encode('utf-8')).decode('ascii')
+        setup_b64 = base64.b64encode(setup_ps1_content.encode('utf-8')).decode('ascii')
+        
+        # Découper en chunks pour éviter les limites de ligne de commande
+        chunks = [setup_b64[i:i+2000] for i in range(0, len(setup_b64), 2000)]
+        
+        # Créer le dossier et écrire le script
+        script_create_setup = f"""
+        $vmAutomationDir = '{win_drive}:\\VM-Automation'
+        New-Item -ItemType Directory -Path $vmAutomationDir -Force -ErrorAction SilentlyContinue | Out-Null
+        
+        # Écrire le fichier en chunks pour éviter les limites de taille
+        $tempB64 = "$vmAutomationDir\\setup.b64"
+        """
+        
+        for i, chunk in enumerate(chunks):
+            if i == 0:
+                script_create_setup += f"""
+        [System.IO.File]::WriteAllText($tempB64, '{chunk}')
+        """
+            else:
+                script_create_setup += f"""
+        [System.IO.File]::AppendAllText($tempB64, '{chunk}')
+        """
+        
+        script_create_setup += f"""
+        # Décoder et écrire le script PowerShell
+        $b64Content = [System.IO.File]::ReadAllText($tempB64)
+        $bytes = [System.Convert]::FromBase64String($b64Content)
+        $scriptContent = [System.Text.Encoding]::UTF8.GetString($bytes)
+        [System.IO.File]::WriteAllText("$vmAutomationDir\\setup.ps1", $scriptContent)
+        
+        # Nettoyer le fichier temporaire
+        Remove-Item $tempB64 -Force -ErrorAction SilentlyContinue
+        
+        Write-Output "VM-Automation setup.ps1 created"
+        """
+        
+        result = await self._execute(script_create_setup, timeout=60)
+        
+        # Vérifier que le script a bien été créé
+        if result.success and "setup.ps1 created" in str(result.stdout or ""):
+            logger.info(
+                "hyperv_dism_vm_automation_setup_created",
+                vm_id=vm_id,
+                file="C:\\VM-Automation\\setup.ps1",
+            )
+        else:
+            logger.warning(
+                "hyperv_dism_vm_automation_setup_warning",
+                vm_id=vm_id,
+                stdout=str(result.stdout)[:200] if result.stdout else None,
+                stderr=str(result.stderr)[:200] if result.stderr else None,
+            )
+        
+        # Vérifier également que RunOnce a été configuré
+        logger.info(
+            "hyperv_dism_runonce_configured",
+            vm_id=vm_id,
+            key="HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce\\VM-Automation-Setup",
+        )
+        
+        # Garder aussi SetupComplete.cmd comme backup (au cas où)
+        setup_complete_content = f"""@echo off
+REM ============================================
+REM SetupComplete.cmd - Backup configuration
+REM Exécuté uniquement si RunOnce échoue
+REM ============================================
+if exist "C:\\VM-Automation\\ready.flag" goto :EOF
+echo [%date% %time%] SetupComplete starting (backup) >> C:\\VM-Automation\\setup.log
+powershell.exe -ExecutionPolicy Bypass -File "C:\\VM-Automation\\setup.ps1"
+echo [%date% %time%] SetupComplete finished >> C:\\VM-Automation\\setup.log
+"""
+        
+        setup_cmd_b64 = base64.b64encode(setup_complete_content.encode('utf-8')).decode('ascii')
         
         script_setup_complete = f"""
         $setupDir = '{win_drive}:\\Windows\\Setup\\Scripts'
         New-Item -ItemType Directory -Path $setupDir -Force -ErrorAction SilentlyContinue | Out-Null
         
-        $content = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('{setup_b64}'))
+        $content = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('{setup_cmd_b64}'))
         [System.IO.File]::WriteAllText("$setupDir\\SetupComplete.cmd", $content)
         
-        Write-Output "SetupComplete.cmd created"
+        Write-Output "SetupComplete.cmd created (backup)"
         """
         
-        await self._execute(script_setup_complete, timeout=30)
-        logger.debug("hyperv_dism_setup_complete_created", vm_id=vm_id)
+        result = await self._execute(script_setup_complete, timeout=30)
+        if result.success:
+            logger.info(
+                "hyperv_dism_setup_complete_created",
+                vm_id=vm_id,
+                file="C:\\Windows\\Setup\\Scripts\\SetupComplete.cmd",
+            )
+        else:
+            logger.warning(
+                "hyperv_dism_setup_complete_warning",
+                vm_id=vm_id,
+                error=str(result.stderr)[:200] if result.stderr else None,
+            )
         
         # Étape 4: Configurer le bootloader
         script_boot = f"""
+        $ErrorActionPreference = 'Continue'
         bcdboot {win_drive}:\\Windows /s {efi_drive}: /f UEFI
-        if ($LASTEXITCODE -eq 0) {{
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -eq 0) {{
             Write-Output "BOOT_SUCCESS"
         }} else {{
-            throw "BCDBoot failed with exit code $LASTEXITCODE"
+            throw "BCDBoot failed with exit code $exitCode"
         }}
         """
         
         result = await self._execute(script_boot, timeout=60)
-        if not result.success or "BOOT_SUCCESS" not in (result.stdout or ""):
-            raise VMOperationError(vm_id, "deploy_dism_boot", result.stderr or result.stdout)
+        
+        # Privilégier la présence de "BOOT_SUCCESS" dans stdout plutôt que result.success
+        if "BOOT_SUCCESS" not in (result.stdout or ""):
+            # Si BOOT_SUCCESS n'est pas présent, vérifier result.success
+            if not result.success:
+                raise VMOperationError(vm_id, "deploy_dism_boot", result.stderr or result.stdout)
+            else:
+                # BOOT_SUCCESS absent mais result.success = True : avertissement mais continuer
+                logger.warning(
+                    "boot_success_marker_missing",
+                    vm_id=vm_id,
+                    stdout=result.stdout[:200] if result.stdout else None,
+                )
         
         logger.debug("hyperv_dism_bootloader_configured", vm_id=vm_id)
         
@@ -1779,7 +2836,9 @@ echo [%date% %time%] SetupComplete finished >> C:\\Windows\\Setup\\Scripts\\setu
         script_finalize = f"""
         # Démonter ISO et VHD
         Dismount-DiskImage -ImagePath '{iso_path}'
-        Dismount-VHD -Path '{vhd_path}'
+        Dismount-VHD -Path '{vhd_path}' -ErrorAction Stop
+        $vhdFinalCheck = Get-VHD -Path '{vhd_path}' -ErrorAction SilentlyContinue
+        if ($vhdFinalCheck.Attached) {{ Write-Error "VHD still mounted after dismount: {vhd_path}" }}
         
         # Configurer la VM pour booter sur le disque dur
         $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
@@ -1789,12 +2848,12 @@ echo [%date% %time%] SetupComplete finished >> C:\\Windows\\Setup\\Scripts\\setu
         
         if ($vm) {{
             # Éjecter le DVD s'il est monté
-            Get-VMDvdDrive -VM $vm | Remove-VMDvdDrive -ErrorAction SilentlyContinue
+            Get-VMDvdDrive -VMName $vm.Name | Remove-VMDvdDrive -ErrorAction SilentlyContinue
             
             # Configurer le boot sur le disque dur
-            $hdd = Get-VMHardDiskDrive -VM $vm | Where-Object {{ $_.ControllerLocation -eq 0 }}
+            $hdd = Get-VMHardDiskDrive -VMName $vm.Name | Where-Object {{ $_.ControllerLocation -eq 0 }}
             if ($hdd) {{
-                Set-VMFirmware -VM $vm -FirstBootDevice $hdd
+                Set-VMFirmware -VMName $vm.Name -FirstBootDevice $hdd
             }}
             
             # Corriger les permissions sur le VHDX pour Hyper-V
@@ -1842,22 +2901,27 @@ echo [%date% %time%] SetupComplete finished >> C:\\Windows\\Setup\\Scripts\\setu
         if self._executor:
             self._executor.close()
 
+    async def cleanup(self) -> None:
+        """Libère les ressources et ferme les connexions."""
+        self.close()
+
     # =========================================================================
     # Méthodes de monitoring
     # =========================================================================
 
     async def get_vm_health(self, vm_id: str) -> VMHealthStatus | None:
         """Récupère l'état de santé complet d'une VM."""
+        safe_id = _escape_ps(vm_id)
         script = f"""
-        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        $vm = Get-VM -Name '{safe_id}' -ErrorAction SilentlyContinue
         if (-not $vm) {{
-            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{safe_id}' }}
         }}
         if ($vm) {{
-            $intServices = Get-VMIntegrationService -VM $vm | Select-Object Name, Enabled, 
+            $intServices = Get-VMIntegrationService -VMName $vm.Name | Select-Object Name, Enabled, 
                 @{{N='Status';E={{$_.PrimaryOperationalStatus.ToString()}}}}
             
-            $nic = Get-VMNetworkAdapter -VM $vm
+            $nic = Get-VMNetworkAdapter -VMName $vm.Name
             
             @{{
                 VMName = $vm.Name
@@ -1921,10 +2985,11 @@ echo [%date% %time%] SetupComplete finished >> C:\\Windows\\Setup\\Scripts\\setu
 
     async def get_vm_heartbeat(self, vm_id: str) -> str | None:
         """Récupère le statut heartbeat d'une VM."""
+        safe_id = _escape_ps(vm_id)
         script = f"""
-        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        $vm = Get-VM -Name '{safe_id}' -ErrorAction SilentlyContinue
         if (-not $vm) {{
-            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{safe_id}' }}
         }}
         if ($vm) {{
             Write-Output $vm.Heartbeat.ToString()
@@ -1950,7 +3015,7 @@ echo [%date% %time%] SetupComplete finished >> C:\\Windows\\Setup\\Scripts\\setu
             $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
         }}
         if ($vm) {{
-            Get-VMIntegrationService -VM $vm | Select-Object Name, Enabled, 
+            Get-VMIntegrationService -VMName $vm.Name | Select-Object Name, Enabled, 
                 @{{N='Status';E={{$_.PrimaryOperationalStatus.ToString()}}}} | ConvertTo-Json
         }}
         """
@@ -1996,7 +3061,7 @@ echo [%date% %time%] SetupComplete finished >> C:\\Windows\\Setup\\Scripts\\setu
             $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
         }}
         if ($vm) {{
-            $nic = Get-VMNetworkAdapter -VM $vm
+            $nic = Get-VMNetworkAdapter -VMName $vm.Name
             $nic.IPAddresses | ConvertTo-Json
         }}
         """
@@ -2015,6 +3080,91 @@ echo [%date% %time%] SetupComplete finished >> C:\\Windows\\Setup\\Scripts\\setu
             return [data] if data else []
         
         return list(data) if data else []
+
+    async def execute_via_winrm_direct(
+        self,
+        vm_ip: str,
+        script: str,
+        credentials: tuple[str, str],
+        timeout: int = 60,
+    ) -> PowerShellDirectResult:
+        """
+        Exécute un script PowerShell directement sur une VM via WinRM (connexion directe).
+        
+        Cette méthode se connecte directement à l'IP de la VM au lieu de passer
+        par PowerShell Direct via l'hyperviseur. Plus rapide et plus fiable.
+        
+        Args:
+            vm_ip: Adresse IP de la VM
+            script: Script PowerShell à exécuter
+            credentials: Tuple (username, password) pour la VM
+            timeout: Timeout en secondes
+            
+        Returns:
+            PowerShellDirectResult avec le résultat de l'exécution
+        """
+        if not WINRM_AVAILABLE:
+            raise HypervisorError(
+                "pywinrm is required for WinRM direct mode. Install with: pip install pywinrm"
+            )
+        import winrm
+        
+        username, password = credentials
+        
+        logger.info(
+            "winrm_direct_executing",
+            vm_ip=vm_ip,
+            script_length=len(script),
+            timeout=timeout,
+        )
+        
+        try:
+            # Connexion WinRM directe à la VM (HTTP port 5985)
+            session = winrm.Session(
+                f"http://{vm_ip}:5985/wsman",
+                auth=(username, password),
+                transport="ntlm",
+                server_cert_validation="ignore",
+            )
+            
+            # Exécuter le script PowerShell
+            result = session.run_ps(script)
+            
+            success = result.status_code == 0
+            stdout = result.std_out.decode("utf-8", errors="replace") if result.std_out else ""
+            stderr = result.std_err.decode("utf-8", errors="replace") if result.std_err else ""
+            
+            if success:
+                logger.info(
+                    "winrm_direct_success",
+                    vm_ip=vm_ip,
+                    output_length=len(stdout),
+                )
+            else:
+                logger.warning(
+                    "winrm_direct_failed",
+                    vm_ip=vm_ip,
+                    exit_code=result.status_code,
+                    stderr=stderr[:200] if stderr else None,
+                )
+            
+            return PowerShellDirectResult(
+                success=success,
+                output=stdout if success else None,
+                error=stderr if not success else None,
+            )
+            
+        except Exception as e:
+            logger.warning(
+                "winrm_direct_error",
+                vm_ip=vm_ip,
+                error=str(e),
+            )
+            return PowerShellDirectResult(
+                success=False,
+                output=None,
+                error=str(e),
+            )
 
     async def execute_in_vm(
         self,
@@ -2136,7 +3286,12 @@ echo [%date% %time%] SetupComplete finished >> C:\\Windows\\Setup\\Scripts\\setu
                 # Vérifier le heartbeat
                 heartbeat = await self.get_vm_heartbeat(vm_id)
                 
-                if heartbeat in ("OkApplicationsHealthy", "OkApplicationsUnknown"):
+                # Accepter tout heartbeat qui n'est pas "NoContact", "None" ou vide
+                # Cela permet de gérer différentes variantes de heartbeat (OkApplicationsHealthy, OkApplicationsUnknown, etc.)
+                invalid_heartbeats = ("NoContact", "None", None, "")
+                is_heartbeat_ok = heartbeat and heartbeat not in invalid_heartbeats
+                
+                if is_heartbeat_ok:
                     logger.info(
                         "hyperv_vm_heartbeat_ok",
                         vm_id=vm_id,
@@ -2216,7 +3371,7 @@ echo [%date% %time%] SetupComplete finished >> C:\\Windows\\Setup\\Scripts\\setu
                 $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
             }}
             if ($vm) {{
-                $nic = Get-VMNetworkAdapter -VM $vm | Where-Object {{ $_.Name -eq '{adapter_name}' }}
+                $nic = Get-VMNetworkAdapter -VMName $vm.Name | Where-Object {{ $_.Name -eq '{adapter_name}' }}
                 if ($nic) {{
                     Set-VMNetworkAdapterVlan -VMNetworkAdapter $nic -Access -VlanId {vlan_id}
                     Write-Output "VLAN {vlan_id} set on adapter {adapter_name}"
@@ -2234,7 +3389,7 @@ echo [%date% %time%] SetupComplete finished >> C:\\Windows\\Setup\\Scripts\\setu
                 $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
             }}
             if ($vm) {{
-                Set-VMNetworkAdapterVlan -VM $vm -Access -VlanId {vlan_id}
+                Set-VMNetworkAdapterVlan -VMName $vm.Name -Access -VlanId {vlan_id}
                 Write-Output "VLAN {vlan_id} set"
             }} else {{
                 throw "VM not found"
@@ -2268,7 +3423,7 @@ echo [%date% %time%] SetupComplete finished >> C:\\Windows\\Setup\\Scripts\\setu
                 $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
             }}
             if ($vm) {{
-                $nic = Get-VMNetworkAdapter -VM $vm | Where-Object {{ $_.Name -eq '{adapter_name}' }}
+                $nic = Get-VMNetworkAdapter -VMName $vm.Name | Where-Object {{ $_.Name -eq '{adapter_name}' }}
                 if ($nic) {{
                     Set-VMNetworkAdapterVlan -VMNetworkAdapter $nic -Untagged
                     Write-Output "VLAN removed from adapter {adapter_name}"
@@ -2284,7 +3439,7 @@ echo [%date% %time%] SetupComplete finished >> C:\\Windows\\Setup\\Scripts\\setu
                 $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
             }}
             if ($vm) {{
-                Set-VMNetworkAdapterVlan -VM $vm -Untagged
+                Set-VMNetworkAdapterVlan -VMName $vm.Name -Untagged
                 Write-Output "VLAN removed"
             }} else {{
                 throw "VM not found"
@@ -2320,7 +3475,7 @@ echo [%date% %time%] SetupComplete finished >> C:\\Windows\\Setup\\Scripts\\setu
             $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
         }}
         if ($vm) {{
-            $nics = Get-VMNetworkAdapter -VM $vm
+            $nics = Get-VMNetworkAdapter -VMName $vm.Name
             {f"$nics = $nics | Where-Object {{ $_.Name -eq '{adapter_name}' }}" if adapter_name else ""}
             $nic = $nics | Select-Object -First 1
             if ($nic) {{
@@ -2361,7 +3516,7 @@ echo [%date% %time%] SetupComplete finished >> C:\\Windows\\Setup\\Scripts\\setu
             $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
         }}
         if ($vm) {{
-            Get-VMNetworkAdapter -VM $vm | ForEach-Object {{
+            Get-VMNetworkAdapter -VMName $vm.Name | ForEach-Object {{
                 $vlan = Get-VMNetworkAdapterVlan -VMNetworkAdapter $_
                 @{{
                     Name = $_.Name
@@ -2439,7 +3594,7 @@ echo [%date% %time%] SetupComplete finished >> C:\\Windows\\Setup\\Scripts\\setu
             $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
         }}
         if ($vm) {{
-            $nic = Add-VMNetworkAdapter -VM $vm -SwitchName '{switch_name}' {name_param} {mac_param} -Passthru
+            $nic = Add-VMNetworkAdapter -VMName $vm.Name -SwitchName '{switch_name}' {name_param} {mac_param} -Passthru
             {f"Set-VMNetworkAdapterVlan -VMNetworkAdapter $nic -Access -VlanId {vlan_id}" if vlan_id else ""}
             $vlan = Get-VMNetworkAdapterVlan -VMNetworkAdapter $nic
             @{{
@@ -2499,7 +3654,7 @@ echo [%date% %time%] SetupComplete finished >> C:\\Windows\\Setup\\Scripts\\setu
             $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
         }}
         if ($vm) {{
-            $nic = Get-VMNetworkAdapter -VM $vm | Where-Object {{ $_.Name -eq '{adapter_name}' }}
+            $nic = Get-VMNetworkAdapter -VMName $vm.Name | Where-Object {{ $_.Name -eq '{adapter_name}' }}
             if ($nic) {{
                 Remove-VMNetworkAdapter -VMNetworkAdapter $nic
                 Write-Output "Adapter removed"
@@ -2542,7 +3697,7 @@ echo [%date% %time%] SetupComplete finished >> C:\\Windows\\Setup\\Scripts\\setu
             $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
         }}
         if ($vm) {{
-            $nic = Get-VMNetworkAdapter -VM $vm | Where-Object {{ $_.Name -eq '{adapter_name}' }}
+            $nic = Get-VMNetworkAdapter -VMName $vm.Name | Where-Object {{ $_.Name -eq '{adapter_name}' }}
             if ($nic) {{
                 Connect-VMNetworkAdapter -VMNetworkAdapter $nic -SwitchName '{switch_name}'
                 Write-Output "Adapter connected"
@@ -2588,7 +3743,7 @@ echo [%date% %time%] SetupComplete finished >> C:\\Windows\\Setup\\Scripts\\setu
             $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
         }}
         if ($vm) {{
-            $nic = Get-VMNetworkAdapter -VM $vm | Where-Object {{ $_.Name -eq '{adapter_name}' }}
+            $nic = Get-VMNetworkAdapter -VMName $vm.Name | Where-Object {{ $_.Name -eq '{adapter_name}' }}
             if ($nic) {{
                 Disconnect-VMNetworkAdapter -VMNetworkAdapter $nic
                 Write-Output "Adapter disconnected"
@@ -2628,7 +3783,7 @@ echo [%date% %time%] SetupComplete finished >> C:\\Windows\\Setup\\Scripts\\setu
             $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
         }}
         if ($vm) {{
-            Get-VMHardDiskDrive -VM $vm | ForEach-Object {{
+            Get-VMHardDiskDrive -VMName $vm.Name | ForEach-Object {{
                 $vhd = Get-VHD -Path $_.Path -ErrorAction SilentlyContinue
                 @{{
                     Path = $_.Path
@@ -2703,7 +3858,7 @@ echo [%date% %time%] SetupComplete finished >> C:\\Windows\\Setup\\Scripts\\setu
             $vhdxPath = '{vhdx_path}'
             if (-not $vhdxPath) {{
                 $vmPath = Split-Path $vm.Path
-                $diskCount = (Get-VMHardDiskDrive -VM $vm).Count
+                $diskCount = (Get-VMHardDiskDrive -VMName $vm.Name).Count
                 $vhdxPath = Join-Path $vmPath "$($vm.Name)_disk$($diskCount + 1).vhdx"
             }}
 
@@ -2715,8 +3870,15 @@ echo [%date% %time%] SetupComplete finished >> C:\\Windows\\Setup\\Scripts\\setu
             }}
             $vhd = New-VHD @vhdParams
 
+            # Fix VHD permissions for Hyper-V Virtual Machine service (SID S-1-5-83-0)
+            $acl = Get-Acl $vhdxPath
+            $sid = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-83-0")
+            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($sid, "FullControl", "Allow")
+            $acl.AddAccessRule($rule)
+            Set-Acl -Path $vhdxPath -AclObject $acl
+
             # Trouver le prochain emplacement disponible
-            $existingDisks = Get-VMHardDiskDrive -VM $vm
+            $existingDisks = Get-VMHardDiskDrive -VMName $vm.Name
             $controller = 0
             $location = 0
 
@@ -2729,7 +3891,7 @@ echo [%date% %time%] SetupComplete finished >> C:\\Windows\\Setup\\Scripts\\setu
             }}
 
             # Attacher le disque
-            Add-VMHardDiskDrive -VM $vm -Path $vhdxPath -ControllerType SCSI -ControllerNumber $controller -ControllerLocation $location
+            Add-VMHardDiskDrive -VMName $vm.Name -Path $vhdxPath -ControllerType SCSI -ControllerNumber $controller -ControllerLocation $location
 
             @{{
                 Path = $vhdxPath
@@ -2806,7 +3968,7 @@ echo [%date% %time%] SetupComplete finished >> C:\\Windows\\Setup\\Scripts\\setu
             $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
         }}
         if ($vm) {{
-            $disk = Get-VMHardDiskDrive -VM $vm | Where-Object {{ {filter_clause} }}
+            $disk = Get-VMHardDiskDrive -VMName $vm.Name | Where-Object {{ {filter_clause} }}
             if ($disk) {{
                 $diskPath = $disk.Path
                 Remove-VMHardDiskDrive -VMHardDiskDrive $disk
@@ -2910,7 +4072,7 @@ echo [%date% %time%] SetupComplete finished >> C:\\Windows\\Setup\\Scripts\\setu
                 throw "Disk file not found: {disk_path}"
             }}
 
-            Add-VMHardDiskDrive -VM $vm -Path '{disk_path}' -ControllerType SCSI -ControllerNumber {controller_number} {location_param}
+            Add-VMHardDiskDrive -VMName $vm.Name -Path '{disk_path}' -ControllerType SCSI -ControllerNumber {controller_number} {location_param}
             Write-Output "Disk attached"
         }} else {{
             throw "VM not found"
@@ -3296,4 +4458,486 @@ $r|ConvertTo-Json -Depth 4
             
         except Exception as e:
             logger.error("hyperv_screenshot_conversion_failed", vm_id=vm_id, error=str(e))
+            return None
+
+    # -------------------------------------------------------------------------
+    # Keyboard input via WMI Msvm_Keyboard
+    # -------------------------------------------------------------------------
+
+    async def send_key(self, vm_id: str, scancode: int) -> bool:
+        """
+        Envoie une frappe clavier unique à la VM (appui + relâche).
+
+        Utilise WMI Msvm_Keyboard.TypeKey pour simuler une touche complète.
+
+        Args:
+            vm_id: ID ou nom de la VM
+            scancode: Code scancode de la touche (ex. 0x1C pour Enter)
+
+        Returns:
+            True si la touche a été envoyée, False sinon
+        """
+        script = f"""
+        $ErrorActionPreference = 'Stop'
+        $vm = Get-VM -Name '{_escape_ps(vm_id)}' -ErrorAction SilentlyContinue
+        if (-not $vm) {{ $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{_escape_ps(vm_id)}' }} }}
+        if (-not $vm) {{ throw "VM not found: {_escape_ps(vm_id)}" }}
+        $vmName = $vm.Name
+        $ns = "root\\virtualization\\v2"
+        $vmWmi = Get-WmiObject -Namespace $ns -Query "SELECT * FROM Msvm_ComputerSystem WHERE ElementName='$vmName'" | Select-Object -First 1
+        if (-not $vmWmi) {{ throw "Cannot find VM in WMI" }}
+        $keyboard = (Get-WmiObject -Namespace $ns -Query "ASSOCIATORS OF {{$($vmWmi.__PATH)}} WHERE ResultClass=Msvm_Keyboard") | Select-Object -First 1
+        if (-not $keyboard) {{ throw "Cannot find keyboard device" }}
+
+        $result = $keyboard.TypeKey({scancode})
+        if ($result.ReturnValue -ne 0) {{
+            throw "TypeKey failed with return value: $($result.ReturnValue)"
+        }}
+        Write-Output "OK"
+        """
+
+        result = await self._execute(script, timeout=15)
+
+        if not result.success:
+            logger.warning(
+                "hyperv_send_key_failed",
+                vm_id=vm_id,
+                scancode=scancode,
+                error=result.stderr,
+            )
+            return False
+
+        logger.info("hyperv_send_key", vm_id=vm_id, scancode=scancode)
+        return True
+
+    async def move_mouse(self, vm_id: str, x_pct: float, y_pct: float) -> bool:
+        """
+        Déplace le curseur de la souris à une position absolue dans la VM.
+
+        Utilise WMI Msvm_SyntheticMouse.SetAbsolutePosition pour définir
+        la position du pointeur. Les coordonnées sont fournies en pourcentage
+        (0-100) et converties en range WMI (0-65535).
+
+        Args:
+            vm_id: ID ou nom de la VM
+            x_pct: Position X en pourcentage (0-100)
+            y_pct: Position Y en pourcentage (0-100)
+
+        Returns:
+            True si le déplacement a réussi, False sinon
+        """
+        # Clamp to 0-100 and convert to 0-65535 range
+        abs_x = int(max(0, min(100, x_pct)) * 65535 / 100)
+        abs_y = int(max(0, min(100, y_pct)) * 65535 / 100)
+
+        script = f"""
+        $ErrorActionPreference = 'Stop'
+        $vm = Get-VM -Name '{_escape_ps(vm_id)}' -ErrorAction SilentlyContinue
+        if (-not $vm) {{ $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{_escape_ps(vm_id)}' }} }}
+        if (-not $vm) {{ throw "VM not found: {_escape_ps(vm_id)}" }}
+        $vmName = $vm.Name
+        $ns = "root\\virtualization\\v2"
+        $vmWmi = Get-WmiObject -Namespace $ns -Query "SELECT * FROM Msvm_ComputerSystem WHERE ElementName='$vmName'" | Select-Object -First 1
+        if (-not $vmWmi) {{ throw "Cannot find VM in WMI" }}
+        $mouse = (Get-WmiObject -Namespace $ns -Query "ASSOCIATORS OF {{$($vmWmi.__PATH)}} WHERE ResultClass=Msvm_SyntheticMouse") | Select-Object -First 1
+        if (-not $mouse) {{ throw "Cannot find mouse device" }}
+
+        $result = $mouse.SetAbsolutePosition({abs_x}, {abs_y})
+        if ($result.ReturnValue -ne 0) {{
+            throw "SetAbsolutePosition failed with return value: $($result.ReturnValue)"
+        }}
+        Write-Output "OK"
+        """
+
+        result = await self._execute(script, timeout=15)
+
+        if not result.success:
+            logger.warning(
+                "hyperv_move_mouse_failed",
+                vm_id=vm_id,
+                x_pct=x_pct,
+                y_pct=y_pct,
+                error=result.stderr,
+            )
+            return False
+
+        logger.debug("hyperv_move_mouse", vm_id=vm_id, x_pct=x_pct, y_pct=y_pct)
+        return True
+
+    async def press_key(self, vm_id: str, scancode: int) -> bool:
+        """
+        Maintient une touche enfoncée sur la VM (sans relâcher).
+
+        Utile pour les combinaisons de touches avec modificateurs
+        (Ctrl, Alt, Shift). Appeler release_key ensuite pour relâcher.
+
+        Args:
+            vm_id: ID ou nom de la VM
+            scancode: Code scancode de la touche modificateur
+
+        Returns:
+            True si la touche est maintenue, False sinon
+        """
+        script = f"""
+        $ErrorActionPreference = 'Stop'
+        $vm = Get-VM -Name '{_escape_ps(vm_id)}' -ErrorAction SilentlyContinue
+        if (-not $vm) {{ $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{_escape_ps(vm_id)}' }} }}
+        if (-not $vm) {{ throw "VM not found: {_escape_ps(vm_id)}" }}
+        $vmName = $vm.Name
+        $ns = "root\\virtualization\\v2"
+        $vmWmi = Get-WmiObject -Namespace $ns -Query "SELECT * FROM Msvm_ComputerSystem WHERE ElementName='$vmName'" | Select-Object -First 1
+        if (-not $vmWmi) {{ throw "Cannot find VM in WMI" }}
+        $keyboard = (Get-WmiObject -Namespace $ns -Query "ASSOCIATORS OF {{$($vmWmi.__PATH)}} WHERE ResultClass=Msvm_Keyboard") | Select-Object -First 1
+        if (-not $keyboard) {{ throw "Cannot find keyboard device" }}
+
+        $result = $keyboard.PressKey({scancode})
+        if ($result.ReturnValue -ne 0) {{
+            throw "PressKey failed with return value: $($result.ReturnValue)"
+        }}
+        Write-Output "OK"
+        """
+
+        result = await self._execute(script, timeout=15)
+
+        if not result.success:
+            logger.warning(
+                "hyperv_press_key_failed",
+                vm_id=vm_id,
+                scancode=scancode,
+                error=result.stderr,
+            )
+            return False
+
+        logger.info("hyperv_press_key", vm_id=vm_id, scancode=scancode)
+        return True
+
+    async def release_key(self, vm_id: str, scancode: int) -> bool:
+        """
+        Relâche une touche précédemment maintenue sur la VM.
+
+        Utilisé après press_key pour terminer une combinaison
+        de touches avec modificateurs.
+
+        Args:
+            vm_id: ID ou nom de la VM
+            scancode: Code scancode de la touche à relâcher
+
+        Returns:
+            True si la touche a été relâchée, False sinon
+        """
+        script = f"""
+        $ErrorActionPreference = 'Stop'
+        $vm = Get-VM -Name '{_escape_ps(vm_id)}' -ErrorAction SilentlyContinue
+        if (-not $vm) {{ $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{_escape_ps(vm_id)}' }} }}
+        if (-not $vm) {{ throw "VM not found: {_escape_ps(vm_id)}" }}
+        $vmName = $vm.Name
+        $ns = "root\\virtualization\\v2"
+        $vmWmi = Get-WmiObject -Namespace $ns -Query "SELECT * FROM Msvm_ComputerSystem WHERE ElementName='$vmName'" | Select-Object -First 1
+        if (-not $vmWmi) {{ throw "Cannot find VM in WMI" }}
+        $keyboard = (Get-WmiObject -Namespace $ns -Query "ASSOCIATORS OF {{$($vmWmi.__PATH)}} WHERE ResultClass=Msvm_Keyboard") | Select-Object -First 1
+        if (-not $keyboard) {{ throw "Cannot find keyboard device" }}
+
+        $result = $keyboard.ReleaseKey({scancode})
+        if ($result.ReturnValue -ne 0) {{
+            throw "ReleaseKey failed with return value: $($result.ReturnValue)"
+        }}
+        Write-Output "OK"
+        """
+
+        result = await self._execute(script, timeout=15)
+
+        if not result.success:
+            logger.warning(
+                "hyperv_release_key_failed",
+                vm_id=vm_id,
+                scancode=scancode,
+                error=result.stderr,
+            )
+            return False
+
+        logger.info("hyperv_release_key", vm_id=vm_id, scancode=scancode)
+        return True
+
+    async def type_text(self, vm_id: str, text: str) -> bool:
+        """
+        Tape du texte brut dans la VM via le clavier virtuel.
+
+        Utilise WMI Msvm_Keyboard.TypeText pour envoyer une chaîne
+        complète d'un coup. Le texte est échappé pour PowerShell.
+
+        Args:
+            vm_id: ID ou nom de la VM
+            text: Texte à taper dans la VM
+
+        Returns:
+            True si le texte a été envoyé, False sinon
+        """
+        escaped_text = _escape_ps(text)
+        script = f"""
+        $ErrorActionPreference = 'Stop'
+        $vm = Get-VM -Name '{_escape_ps(vm_id)}' -ErrorAction SilentlyContinue
+        if (-not $vm) {{ $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{_escape_ps(vm_id)}' }} }}
+        if (-not $vm) {{ throw "VM not found: {_escape_ps(vm_id)}" }}
+        $vmName = $vm.Name
+        $ns = "root\\virtualization\\v2"
+        $vmWmi = Get-WmiObject -Namespace $ns -Query "SELECT * FROM Msvm_ComputerSystem WHERE ElementName='$vmName'" | Select-Object -First 1
+        if (-not $vmWmi) {{ throw "Cannot find VM in WMI" }}
+        $keyboard = (Get-WmiObject -Namespace $ns -Query "ASSOCIATORS OF {{$($vmWmi.__PATH)}} WHERE ResultClass=Msvm_Keyboard") | Select-Object -First 1
+        if (-not $keyboard) {{ throw "Cannot find keyboard device" }}
+
+        $result = $keyboard.TypeText('{escaped_text}')
+        if ($result.ReturnValue -ne 0) {{
+            throw "TypeText failed with return value: $($result.ReturnValue)"
+        }}
+        Write-Output "OK"
+        """
+
+        result = await self._execute(script, timeout=15)
+
+        if not result.success:
+            logger.warning(
+                "hyperv_type_text_failed",
+                vm_id=vm_id,
+                text_length=len(text),
+                error=result.stderr,
+            )
+            return False
+
+        logger.info("hyperv_type_text", vm_id=vm_id, text_length=len(text))
+        return True
+
+    # -------------------------------------------------------------------------
+    # Mouse click
+    # -------------------------------------------------------------------------
+
+    async def click_mouse(
+        self,
+        vm_id: str,
+        x: float,
+        y: float,
+        button: int = 1,
+    ) -> bool:
+        """
+        Envoie un clic souris à la VM via WMI Msvm_SyntheticMouse.
+
+        Args:
+            vm_id: ID ou nom de la VM
+            x: Position X en pourcentage (0-100) de l'écran
+            y: Position Y en pourcentage (0-100) de l'écran
+            button: Bouton de la souris (1=gauche, 2=droit)
+
+        Returns:
+            True si le clic a été envoyé, False sinon
+        """
+        # Clamp percentages to 0-100 and convert to absolute coords (0-65535)
+        abs_x = int(max(0.0, min(100.0, x)) / 100.0 * 65535)
+        abs_y = int(max(0.0, min(100.0, y)) / 100.0 * 65535)
+        btn = int(button) if button in (1, 2) else 1
+
+        script = f"""
+        $ErrorActionPreference = 'Stop'
+        $vm = Get-VM -Name '{_escape_ps(vm_id)}' -ErrorAction SilentlyContinue
+        if (-not $vm) {{ $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{_escape_ps(vm_id)}' }} }}
+        if (-not $vm) {{ throw "VM not found: {_escape_ps(vm_id)}" }}
+        $vmName = $vm.Name
+        $ns = "root\\virtualization\\v2"
+        $vmWmi = Get-WmiObject -Namespace $ns -Query "SELECT * FROM Msvm_ComputerSystem WHERE ElementName='$vmName'" | Select-Object -First 1
+        if (-not $vmWmi) {{ throw "Cannot find VM in WMI" }}
+        $mouse = (Get-WmiObject -Namespace $ns -Query "ASSOCIATORS OF {{$($vmWmi.__PATH)}} WHERE ResultClass=Msvm_SyntheticMouse") | Select-Object -First 1
+        if (-not $mouse) {{ throw "Cannot find mouse device" }}
+
+        $posResult = $mouse.SetAbsolutePosition({abs_x}, {abs_y})
+        if ($posResult.ReturnValue -ne 0) {{
+            throw "SetAbsolutePosition failed with return value: $($posResult.ReturnValue)"
+        }}
+        $clickResult = $mouse.ClickButton({btn})
+        if ($clickResult.ReturnValue -ne 0) {{
+            throw "ClickButton failed with return value: $($clickResult.ReturnValue)"
+        }}
+        Write-Output "OK"
+        """
+
+        result = await self._execute(script, timeout=15)
+
+        if not result.success:
+            logger.warning(
+                "hyperv_click_mouse_failed",
+                vm_id=vm_id,
+                x=x,
+                y=y,
+                button=button,
+                error=result.stderr,
+            )
+            return False
+
+        logger.info(
+            "hyperv_click_mouse",
+            vm_id=vm_id,
+            x=x,
+            y=y,
+            button=button,
+        )
+        return True
+
+    # -------------------------------------------------------------------------
+    # Screenshot (raw bytes variant)
+    # -------------------------------------------------------------------------
+
+    async def get_vm_screenshot_bytes(
+        self,
+        vm_id: str,
+        width: int = 640,
+        height: int = 480,
+    ) -> bytes | None:
+        """
+        Capture un screenshot de l'écran de la VM et retourne les octets PNG bruts.
+
+        Identique à get_vm_screenshot mais retourne des bytes au lieu
+        d'une chaîne base64, utile pour écrire directement dans un fichier
+        ou streamer via une API.
+
+        Args:
+            vm_id: ID ou nom de la VM
+            width: Largeur de l'image (défaut 640)
+            height: Hauteur de l'image (défaut 480)
+
+        Returns:
+            Octets PNG bruts ou None si échec
+        """
+        script = f"""
+        $ErrorActionPreference = 'Stop'
+
+        # Trouver la VM
+        $vm = Get-VM -Name '{vm_id}' -ErrorAction SilentlyContinue
+        if (-not $vm) {{
+            $vm = Get-VM | Where-Object {{ $_.VMId.ToString() -eq '{vm_id}' }}
+        }}
+        if (-not $vm) {{
+            throw "VM not found: {vm_id}"
+        }}
+
+        # Vérifier que la VM est en cours d'exécution
+        if ($vm.State -ne 'Running') {{
+            throw "VM must be running to capture screenshot"
+        }}
+
+        # Obtenir le service de management via WMI
+        $vmName = $vm.Name
+        $ns = "root\\virtualization\\v2"
+
+        # Récupérer les settings de la VM
+        $vmWmi = Get-WmiObject -Namespace $ns -Query "SELECT * FROM Msvm_ComputerSystem WHERE ElementName='$vmName'" | Select-Object -First 1
+
+        if (-not $vmWmi) {{
+            throw "Cannot find VM in WMI"
+        }}
+
+        # Récupérer les settings data
+        $vmSettingsQuery = "ASSOCIATORS OF {{$($vmWmi.__PATH)}} WHERE AssocClass=Msvm_SettingsDefineState ResultClass=Msvm_VirtualSystemSettingData"
+        $vmSettings = Get-WmiObject -Namespace $ns -Query $vmSettingsQuery | Select-Object -First 1
+
+        if (-not $vmSettings) {{
+            throw "Cannot find VM settings"
+        }}
+
+        # Obtenir le service de management
+        $vsms = Get-WmiObject -Namespace $ns -Class Msvm_VirtualSystemManagementService
+
+        # Capturer le thumbnail
+        $result = $vsms.GetVirtualSystemThumbnailImage($vmSettings.__PATH, {width}, {height})
+
+        if ($result.ReturnValue -ne 0) {{
+            throw "Failed to capture screenshot. Return code: $($result.ReturnValue)"
+        }}
+
+        # Retourner les infos: width, height et données en base64
+        @{{
+            Width = {width}
+            Height = {height}
+            Data = [Convert]::ToBase64String($result.ImageData)
+        }} | ConvertTo-Json -Compress
+        """
+
+        result = await self._execute(script, timeout=30)
+
+        if not result.success:
+            logger.warning(
+                "hyperv_screenshot_bytes_failed",
+                vm_id=vm_id,
+                error=result.stderr,
+            )
+            return None
+
+        # Parser le JSON
+        data = self._parse_json_output(result.stdout)
+
+        if not data or not data.get("Data"):
+            logger.warning("hyperv_screenshot_bytes_empty", vm_id=vm_id)
+            return None
+
+        # Convertir RGB16 brut en PNG
+        try:
+            import base64
+            from io import BytesIO
+            import numpy as np
+            from PIL import Image
+
+            # Décoder les données base64
+            raw_data = base64.b64decode(data["Data"])
+            img_width = data.get("Width", width)
+            img_height = data.get("Height", height)
+
+            # Les données Hyper-V ont un header de 4 bytes
+            header_size = 4
+            if len(raw_data) > img_width * img_height * 2:
+                raw_data = raw_data[header_size:]
+
+            # Calculer le nombre de pixels attendu
+            expected_pixels = img_width * img_height
+            actual_pixels = len(raw_data) // 2
+
+            # Ajuster les dimensions si nécessaire
+            if actual_pixels != expected_pixels:
+                logger.warning(
+                    "hyperv_screenshot_bytes_size_mismatch",
+                    expected=expected_pixels,
+                    actual=actual_pixels,
+                )
+
+            # Les données sont en RGB565 (16 bits par pixel)
+            # Convertir en RGB888 via numpy (vectorisé, ~100x plus rapide)
+            usable_bytes = min(len(raw_data), expected_pixels * 2)
+            raw_arr = np.frombuffer(raw_data[:usable_bytes], dtype=np.uint16)
+
+            # RGB565: RRRRRGGGGGGBBBBB (little-endian, natif sur x86)
+            r = ((raw_arr >> 11) & 0x1F).astype(np.uint8) << 3
+            g = ((raw_arr >> 5) & 0x3F).astype(np.uint8) << 2
+            b = (raw_arr & 0x1F).astype(np.uint8) << 3
+
+            # Empiler en (N, 3) puis compléter avec des pixels noirs si nécessaire
+            rgb = np.stack((r, g, b), axis=-1)
+            if len(rgb) < expected_pixels:
+                padding = np.zeros((expected_pixels - len(rgb), 3), dtype=np.uint8)
+                rgb = np.concatenate((rgb, padding), axis=0)
+            else:
+                rgb = rgb[:expected_pixels]
+
+            # Créer l'image directement depuis le tableau numpy
+            img = Image.frombuffer(
+                "RGB", (img_width, img_height), rgb.tobytes(), "raw", "RGB", 0, 1
+            )
+
+            # Sauvegarder en PNG dans un buffer (compress_level=1 : rapide)
+            buffer = BytesIO()
+            img.save(buffer, format="PNG", compress_level=1)
+            buffer.seek(0)
+
+            # Retourner les octets PNG bruts
+            png_bytes = buffer.getvalue()
+
+            logger.info("hyperv_screenshot_bytes_captured", vm_id=vm_id, size=len(png_bytes))
+            return png_bytes
+
+        except Exception as e:
+            logger.error("hyperv_screenshot_bytes_conversion_failed", vm_id=vm_id, error=str(e))
             return None

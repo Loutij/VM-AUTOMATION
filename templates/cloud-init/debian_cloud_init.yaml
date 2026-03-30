@@ -23,14 +23,16 @@ timezone: {{ timezone | default('Europe/Paris') }}
 # Utilisateurs
 # =============================================================================
 users:
-  - name: {{ username | default('admin') }}
+  - name: {{ username | default('otoroot') }}
     gecos: {{ user_fullname | default('Administrator') }}
     groups: [sudo, adm, systemd-journal]
     shell: /bin/bash
     sudo: ALL=(ALL) NOPASSWD:ALL
     lock_passwd: false
-    {% if user_password %}
-    passwd: {{ user_password_hash | default('$6$rounds=4096$randomsalt$hashedpassword') }}
+    {% if user_password_hash %}
+    passwd: {{ user_password_hash }}
+    {% elif user_password %}
+    passwd: {{ user_password }}
     {% endif %}
     {% if ssh_authorized_keys %}
     ssh_authorized_keys:

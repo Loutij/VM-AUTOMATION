@@ -197,6 +197,8 @@ secrets/
 credentials/
 .secrets
 clickup.env
+hyperv.env
+.env
 
 # Database
 *.db
@@ -256,7 +258,6 @@ junit.xml
 /playwright-report/
 /playwright/.cache/
 rules_cursor.md
-hyperv.env
 *.env
 *.jpg
 *.png

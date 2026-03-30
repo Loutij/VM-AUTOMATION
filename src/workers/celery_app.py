@@ -45,18 +45,30 @@ celery_app.conf.update(
     worker_concurrency=4,
     
     # Beat schedule pour les tâches périodiques
+    # - process-pending: 30s suffit, 10s créait trop de charge DB pour peu de bénéfice
+    # - monitor-active: 60s suffit, les installations OS durent plusieurs minutes
+    # - cleanup-old-logs: 1h, maintenance légère
+    # - sync-all-hypervisors: 5min, synchronisation état Hyper-V
     beat_schedule={
         "process-pending-deployments": {
             "task": "src.workers.tasks.process_pending_deployments",
-            "schedule": 10.0,  # Toutes les 10 secondes
+            "schedule": 30.0,  # Toutes les 30 secondes
         },
         "monitor-active-deployments": {
             "task": "src.workers.tasks.monitor_active_deployments",
-            "schedule": 30.0,  # Toutes les 30 secondes
+            "schedule": 60.0,  # Toutes les 60 secondes
         },
         "cleanup-old-logs": {
             "task": "src.workers.tasks.cleanup_old_logs",
             "schedule": 3600.0,  # Toutes les heures
+        },
+        "sync-all-hypervisors": {
+            "task": "src.workers.tasks.sync_all_hypervisors",
+            "schedule": 300.0,  # Toutes les 5 minutes
+        },
+        "cleanup-vnc-sessions": {
+            "task": "src.workers.tasks.cleanup_vnc_sessions",
+            "schedule": 300.0,  # Toutes les 5 minutes
         },
     },
 )

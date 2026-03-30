@@ -52,14 +52,14 @@ class ConfigurationError(VMAutomationError):
 class AuthenticationError(VMAutomationError):
     """Erreur d'authentification."""
 
-    def __init__(self, message: str = "Authentication failed") -> None:
+    def __init__(self, message: str = "Échec de l'authentification") -> None:
         super().__init__(message, "AUTH_ERROR")
 
 
 class AuthorizationError(VMAutomationError):
     """Erreur d'autorisation (permissions insuffisantes)."""
 
-    def __init__(self, message: str = "Permission denied") -> None:
+    def __init__(self, message: str = "Permission refusée") -> None:
         super().__init__(message, "AUTHZ_ERROR")
 
 
@@ -67,7 +67,7 @@ class TokenExpiredError(AuthenticationError):
     """Token JWT expiré."""
 
     def __init__(self) -> None:
-        super().__init__("Token has expired")
+        super().__init__("Le token a expiré")
         self.code = "TOKEN_EXPIRED"
 
 
@@ -75,7 +75,7 @@ class InvalidTokenError(AuthenticationError):
     """Token JWT invalide."""
 
     def __init__(self) -> None:
-        super().__init__("Invalid token")
+        super().__init__("Token invalide")
         self.code = "INVALID_TOKEN"
 
 
@@ -97,9 +97,9 @@ class NotFoundError(VMAutomationError):
     def __init__(
         self, resource_type: str, resource_id: str | None = None
     ) -> None:
-        message = f"{resource_type} not found"
+        message = f"{resource_type} non trouvé(e)"
         if resource_id:
-            message = f"{resource_type} with id '{resource_id}' not found"
+            message = f"{resource_type} avec l'id '{resource_id}' non trouvé(e)"
         super().__init__(message, "NOT_FOUND", {"resource_type": resource_type})
 
 
@@ -108,7 +108,7 @@ class AlreadyExistsError(VMAutomationError):
 
     def __init__(self, resource_type: str, identifier: str) -> None:
         super().__init__(
-            f"{resource_type} '{identifier}' already exists",
+            f"{resource_type} '{identifier}' existe déjà",
             "ALREADY_EXISTS",
             {"resource_type": resource_type, "identifier": identifier},
         )
@@ -130,7 +130,7 @@ class HypervisorConnectionError(HypervisorError):
     """Impossible de se connecter à l'hyperviseur."""
 
     def __init__(self, host: str, reason: str | None = None) -> None:
-        message = f"Cannot connect to hypervisor '{host}'"
+        message = f"Impossible de se connecter à l'hyperviseur '{host}'"
         if reason:
             message += f": {reason}"
         super().__init__(message, {"host": host})
@@ -142,7 +142,7 @@ class VMCreationError(HypervisorError):
 
     def __init__(self, vm_name: str, reason: str) -> None:
         super().__init__(
-            f"Failed to create VM '{vm_name}': {reason}",
+            f"Échec de création de la VM '{vm_name}' : {reason}",
             {"vm_name": vm_name, "reason": reason},
         )
         self.code = "VM_CREATION_ERROR"
@@ -153,9 +153,9 @@ class VMNotFoundError(HypervisorError):
 
     def __init__(self, vm_name: str, hypervisor: str | None = None) -> None:
         details: dict[str, Any] = {"vm_name": vm_name}
-        message = f"VM '{vm_name}' not found"
+        message = f"VM '{vm_name}' non trouvée"
         if hypervisor:
-            message += f" on hypervisor '{hypervisor}'"
+            message += f" sur l'hyperviseur '{hypervisor}'"
             details["hypervisor"] = hypervisor
         super().__init__(message, details)
         self.code = "VM_NOT_FOUND"
@@ -166,7 +166,7 @@ class VMOperationError(HypervisorError):
 
     def __init__(self, vm_name: str, operation: str, reason: str) -> None:
         super().__init__(
-            f"Failed to {operation} VM '{vm_name}': {reason}",
+            f"Échec de l'opération '{operation}' sur la VM '{vm_name}' : {reason}",
             {"vm_name": vm_name, "operation": operation, "reason": reason},
         )
         self.code = "VM_OPERATION_ERROR"
@@ -202,7 +202,7 @@ class PowerShellTimeoutError(PowerShellError):
 
     def __init__(self, timeout: int, command: str | None = None) -> None:
         super().__init__(
-            f"PowerShell command timed out after {timeout} seconds",
+            f"Commande PowerShell expirée après {timeout} secondes",
             command=command,
         )
         self.code = "POWERSHELL_TIMEOUT"
@@ -235,7 +235,7 @@ class DeploymentStepError(DeploymentError):
 
     def __init__(self, deployment_id: str, step: str, reason: str) -> None:
         super().__init__(
-            f"Deployment step '{step}' failed: {reason}",
+            f"Étape de déploiement '{step}' échouée : {reason}",
             deployment_id=deployment_id,
             step=step,
         )
@@ -247,7 +247,7 @@ class DeploymentTimeoutError(DeploymentError):
 
     def __init__(self, deployment_id: str, step: str, timeout: int) -> None:
         super().__init__(
-            f"Deployment step '{step}' timed out after {timeout} seconds",
+            f"Étape de déploiement '{step}' expirée après {timeout} secondes",
             deployment_id=deployment_id,
             step=step,
         )
@@ -274,7 +274,7 @@ class ResourceBusyError(VMAutomationError):
 
     def __init__(self, resource_type: str, resource_id: str) -> None:
         super().__init__(
-            f"{resource_type} '{resource_id}' is currently busy",
+            f"{resource_type} '{resource_id}' est actuellement occupé(e)",
             "RESOURCE_BUSY",
             {"resource_type": resource_type, "resource_id": resource_id},
         )

@@ -8,26 +8,36 @@ Routes d'authentification API.
 from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, OAuth2PasswordRequestForm
-from pydantic import BaseModel, EmailStr
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.dependencies import get_db
+from src.api.dependencies import get_db, RequireAdmin
 from src.common.auth import (
+    ACCESS_TOKEN_EXPIRE_MINUTES,
     Token,
     UserAuth,
+    blacklist_token,
     create_tokens,
+    decode_token,
     hash_password,
+    is_token_blacklisted,
     verify_access_token,
     verify_password,
     verify_refresh_token,
 )
 from src.common.exceptions import AuthenticationError
+from src.domain.models import UserRole
 from src.domain.user_model import User
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+# Rate limiter for auth endpoints (10 requests/minute)
+limiter = Limiter(key_func=get_remote_address)
 
 # Security scheme
 security = HTTPBearer(auto_error=False)
@@ -41,9 +51,9 @@ security = HTTPBearer(auto_error=False)
 class UserCreate(BaseModel):
     """Schéma pour créer un utilisateur."""
 
-    username: str
+    username: str = Field(..., min_length=3, max_length=50, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$", description="Nom d'utilisateur (alphanumérique, 3-50 caractères)")
     email: EmailStr
-    password: str
+    password: str = Field(..., min_length=8, max_length=128, description="Mot de passe (minimum 8 caractères)")
     full_name: str | None = None
 
 
@@ -56,6 +66,7 @@ class UserResponse(BaseModel):
     full_name: str | None
     is_active: bool
     is_superuser: bool
+    role: str
     created_at: datetime
 
     class Config:
@@ -71,8 +82,17 @@ class UserResponse(BaseModel):
             full_name=obj.full_name,
             is_active=obj.is_active,
             is_superuser=obj.is_superuser,
+            role=obj.role.value if hasattr(obj.role, 'value') else obj.role,
             created_at=obj.created_at,
         )
+
+
+class UserUpdate(BaseModel):
+    """Schéma pour modifier un utilisateur (admin)."""
+
+    full_name: str | None = None
+    is_active: bool | None = None
+    role: str | None = None
 
 
 class RefreshTokenRequest(BaseModel):
@@ -118,7 +138,12 @@ async def get_current_user(
         )
 
     try:
-        user_id = verify_access_token(credentials.credentials)
+        payload = decode_token(credentials.credentials, expected_type="access")
+        user_id = payload.sub
+
+        # Check if token has been revoked (logout)
+        if payload.jti and await is_token_blacklisted(payload.jti):
+            raise AuthenticationError("Token has been revoked")
     except AuthenticationError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -174,7 +199,9 @@ async def get_current_superuser(
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit("10/minute")
 async def register(
+    request: Request,
     user_data: UserCreate,
     db: AsyncSession = Depends(get_db),
 ) -> UserResponse:
@@ -220,7 +247,9 @@ async def register(
 
 
 @router.post("/login", response_model=Token)
+@limiter.limit("10/minute")
 async def login(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
 ) -> Token:
@@ -255,8 +284,9 @@ async def login(
     user.last_login = datetime.now(timezone.utc)
     await db.commit()
 
-    # Créer les tokens
-    return create_tokens(str(user.id))
+    # Créer les tokens avec username et rôle
+    role = user.role.value if hasattr(user.role, 'value') else (user.role or "user")
+    return create_tokens(str(user.id), username=user.username, role=role)
 
 
 @router.post("/refresh", response_model=Token)
@@ -292,7 +322,8 @@ async def refresh_token(
             detail="Utilisateur invalide ou désactivé",
         )
 
-    return create_tokens(str(user.id))
+    role = user.role.value if hasattr(user.role, 'value') else (user.role or "user")
+    return create_tokens(str(user.id), username=user.username, role=role)
 
 
 @router.get("/me", response_model=UserResponse)
@@ -341,15 +372,189 @@ async def change_password(
 
 
 @router.post("/logout")
-async def logout() -> dict:
+async def logout(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
+) -> dict:
     """
-    Déconnexion (côté client, invalider le token).
+    Déconnexion - blackliste le token JWT courant.
 
-    Note: Avec JWT stateless, la déconnexion se fait côté client
-    en supprimant le token. Pour une vraie invalidation, il faudrait
-    un système de blacklist (Redis).
+    Le token est ajouté à la blacklist Redis (ou in-memory) pour la durée
+    restante de sa validité, empêchant toute réutilisation.
 
     Returns:
         Message de confirmation
     """
+    if credentials:
+        try:
+            payload = decode_token(credentials.credentials, expected_type="access")
+            if payload.jti:
+                # Calculate remaining lifetime in seconds
+                remaining = int((payload.exp - datetime.now(timezone.utc)).total_seconds())
+                if remaining > 0:
+                    await blacklist_token(payload.jti, remaining)
+        except AuthenticationError:
+            pass  # Token already invalid, nothing to blacklist
+
     return {"message": "Déconnexion réussie"}
+
+
+# =============================================================================
+# Admin Routes - Gestion des utilisateurs
+# =============================================================================
+
+
+@router.get("/admin/users", response_model=list[UserResponse])
+async def list_users(
+    admin: RequireAdmin,
+    db: AsyncSession = Depends(get_db),
+) -> list[UserResponse]:
+    """Liste tous les utilisateurs (admin uniquement)."""
+    result = await db.execute(select(User).order_by(User.created_at.desc()))
+    users = result.scalars().all()
+    return [UserResponse.from_orm(u) for u in users]
+
+
+@router.get("/admin/users/{user_id}", response_model=UserResponse)
+async def get_user(
+    user_id: str,
+    admin: RequireAdmin,
+    db: AsyncSession = Depends(get_db),
+) -> UserResponse:
+    """Récupère un utilisateur par ID (admin uniquement)."""
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Utilisateur non trouvé",
+        )
+    return UserResponse.from_orm(user)
+
+
+@router.post("/admin/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def admin_create_user(
+    user_data: UserCreate,
+    admin: RequireAdmin,
+    db: AsyncSession = Depends(get_db),
+) -> UserResponse:
+    """Crée un utilisateur (admin uniquement). Le rôle par défaut est 'user'."""
+    # Vérifier unicité
+    result = await db.execute(select(User).where(User.username == user_data.username))
+    if result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ce nom d'utilisateur est déjà pris",
+        )
+    result = await db.execute(select(User).where(User.email == user_data.email))
+    if result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cet email est déjà utilisé",
+        )
+
+    user = User(
+        username=user_data.username,
+        email=user_data.email,
+        hashed_password=hash_password(user_data.password),
+        full_name=user_data.full_name,
+        role=UserRole.USER,
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return UserResponse.from_orm(user)
+
+
+@router.patch("/admin/users/{user_id}", response_model=UserResponse)
+async def update_user(
+    user_id: str,
+    updates: UserUpdate,
+    admin: RequireAdmin,
+    db: AsyncSession = Depends(get_db),
+) -> UserResponse:
+    """Met à jour un utilisateur (admin uniquement)."""
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Utilisateur non trouvé",
+        )
+
+    if updates.full_name is not None:
+        user.full_name = updates.full_name
+    if updates.is_active is not None:
+        user.is_active = updates.is_active
+    if updates.role is not None:
+        try:
+            user.role = UserRole(updates.role)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Rôle invalide: {updates.role}. Valeurs acceptées: admin, user",
+            )
+
+    await db.commit()
+    await db.refresh(user)
+    return UserResponse.from_orm(user)
+
+
+@router.delete("/admin/users/{user_id}")
+async def delete_user(
+    user_id: str,
+    admin: RequireAdmin,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Supprime un utilisateur (admin uniquement)."""
+    # Empêcher l'auto-suppression
+    if user_id == admin.get("user_id"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Impossible de supprimer votre propre compte",
+        )
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Utilisateur non trouvé",
+        )
+
+    await db.delete(user)
+    await db.commit()
+    return {"message": f"Utilisateur '{user.username}' supprimé"}
+
+
+class ResetPasswordRequest(BaseModel):
+    """Schéma pour réinitialiser un mot de passe (admin)."""
+
+    new_password: str
+
+
+@router.post("/admin/users/{user_id}/reset-password")
+async def admin_reset_password(
+    user_id: str,
+    request: ResetPasswordRequest,
+    admin: RequireAdmin,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Réinitialise le mot de passe d'un utilisateur (admin uniquement)."""
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Utilisateur non trouvé",
+        )
+
+    new_password = request.new_password
+    if not new_password or len(new_password) < 8:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Le mot de passe doit contenir au moins 8 caractères",
+        )
+
+    user.hashed_password = hash_password(new_password)
+    await db.commit()
+    return {"message": f"Mot de passe de '{user.username}' réinitialisé"}

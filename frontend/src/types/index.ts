@@ -6,8 +6,13 @@ export interface Hypervisor {
   host: string;
   port?: number;
   username: string;
-  is_connected: boolean;
+  is_active: boolean;
   vm_count?: number;
+  // VMware-specific fields
+  datacenter?: string;
+  cluster?: string;
+  default_datastore?: string;
+  default_resource_pool?: string;
   created_at: string;
   updated_at: string;
 }
@@ -25,6 +30,13 @@ export interface VirtualMachine {
   disk_gb: number; // Aligned with backend (was disk_size_gb)
   os_type?: string;
   ip_address?: string;
+  network_switch?: string;
+  // VMware-specific fields
+  tools_status?: string;
+  tools_version?: string;
+  guest_os?: string;
+  datastore?: string;
+  vlan_id?: number;
   created_at: string;
   updated_at: string;
 }
@@ -124,11 +136,14 @@ export interface OSTemplate {
   min_cpu: number;     // Aligned with backend (was default_cpu)
   min_ram_gb: number;  // Aligned with backend (was default_memory_mb)
   min_disk_gb: number; // Aligned with backend (was default_disk_gb)
+  install_locale?: string;  // Langue d'installation (ex: fr-FR, en-US)
+  updated_at?: string;
   created_at: string;
 }
 
 // Types pour les déploiements
-export type DeploymentStatus = 
+export type DeploymentStatus =
+  | 'pending_approval'
   | 'pending'
   | 'in_progress'
   | 'creating_vm'
@@ -137,7 +152,8 @@ export type DeploymentStatus =
   | 'installing_software'
   | 'completed'
   | 'failed'
-  | 'cancelled';
+  | 'cancelled'
+  | 'rejected';
 
 export interface DeploymentLog {
   id: string;
@@ -145,22 +161,49 @@ export interface DeploymentLog {
   step: string;
   level: 'debug' | 'info' | 'warning' | 'error';
   message: string;
+  details?: Record<string, any>;
   created_at: string;
 }
 
 export interface Deployment {
   id: string;
-  vm_name: string;  // Aligned with backend (was name)
+  vm_name: string;  // Aligned with backend
+  name: string;     // Alias for vm_name (for display)
   hypervisor_id: string;
   os_template_id: string;  // Aligned with backend (was template_id)
   vm_id?: string;
   status: DeploymentStatus;
   progress: number;
+  current_step?: string;  // Étape courante du déploiement
   error_message?: string;
   config: DeploymentConfig;
   logs?: DeploymentLog[];
   created_at: string;
   updated_at: string;
+  // Approval workflow
+  requested_by_username?: string;
+  reviewed_by_username?: string;
+  reviewed_at?: string;
+  review_note?: string;
+}
+
+// Audit log
+export interface AuditLogEntry {
+  id: string;
+  user_id: string;
+  username: string;
+  action: string;
+  resource_type: string;
+  resource_id?: string;
+  details?: Record<string, any>;
+  created_at: string;
+}
+
+export interface AuditLogList {
+  items: AuditLogEntry[];
+  total: number;
+  page: number;
+  page_size: number;
 }
 
 export interface DeploymentConfig {
@@ -176,7 +219,7 @@ export interface DeploymentConfig {
     domain: string;
     user?: string;
     password?: string;
-    ou_path?: string;
+    ou?: string;
   };
   ip_config?: {
     static_ip?: boolean;
@@ -202,10 +245,15 @@ export interface DeploymentConfig {
   // Logiciels
   software_profile?: string; // minimal, tools, development, webserver, database, monitoring
   packages?: string[]; // Packages Chocolatey supplémentaires
+  package_configs?: Record<string, Record<string, unknown>>; // Configurations par package
   // Windows Update
   enable_windows_update?: boolean;
   // Commandes post-install personnalisées
   post_install_commands?: string[];
+  // Linux-specific
+  ssh_keys?: string[];
+  extra_packages?: string[];
+  post_commands?: string[];
   network?: {
     dhcp: boolean;
     ip_address?: string;
@@ -246,13 +294,25 @@ export interface DashboardStats {
 }
 
 export interface HealthCheck {
-  status: 'healthy' | 'unhealthy';
-  database: boolean;
-  redis: boolean;
-  hypervisors: {
-    name: string;
-    connected: boolean;
-  }[];
+  status: 'healthy' | 'unhealthy' | 'degraded';
+  timestamp: string;
+  version: string;
+  environment: string;
+  checks: {
+    database: {
+      status: 'healthy' | 'unhealthy';
+      host?: string;
+      error?: string;
+    };
+    redis: {
+      status: 'healthy' | 'unhealthy' | 'unknown';
+      message?: string;
+    };
+    celery: {
+      status: 'healthy' | 'unhealthy' | 'unknown';
+      message?: string;
+    };
+  };
 }
 
 // Types pour les switches virtuels
@@ -281,6 +341,18 @@ export interface PhysicalAdapter {
   mac_address: string;
 }
 
+// Types pour les emplacements de stockage
+export interface StorageLocation {
+  drive_letter: string;
+  path: string;
+  total_gb: number;
+  free_gb: number;
+  used_gb: number;
+  percent_free: number;
+  is_default: boolean;
+  is_recommended: boolean;
+}
+
 // Types pour les paramètres de l'application
 export interface AppSettings {
   // Paramètres généraux
@@ -299,8 +371,8 @@ export interface AppSettings {
   // Valeurs par défaut pour les déploiements
   defaultDeployment: {
     cpu_count: number;
-    memory_mb: number;
-    disk_size_gb: number;
+    ram_gb: number;
+    disk_gb: number;
     network_switch: string;
   };
   
@@ -324,8 +396,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
   defaultDeployment: {
     cpu_count: 2,
-    memory_mb: 4096,
-    disk_size_gb: 60,
+    ram_gb: 4,
+    disk_gb: 60,
     network_switch: 'Default Switch',
   },
   display: {
@@ -392,6 +464,7 @@ export interface ConfigField {
   type: 'string' | 'number' | 'boolean' | 'select';
   label: string;
   description?: string;
+  placeholder?: string;
   required?: boolean;
   default?: unknown;
   options?: { value: string; label: string }[];
@@ -425,4 +498,131 @@ export interface SoftwareList {
 
 export interface ProfileList {
   profiles: SoftwareProfile[];
+}
+
+// Types pour l'administration des utilisateurs
+export type UserRole = 'admin' | 'user';
+
+export interface AdminUser {
+  id: string;
+  username: string;
+  email: string;
+  full_name: string | null;
+  is_active: boolean;
+  is_superuser: boolean;
+  role: UserRole;
+  created_at: string;
+}
+
+export interface CreateUserRequest {
+  username: string;
+  email: string;
+  password: string;
+  full_name?: string;
+}
+
+export interface UpdateUserRequest {
+  full_name?: string | null;
+  is_active?: boolean;
+  role?: UserRole;
+}
+
+export interface ResetPasswordRequest {
+  new_password: string;
+}
+
+// Types pour l'inventaire logiciel
+export interface ChocoPackage {
+  Name: string;
+  Version: string;
+  Source: string;
+}
+
+export interface InstalledProgram {
+  DisplayName: string;
+  DisplayVersion: string | null;
+  Publisher: string | null;
+  InstallDate: string | null;
+  EstimatedSize: number | null;
+}
+
+export interface WindowsFeature {
+  FeatureName?: string;
+  Name?: string;
+  DisplayName?: string;
+  State?: string;
+  InstallState?: string;
+}
+
+export interface ServiceInfo {
+  Name?: string;
+  name?: string;
+  DisplayName?: string;
+  Status?: string;
+  status?: string;
+  StartType?: string;
+}
+
+export interface WindowsUpdate {
+  HotFixID: string;
+  Description?: string;
+  InstalledOn?: string;
+  InstalledBy?: string;
+}
+
+export interface SystemInfo {
+  hostname?: string;
+  os_name?: string;
+  os_version?: string;
+  os_build?: string;
+  last_boot?: string;
+  uptime_hours?: number;
+  os_info?: string;
+  kernel?: string;
+  uptime?: string;
+}
+
+export interface SoftwareInventory {
+  vm_id: string;
+  vm_name: string;
+  os_type: string;
+  timestamp: string;
+  system_info?: SystemInfo;
+  chocolatey_packages?: ChocoPackage[];
+  installed_programs?: InstalledProgram[];
+  windows_features?: WindowsFeature[];
+  running_services?: ServiceInfo[];
+  recent_updates?: WindowsUpdate[];
+  // Linux
+  packages?: { name: string; version: string; status?: string }[];
+  snap_packages?: { name: string; version: string; source?: string }[];
+  flatpak_packages?: { name: string; version: string; source?: string }[];
+  total_packages: number;
+}
+
+// VNC Types
+export interface VNCStatus {
+  reachable: boolean;
+  is_vnc?: boolean;
+  server_version?: string;
+  vm_ip?: string;
+  port: number;
+  error?: string;
+}
+
+export interface VNCInstallResult {
+  success: boolean;
+  step: string;
+  vnc_port?: number;
+  vnc_display?: number;
+  vm_ip?: string;
+  protocol?: string;
+  error?: string | null;
+}
+
+export interface VNCSession {
+  vm_id: string;
+  vm_ip: string;
+  vnc_port: number;
+  running: boolean;
 }

@@ -1,145 +1,123 @@
-# VM Automation - Guide de Démarrage Rapide
+# VM Automation - Guide de Demarrage
 
-## 1. Installation de Git
+## Prerequis
 
-Git n'est pas détecté sur ce système. Installation requise :
+- Python 3.11+
+- Node.js 18+
+- Docker + Docker Compose
+- Acces a un serveur Hyper-V (WinRM active)
 
-### Option 1 : Téléchargement direct
-1. Télécharger depuis https://git-scm.com/download/win
-2. Exécuter l'installateur
-3. Redémarrer le terminal/VSCode
+Voir [PREREQUISITES.md](PREREQUISITES.md) pour les details infrastructure.
 
-### Option 2 : Via Chocolatey
-```powershell
-choco install git -y
+## 1. Cloner le projet
+
+```bash
+git clone <repo-url>
+cd VM-AUTOMATION
 ```
 
-### Option 3 : Via Winget
-```powershell
-winget install Git.Git
-```
+## 2. Backend
 
----
+### Environnement Python
 
-## 2. Initialisation du Repository
-
-Une fois Git installé, exécuter dans le dossier du projet :
-
-```powershell
-# Naviguer vers le projet
-cd "c:\Users\cma.ext\OneDrive - OTO Technology\Documents\CURSOR\2"
-
-# Initialiser Git
-git init
-
-# Ajouter tous les fichiers
-git add .
-
-# Premier commit
-git commit -m "feat: initialisation du projet VM Automation
-
-- Structure de base du projet Python/FastAPI
-- Documentation initiale (README, TASKS, PREREQUISITES, ARCHITECTURE)
-- Configuration (.gitignore, requirements.txt, docker-compose.yml)
-- Structure des dossiers (src/, templates/, scripts/, tests/, docs/)"
-```
-
----
-
-## 3. Création du Repository GitHub
-
-```powershell
-# Créer le repo sur GitHub (nécessite GitHub CLI)
-gh repo create vm-automation --private --source=. --push
-
-# OU manuellement :
-# 1. Créer le repo sur github.com
-# 2. Ajouter le remote
-git remote add origin https://github.com/VOTRE-ORG/vm-automation.git
-
-# 3. Pousser
-git push -u origin main
-```
-
----
-
-## 4. Installation des Dépendances
-
-### Backend (Python)
-
-```powershell
-# Créer l'environnement virtuel
-python -m venv venv
-
-# Activer l'environnement
-.\venv\Scripts\Activate
-
-# Installer les dépendances
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-```
-
-### Services (Docker)
-
-```powershell
-# Lancer PostgreSQL et Redis
-docker-compose up -d
-
-# Vérifier les services
-docker-compose ps
 ```
 
 ### Configuration
 
-```powershell
-# Copier le fichier de configuration
-copy config\env.example .env
-
-# Éditer les valeurs (notamment les credentials Hyper-V)
-notepad .env
+```bash
+cp config/env.example .env
+# Editer .env avec vos valeurs (credentials Hyper-V, etc.)
 ```
 
----
+Voir [ENV_REFERENCE.md](ENV_REFERENCE.md) pour toutes les variables.
 
-## 5. Vérification de l'Installation
+### Services Docker (PostgreSQL + Redis)
 
-```powershell
-# Vérifier Python
-python --version  # Doit être >= 3.11
-
-# Vérifier les services Docker
-docker-compose ps
-
-# Tester la connexion DB
-python -c "import asyncpg; print('asyncpg OK')"
-
-# Tester la connexion Redis
-python -c "import redis; r = redis.Redis(); r.ping(); print('Redis OK')"
+```bash
+docker compose up -d
 ```
 
----
+### Base de donnees
 
-## 6. Prochaines Étapes
+```bash
+# Appliquer les migrations
+alembic upgrade head
+```
 
-1. **Configurer Hyper-V** : Voir `docs/PREREQUISITES.md`
-2. **Lancer l'API** : `uvicorn src.api.main:app --reload`
-3. **Consulter les tâches** : Voir `docs/TASKS.md`
+### Lancer l'API
 
----
+```bash
+uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
+```
 
-## Troubleshooting
+API accessible sur http://localhost:8000
+Documentation Swagger : http://localhost:8000/docs
 
-### Git non reconnu après installation
-- Fermer et rouvrir le terminal/VSCode
-- Vérifier que Git est dans le PATH : `$env:PATH -split ';' | Select-String git`
+### Lancer les workers Celery
 
-### Docker non disponible
-- Installer Docker Desktop : https://www.docker.com/products/docker-desktop/
-- Ou utiliser PostgreSQL/Redis installés localement
+```bash
+celery -A src.workers.celery_app worker --loglevel=info
+```
 
-### Erreur de connexion Hyper-V
-- Vérifier que WinRM est activé sur l'hôte Hyper-V
-- Tester : `Test-WSMan -ComputerName <hyperv-host>`
+### Monitoring Celery (optionnel)
 
----
+```bash
+# Flower disponible via Docker Compose sur http://localhost:5555
+```
 
-*Document créé le 2026-01-26*
+## 3. Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Frontend accessible sur http://localhost:5173
+
+## 4. Premier deploiement
+
+1. Ouvrir http://localhost:5173
+2. Se connecter (ou creer un compte via l'API `/auth/register`)
+3. Aller dans **Hyperviseurs** > Ajouter votre serveur Hyper-V
+4. Cliquer **Tester la connexion** pour verifier
+5. Aller dans **Templates** > Verifier que les templates OS sont presents
+6. Aller dans **Nouveau Deploiement** > Suivre le wizard
+
+## 5. Service systemd (production)
+
+```bash
+# Installer le service
+sudo bash scripts/install-systemd-service.sh
+
+# Gerer le service
+sudo systemctl start vm-automation
+sudo systemctl enable vm-automation
+sudo systemctl status vm-automation
+```
+
+Configuration du service : `config/vm-automation.service`
+
+## Verification
+
+```bash
+# Verifier l'API
+curl http://localhost:8000/health
+
+# Verifier les services Docker
+docker compose ps
+
+# Verifier Celery
+celery -A src.workers.celery_app inspect ping
+```
+
+## Prochaines etapes
+
+- [ARCHITECTURE.md](ARCHITECTURE.md) - Comprendre l'architecture
+- [API_REFERENCE.md](API_REFERENCE.md) - Reference API
+- [DEPLOYMENT_WORKFLOW.md](DEPLOYMENT_WORKFLOW.md) - Comprendre le flux de deploiement
+- [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Resoudre les problemes

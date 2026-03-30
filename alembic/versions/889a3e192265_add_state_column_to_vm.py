@@ -1,7 +1,7 @@
 """add_state_column_to_vm
 
 Revision ID: 889a3e192265
-Revises: 001
+Revises: 012_add_foreign_key_indexes
 Create Date: 2026-01-26 17:13:13.683702
 
 """

@@ -31,6 +31,13 @@ from src.common.database import Base
 # =============================================================================
 
 
+class UserRole(str, enum.Enum):
+    """Rôles utilisateur."""
+
+    ADMIN = "admin"
+    USER = "user"
+
+
 class HypervisorType(str, enum.Enum):
     """Types d'hyperviseurs supportés."""
 
@@ -89,6 +96,7 @@ class VMState(str, enum.Enum):
 class DeploymentStatus(str, enum.Enum):
     """États possibles d'un déploiement."""
 
+    PENDING_APPROVAL = "pending_approval"
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     CREATING_VM = "creating_vm"
@@ -96,8 +104,10 @@ class DeploymentStatus(str, enum.Enum):
     POST_INSTALL = "post_install"
     INSTALLING_SOFTWARE = "installing_software"
     COMPLETED = "completed"
+    COMPLETED_WITH_WARNINGS = "completed_with_warnings"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    REJECTED = "rejected"
 
 
 class LogLevel(str, enum.Enum):
@@ -164,18 +174,37 @@ class Hypervisor(Base, TimestampMixin):
     username: Mapped[str] = mapped_column(String(100), nullable=False)
     password_encrypted: Mapped[str] = mapped_column(String(500), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Champs spécifiques VMware/vSphere
+    datacenter: Mapped[str | None] = mapped_column(
+        String(100), nullable=True,
+        comment="Datacenter VMware vSphere",
+    )
+    cluster: Mapped[str | None] = mapped_column(
+        String(100), nullable=True,
+        comment="Cluster VMware vSphere",
+    )
+    default_datastore: Mapped[str | None] = mapped_column(
+        String(200), nullable=True,
+        comment="Datastore par défaut pour le stockage VMware",
+    )
+    default_resource_pool: Mapped[str | None] = mapped_column(
+        String(200), nullable=True,
+        comment="Pool de ressources par défaut VMware",
+    )
 
     # Relations
     virtual_machines: Mapped[list["VirtualMachine"]] = relationship(
         back_populates="hypervisor",
         cascade="all, delete-orphan",
+        lazy="selectin",
     )
 
     @property
     def password(self) -> str:
-        """Retourne le mot de passe (à décrypter si nécessaire)."""
-        # TODO: Implémenter le déchiffrement si password_encrypted est chiffré
-        return self.password_encrypted
+        """Retourne le mot de passe déchiffré."""
+        from src.common.crypto import decrypt_password
+
+        return decrypt_password(self.password_encrypted)
 
     def __repr__(self) -> str:
         return f"<Hypervisor(id={self.id}, name={self.name}, type={self.type})>"
@@ -207,6 +236,10 @@ class OSTemplate(Base, TimestampMixin):
     min_cpu: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     min_ram_gb: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
     min_disk_gb: Mapped[int] = mapped_column(Integer, default=20, nullable=False)
+    install_locale: Mapped[str] = mapped_column(
+        String(10), default="fr-FR", nullable=False,
+        comment="Langue d'installation (ex: fr-FR, en-US)"
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     # Relations
@@ -285,6 +318,7 @@ class VirtualMachine(Base, TimestampMixin):
     deployments: Mapped[list["Deployment"]] = relationship(
         back_populates="virtual_machine",
         cascade="all, delete-orphan",
+        lazy="selectin",
     )
     software_installations: Mapped[list["VMSoftware"]] = relationship(
         back_populates="virtual_machine",
@@ -331,7 +365,26 @@ class Deployment(Base, TimestampMixin):
         nullable=True,
         comment="ID de l'utilisateur ayant créé le déploiement",
     )
-    
+    requested_by_username: Mapped[str | None] = mapped_column(
+        String(50), nullable=True,
+        comment="Username de l'utilisateur ayant créé le déploiement",
+    )
+    reviewed_by: Mapped[UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True,
+        comment="ID de l'admin ayant validé/refusé",
+    )
+    reviewed_by_username: Mapped[str | None] = mapped_column(
+        String(50), nullable=True,
+        comment="Username de l'admin ayant validé/refusé",
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    review_note: Mapped[str | None] = mapped_column(
+        Text, nullable=True,
+        comment="Commentaire de l'admin lors de la validation/refus",
+    )
+
     # Configuration
     config: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     
@@ -363,6 +416,7 @@ class Deployment(Base, TimestampMixin):
         back_populates="deployment",
         cascade="all, delete-orphan",
         order_by="DeploymentLog.created_at",
+        lazy="selectin",
     )
 
     def __repr__(self) -> str:
@@ -403,6 +457,38 @@ class DeploymentLog(Base):
 
     def __repr__(self) -> str:
         return f"<DeploymentLog(id={self.id}, level={self.level}, step={self.step})>"
+
+
+class AuditLog(Base):
+    """Journal d'audit - trace toutes les actions utilisateur."""
+
+    __tablename__ = "audit_logs"
+
+    id: Mapped[UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    user_id: Mapped[str] = mapped_column(String(50), nullable=False)
+    username: Mapped[str] = mapped_column(String(50), nullable=False)
+    action: Mapped[str] = mapped_column(
+        String(50), nullable=False,
+        comment="Type d'action (deployment_created, deployment_approved, user_created, etc.)",
+    )
+    resource_type: Mapped[str] = mapped_column(
+        String(50), nullable=False,
+        comment="Type de ressource (deployment, user, hypervisor, etc.)",
+    )
+    resource_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    details: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    def __repr__(self) -> str:
+        return f"<AuditLog(id={self.id}, action={self.action}, user={self.username})>"
 
 
 class SoftwareCategory(str, enum.Enum):

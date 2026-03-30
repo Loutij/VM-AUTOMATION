@@ -241,62 +241,56 @@ class SoftwareInstallService:
         Returns:
             True si Chocolatey est prêt
         """
-        script = """
-        # Vérifier si Chocolatey est installé
-        $chocoPath = "$env:ProgramData\\chocolatey\\bin\\choco.exe"
-        
-        if (Test-Path $chocoPath) {
-            $version = & $chocoPath --version
-            Write-Output "INSTALLED:$version"
-            return
-        }
-        
-        Write-Host "Installation de Chocolatey..."
-        
-        # Installer Chocolatey
-        Set-ExecutionPolicy Bypass -Scope Process -Force
-        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
-        
-        try {
-            Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-            
-            # Rafraîchir le PATH
-            $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-            
-            # Vérifier l'installation
-            if (Test-Path $chocoPath) {
-                $version = & $chocoPath --version
-                Write-Output "INSTALLED:$version"
-            } else {
-                Write-Output "FAILED:Installation failed"
-            }
-        } catch {
-            Write-Output "FAILED:$($_.Exception.Message)"
-        }
-        """
+        # Script simplifié - vérifier d'abord si Chocolatey est installé
+        check_script = """$p="$env:ProgramData\\chocolatey\\bin\\choco.exe";if(Test-Path $p){&$p --version}else{"NOT_INSTALLED"}"""
         
         logger.info("software_ensure_chocolatey", vm_name=vm_name)
         
         result = await self.client.execute_in_vm(
-            vm_name, script, credentials, timeout=300
+            vm_name, check_script, credentials, timeout=60
+        )
+        
+        logger.info(
+            "software_chocolatey_check",
+            vm_name=vm_name,
+            success=result.success,
+            output=str(result.output)[:200] if result.output else None,
+            error=result.error,
         )
         
         if result.success and result.output:
             output = str(result.output).strip()
-            if output.startswith("INSTALLED:"):
-                version = output.split(":", 1)[1]
-                logger.info(
-                    "software_chocolatey_ready",
-                    vm_name=vm_name,
-                    version=version,
-                )
+            if output != "NOT_INSTALLED" and output:
+                logger.info("software_chocolatey_ready", vm_name=vm_name, version=output)
                 return True
         
-        logger.error(
-            "software_chocolatey_failed",
-            vm_name=vm_name,
-            error=result.error or result.output,
+        # Chocolatey non installé - l'installer
+        logger.info("software_installing_chocolatey", vm_name=vm_name)
+        install_script = """Set-ExecutionPolicy Bypass -Scope Process -Force;[Net.ServicePointManager]::SecurityProtocol=3072;iex((New-Object Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'));$env:Path=[Environment]::GetEnvironmentVariable('Path','Machine')"""
+        
+        install_result = await self.client.execute_in_vm(
+            vm_name, install_script, credentials, timeout=300
         )
+        
+        logger.info(
+            "software_chocolatey_install_result",
+            vm_name=vm_name,
+            success=install_result.success,
+            error=install_result.error,
+        )
+        
+        # Vérifier à nouveau
+        result2 = await self.client.execute_in_vm(
+            vm_name, check_script, credentials, timeout=60
+        )
+        
+        if result2.success and result2.output:
+            output = str(result2.output).strip()
+            if output != "NOT_INSTALLED" and output:
+                logger.info("software_chocolatey_ready", vm_name=vm_name, version=output)
+                return True
+        
+        logger.error("software_chocolatey_failed", vm_name=vm_name, error=install_result.error)
         return False
 
     async def install_package_chocolatey(
@@ -319,59 +313,9 @@ class SoftwareInstallService:
         version_param = f"--version={package.version}" if package.version else ""
         extra_args = package.install_args or ""
         
-        script = f"""
-        $ErrorActionPreference = 'Stop'
-        $startTime = Get-Date
-        
-        try {{
-            # Vérifier si déjà installé
-            $installed = choco list --exact {package.name} --limit-output
-            if ($installed) {{
-                $currentVersion = ($installed -split '\\|')[1]
-                @{{
-                    Status = 'skipped'
-                    VersionInstalled = $currentVersion
-                    Error = $null
-                    Duration = 0
-                }} | ConvertTo-Json
-                return
-            }}
-            
-            # Installer le package
-            $result = choco install {package.name} -y --no-progress {version_param} {extra_args} 2>&1
-            $exitCode = $LASTEXITCODE
-            
-            $duration = ((Get-Date) - $startTime).TotalSeconds
-            
-            if ($exitCode -eq 0) {{
-                # Récupérer la version installée
-                $installed = choco list --exact {package.name} --limit-output
-                $version = if ($installed) {{ ($installed -split '\\|')[1] }} else {{ 'unknown' }}
-                
-                @{{
-                    Status = 'installed'
-                    VersionInstalled = $version
-                    Error = $null
-                    Duration = $duration
-                }} | ConvertTo-Json
-            }} else {{
-                @{{
-                    Status = 'failed'
-                    VersionInstalled = $null
-                    Error = "Exit code: $exitCode - $result"
-                    Duration = $duration
-                }} | ConvertTo-Json
-            }}
-        }} catch {{
-            $duration = ((Get-Date) - $startTime).TotalSeconds
-            @{{
-                Status = 'failed'
-                VersionInstalled = $null
-                Error = $_.Exception.Message
-                Duration = $duration
-            }} | ConvertTo-Json
-        }}
-        """
+        # Script minifié pour éviter la limite de ligne de commande
+        # IMPORTANT: Utiliser le chemin complet vers choco.exe car le PATH n'est pas toujours à jour après installation
+        script = f"""$c="$env:ProgramData\\chocolatey\\bin\\choco.exe";$n='{package.name}';$i=&$c list --exact $n --limit-output;if($i){{@{{Status='skipped';VersionInstalled=($i-split'\\|')[1];Error=$null;Duration=0}}|ConvertTo-Json;return}};$r=&$c install $n -y --no-progress {version_param} {extra_args} 2>&1;$x=$LASTEXITCODE;if($x-eq0){{$v=(&$c list --exact $n --limit-output)-split'\\|';@{{Status='installed';VersionInstalled=$v[1];Error=$null;Duration=0}}|ConvertTo-Json}}else{{@{{Status='failed';VersionInstalled=$null;Error="Exit:$x"}}|ConvertTo-Json}}"""
         
         logger.info(
             "software_installing_package",
@@ -383,6 +327,16 @@ class SoftwareInstallService:
             vm_name, script, credentials, timeout=600
         )
         
+        logger.info(
+            "software_package_install_result",
+            vm_name=vm_name,
+            package=package.name,
+            success=result.success,
+            output_type=type(result.output).__name__,
+            output=str(result.output)[:300] if result.output else None,
+            error=result.error,
+        )
+        
         if not result.success:
             return InstallationResult(
                 package_name=package.name,
@@ -390,7 +344,29 @@ class SoftwareInstallService:
                 error=result.error,
             )
         
-        data = result.output if isinstance(result.output, dict) else {}
+        # Extraire les données du résultat
+        data = {}
+        if isinstance(result.output, dict):
+            # Si c'est un dict avec "value", extraire la valeur
+            if "value" in result.output:
+                inner = result.output.get("value")
+                if isinstance(inner, dict):
+                    data = inner
+                elif isinstance(inner, str):
+                    # Essayer de parser comme JSON
+                    try:
+                        import json
+                        data = json.loads(inner)
+                    except Exception:
+                        data = {"Status": "installed"} if "installed" in inner.lower() else {}
+            else:
+                data = result.output
+        elif isinstance(result.output, str):
+            try:
+                import json
+                data = json.loads(result.output)
+            except Exception:
+                data = {}
         
         status_str = data.get("Status", "failed")
         status = InstallationStatus(status_str) if status_str in [s.value for s in InstallationStatus] else InstallationStatus.FAILED

@@ -45,6 +45,7 @@ export interface UseWebSocketOptions {
 export interface UseWebSocketReturn {
   status: WebSocketStatus;
   isConnected: boolean;
+  fallbackPolling: boolean;
   lastMessage: WebSocketMessage | null;
   send: (message: WebSocketMessage) => void;
   subscribe: (room: string) => void;
@@ -72,7 +73,8 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
 
   const [status, setStatus] = useState<WebSocketStatus>('disconnected');
   const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null);
-  
+  const [fallbackPolling, setFallbackPolling] = useState(false);
+
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -95,16 +97,21 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
     setStatus('connecting');
     
     try {
-      const ws = new WebSocket(url);
+      // Append auth token to WebSocket URL for server-side verification
+      const token = localStorage.getItem('access_token');
+      const separator = url.includes('?') ? '&' : '?';
+      const wsUrl = token ? `${url}${separator}token=${encodeURIComponent(token)}` : url;
+      const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
         setStatus('connected');
         reconnectAttemptsRef.current = 0;
-        
-        // Re-souscrire aux rooms précédentes
+        setFallbackPolling(false);
+
+        // Re-souscrire aux rooms précédentes avec le format attendu par le backend
         subscribedRoomsRef.current.forEach((room) => {
-          ws.send(JSON.stringify({ type: 'subscribe', payload: { room } }));
+          ws.send(JSON.stringify({ action: 'join_room', room: room }));
         });
         
         onOpen?.();
@@ -121,6 +128,9 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
           reconnectTimeoutRef.current = setTimeout(() => {
             connect();
           }, reconnectInterval * reconnectAttemptsRef.current);
+        } else if (reconnect && reconnectAttemptsRef.current >= maxReconnectAttempts) {
+          // Tentatives de reconnexion épuisées - activer le polling de secours
+          setFallbackPolling(true);
         }
       };
 
@@ -178,9 +188,10 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
     subscribedRoomsRef.current.add(room);
     
     if (wsRef.current?.readyState === WebSocket.OPEN) {
+      // Format attendu par le backend : {"action": "join_room", "room": "..."}
       wsRef.current.send(JSON.stringify({
-        type: 'subscribe',
-        payload: { room },
+        action: 'join_room',
+        room: room,
       }));
     }
   }, []);
@@ -190,9 +201,10 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
     subscribedRoomsRef.current.delete(room);
     
     if (wsRef.current?.readyState === WebSocket.OPEN) {
+      // Format attendu par le backend : {"action": "leave_room", "room": "..."}
       wsRef.current.send(JSON.stringify({
-        type: 'unsubscribe',
-        payload: { room },
+        action: 'leave_room',
+        room: room,
       }));
     }
   }, []);
@@ -204,7 +216,9 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
     return () => {
       clearReconnectTimeout();
       if (wsRef.current) {
+        wsRef.current.onclose = null;  // Prevent stale reconnect handler
         wsRef.current.close();
+        wsRef.current = null;
       }
     };
   }, [connect, clearReconnectTimeout]);
@@ -212,6 +226,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
   return {
     status,
     isConnected: status === 'connected',
+    fallbackPolling,
     lastMessage,
     send,
     subscribe,
@@ -231,8 +246,23 @@ export function useDeploymentEvents(
   const [progress, setProgress] = useState<DeploymentProgressPayload | null>(null);
 
   const handleMessage = useCallback((message: WebSocketMessage) => {
-    if (message.type === 'deployment_progress') {
-      const payload = message.payload as DeploymentProgressPayload;
+    // Normaliser le format du message (support backend et frontend)
+    const messageType = (message as any).type || (message as any).event_type || message.type;
+    const messagePayload = (message as any).payload || (message as any).data || message.payload;
+    
+    // Normaliser le type (deployment.progress -> deployment_progress)
+    const normalizedType = messageType?.replace(/\./g, '_');
+    
+    // Accepter les événements de progression de déploiement
+    if (normalizedType === 'deployment_progress' || 
+        normalizedType === 'deployment_created' ||
+        normalizedType === 'deployment_started' ||
+        normalizedType === 'deployment_completed' ||
+        normalizedType === 'deployment_failed' ||
+        normalizedType === 'deployment_cancelled' ||
+        normalizedType === 'deployment_step_completed') {
+      
+      const payload = messagePayload as DeploymentProgressPayload;
       
       if (!deploymentId || payload.deployment_id === deploymentId) {
         setProgress(payload);
@@ -241,7 +271,7 @@ export function useDeploymentEvents(
     }
   }, [deploymentId, onProgress]);
 
-  const { status, isConnected, subscribe, unsubscribe } = useWebSocket({
+  const { status, isConnected, fallbackPolling, subscribe, unsubscribe } = useWebSocket({
     onMessage: handleMessage,
   });
 
@@ -263,7 +293,7 @@ export function useDeploymentEvents(
     };
   }, [isConnected, deploymentId, subscribe, unsubscribe]);
 
-  return { status, isConnected, progress };
+  return { status, isConnected, fallbackPolling, progress };
 }
 
 /**

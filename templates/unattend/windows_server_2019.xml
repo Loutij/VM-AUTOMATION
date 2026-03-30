@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<unattend xmlns="urn:schemas-microsoft-com:unattend">
+<unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
     <!-- =================================================================== -->
     <!-- Windows Server 2019 - Unattended Installation Template              -->
     <!-- Variables Jinja2: {{ variable_name }}                               -->
@@ -38,7 +38,7 @@
                         </CreatePartition>
                         <CreatePartition wcm:action="add">
                             <Order>2</Order>
-                            <Size>128</Size>
+                            <Size>16</Size>
                             <Type>MSR</Type>
                         </CreatePartition>
                         <CreatePartition wcm:action="add">
@@ -128,6 +128,11 @@
                     <Group>Remote Desktop</Group>
                     <Profile>all</Profile>
                 </FirewallGroup>
+                <FirewallGroup wcm:action="add" wcm:keyValue="BureauADistance">
+                    <Active>true</Active>
+                    <Group>Bureau à distance</Group>
+                    <Profile>all</Profile>
+                </FirewallGroup>
             </FirewallGroups>
         </component>
 
@@ -197,40 +202,70 @@
 
             <UserAccounts>
                 <AdministratorPassword>
-                    <Value>{{ admin_password | default('TempP@ss123!') }}</Value>
+                    <Value>{{ admin_password | default('tooroto') }}</Value>
                     <PlainText>true</PlainText>
                 </AdministratorPassword>
+                <LocalAccounts>
+                    <LocalAccount wcm:action="add">
+                        <Password>
+                            <Value>{{ admin_password | default('tooroto') }}</Value>
+                            <PlainText>true</PlainText>
+                        </Password>
+                        <Description>Admin account</Description>
+                        <DisplayName>{{ admin_username | default('otoroot') }}</DisplayName>
+                        <Group>Administrators</Group>
+                        <Name>{{ admin_username | default('otoroot') }}</Name>
+                    </LocalAccount>
+                </LocalAccounts>
             </UserAccounts>
 
             <AutoLogon>
                 <Password>
-                    <Value>{{ admin_password | default('TempP@ss123!') }}</Value>
+                    <Value>{{ admin_password | default('tooroto') }}</Value>
                     <PlainText>true</PlainText>
                 </Password>
                 <Enabled>true</Enabled>
                 <LogonCount>1</LogonCount>
-                <Username>Administrator</Username>
+                <Username>{{ admin_username | default('otoroot') }}</Username>
             </AutoLogon>
 
             <FirstLogonCommands>
+                <!-- Activer le built-in Administrateur + set passwords -->
                 <SynchronousCommand wcm:action="add">
                     <Order>1</Order>
+                    <CommandLine>cmd /c net user Administrateur "{{ admin_password | default('tooroto') }}" /active:yes &amp; net user Administrator "{{ admin_password | default('tooroto') }}" /active:yes</CommandLine>
+                    <Description>Set built-in admin passwords</Description>
+                </SynchronousCommand>
+                <SynchronousCommand wcm:action="add">
+                    <Order>2</Order>
                     <CommandLine>powershell -Command "Enable-PSRemoting -Force -SkipNetworkProfileCheck"</CommandLine>
                     <Description>Enable PowerShell Remoting</Description>
                 </SynchronousCommand>
                 <SynchronousCommand wcm:action="add">
-                    <Order>2</Order>
+                    <Order>3</Order>
                     <CommandLine>powershell -Command "Set-Item WSMan:\localhost\Client\TrustedHosts -Value '*' -Force"</CommandLine>
                     <Description>Configure WinRM TrustedHosts</Description>
                 </SynchronousCommand>
                 <SynchronousCommand wcm:action="add">
-                    <Order>3</Order>
+                    <Order>4</Order>
                     <CommandLine>powershell -Command "winrm quickconfig -quiet"</CommandLine>
                     <Description>Quick configure WinRM</Description>
                 </SynchronousCommand>
+                <!-- Activer RDP explicitement (registre + firewall FR/EN + désactiver NLA) -->
+                <SynchronousCommand wcm:action="add">
+                    <Order>5</Order>
+                    <CommandLine>powershell -Command "Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0; Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name 'UserAuthentication' -Value 0; Enable-NetFirewallRule -DisplayGroup 'Remote Desktop' -ErrorAction SilentlyContinue; Enable-NetFirewallRule -DisplayGroup 'Bureau à distance' -ErrorAction SilentlyContinue"</CommandLine>
+                    <Description>Enable Remote Desktop with firewall rules</Description>
+                </SynchronousCommand>
+                <!-- Configurer réseau privé + découverte (FR + EN) -->
+                <SynchronousCommand wcm:action="add">
+                    <Order>6</Order>
+                    <CommandLine>powershell -Command "Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private -ErrorAction SilentlyContinue; netsh advfirewall firewall set rule group='Network Discovery' new enable=Yes 2>$null; netsh advfirewall firewall set rule group='Découverte de réseau' new enable=Yes 2>$null; netsh advfirewall firewall set rule group='File and Printer Sharing' new enable=Yes 2>$null; netsh advfirewall firewall set rule group='Partage de fichiers et d''imprimantes' new enable=Yes 2>$null"</CommandLine>
+                    <Description>Set network profile and enable discovery</Description>
+                </SynchronousCommand>
                 {% if join_domain %}
                 <SynchronousCommand wcm:action="add">
-                    <Order>4</Order>
+                    <Order>7</Order>
                     <CommandLine>powershell -Command "Add-Computer -DomainName '{{ domain_name }}' -Credential (New-Object PSCredential('{{ domain_user }}', (ConvertTo-SecureString '{{ domain_password }}' -AsPlainText -Force))) -OUPath '{{ domain_ou | default('') }}' -Restart"</CommandLine>
                     <Description>Join Active Directory Domain</Description>
                 </SynchronousCommand>
@@ -242,6 +277,12 @@
                     <Description>Callback to automation server</Description>
                 </SynchronousCommand>
                 {% endif %}
+                <!-- Signal VM-Automation que le setup est terminé -->
+                <SynchronousCommand wcm:action="add">
+                    <Order>99</Order>
+                    <CommandLine>cmd /c mkdir C:\VM-Automation 2>nul &amp; echo ready > C:\VM-Automation\ready.flag</CommandLine>
+                    <Description>Create VM-Automation ready flag</Description>
+                </SynchronousCommand>
             </FirstLogonCommands>
         </component>
 

@@ -6,6 +6,8 @@ Module d'authentification JWT.
 Gère la création et validation des tokens JWT.
 """
 
+import time
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -25,7 +27,7 @@ MAX_PASSWORD_BYTES = 72
 
 # Configuration JWT
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 heures
+ACCESS_TOKEN_EXPIRE_MINUTES = 60  # 1 heure
 REFRESH_TOKEN_EXPIRE_DAYS = 7
 
 
@@ -50,6 +52,7 @@ class TokenPayload(BaseModel):
     exp: datetime
     iat: datetime
     type: str  # "access" ou "refresh"
+    jti: str = ""  # JWT ID for token revocation
 
 
 class UserAuth(BaseModel):
@@ -78,10 +81,13 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     Returns:
         True si le mot de passe est correct
     """
-    # Tronquer à 72 bytes (limite bcrypt) pour cohérence avec hash_password
-    password_bytes = plain_password.encode('utf-8')[:MAX_PASSWORD_BYTES]
-    hashed_bytes = hashed_password.encode('utf-8')
-    return bcrypt.checkpw(password_bytes, hashed_bytes)
+    try:
+        # Tronquer à 72 bytes (limite bcrypt) pour cohérence avec hash_password
+        password_bytes = plain_password.encode('utf-8')[:MAX_PASSWORD_BYTES]
+        hashed_bytes = hashed_password.encode('utf-8')
+        return bcrypt.checkpw(password_bytes, hashed_bytes)
+    except Exception:
+        return False
 
 
 def hash_password(password: str) -> str:
@@ -110,6 +116,8 @@ def hash_password(password: str) -> str:
 
 def create_access_token(
     user_id: str,
+    username: str = "",
+    role: str = "user",
     expires_delta: timedelta | None = None,
 ) -> str:
     """
@@ -117,6 +125,8 @@ def create_access_token(
 
     Args:
         user_id: ID de l'utilisateur
+        username: Nom d'utilisateur
+        role: Rôle de l'utilisateur (admin/user)
         expires_delta: Durée de validité personnalisée
 
     Returns:
@@ -131,9 +141,12 @@ def create_access_token(
 
     payload = {
         "sub": user_id,
+        "username": username,
+        "role": role,
         "exp": expire,
         "iat": datetime.now(timezone.utc),
         "type": "access",
+        "jti": str(uuid.uuid4()),
     }
 
     return jwt.encode(payload, settings.api_secret_key.get_secret_value(), algorithm=ALGORITHM)
@@ -156,23 +169,26 @@ def create_refresh_token(user_id: str) -> str:
         "exp": expire,
         "iat": datetime.now(timezone.utc),
         "type": "refresh",
+        "jti": str(uuid.uuid4()),
     }
 
     return jwt.encode(payload, settings.api_secret_key.get_secret_value(), algorithm=ALGORITHM)
 
 
-def create_tokens(user_id: str) -> Token:
+def create_tokens(user_id: str, username: str = "", role: str = "user") -> Token:
     """
     Crée une paire de tokens (access + refresh).
 
     Args:
         user_id: ID de l'utilisateur
+        username: Nom d'utilisateur
+        role: Rôle de l'utilisateur
 
     Returns:
         Token avec access_token et refresh_token
     """
     return Token(
-        access_token=create_access_token(user_id),
+        access_token=create_access_token(user_id, username=username, role=role),
         refresh_token=create_refresh_token(user_id),
         expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,  # en secondes
     )
@@ -207,6 +223,7 @@ def decode_token(token: str, expected_type: str = "access") -> TokenPayload:
             exp=datetime.fromtimestamp(payload["exp"], tz=timezone.utc),
             iat=datetime.fromtimestamp(payload["iat"], tz=timezone.utc),
             type=token_type,
+            jti=payload.get("jti", ""),
         )
 
     except JWTError as e:
@@ -245,3 +262,125 @@ def verify_refresh_token(token: str) -> str:
     """
     payload = decode_token(token, expected_type="refresh")
     return payload.sub
+
+
+# =============================================================================
+# Token Blacklist (Redis-backed with in-memory fallback)
+# =============================================================================
+
+_redis_client = None
+
+
+async def _get_redis():
+    """Get or create a Redis client for token blacklisting."""
+    global _redis_client
+    if _redis_client is None:
+        try:
+            import redis.asyncio as aioredis
+            _redis_client = aioredis.from_url(
+                settings.redis_url,
+                decode_responses=True,
+            )
+            # Test connectivity
+            await _redis_client.ping()
+        except Exception:
+            _redis_client = None
+    return _redis_client
+
+
+# In-memory fallback when Redis is unavailable
+_blacklisted_tokens: dict[str, float] = {}  # jti -> expiry timestamp
+
+
+def _cleanup_expired_tokens() -> None:
+    """Remove expired entries from the in-memory blacklist."""
+    now = time.time()
+    expired = [jti for jti, exp in _blacklisted_tokens.items() if now > exp]
+    for jti in expired:
+        del _blacklisted_tokens[jti]
+
+
+async def blacklist_token(token_jti: str, expires_in: int) -> None:
+    """
+    Add a token JTI to the blacklist until it naturally expires.
+
+    Uses Redis if available, falls back to in-memory dict.
+
+    Args:
+        token_jti: The JWT ID to blacklist
+        expires_in: Seconds until the token naturally expires
+    """
+    if not token_jti:
+        return
+
+    r = await _get_redis()
+    if r is not None:
+        try:
+            await r.setex(f"blacklist:{token_jti}", expires_in, "1")
+            return
+        except Exception:
+            pass
+
+    # Fallback: in-memory
+    _blacklisted_tokens[token_jti] = time.time() + expires_in
+    _cleanup_expired_tokens()
+
+
+async def is_token_blacklisted(token_jti: str) -> bool:
+    """
+    Check if a token JTI has been blacklisted.
+
+    Args:
+        token_jti: The JWT ID to check
+
+    Returns:
+        True if the token is blacklisted
+    """
+    if not token_jti:
+        return False
+
+    r = await _get_redis()
+    if r is not None:
+        try:
+            return await r.exists(f"blacklist:{token_jti}") > 0
+        except Exception:
+            pass
+
+    # Fallback: in-memory
+    exp = _blacklisted_tokens.get(token_jti)
+    if exp is None:
+        return False
+    if time.time() > exp:
+        del _blacklisted_tokens[token_jti]
+        return False
+    return True
+
+
+# =============================================================================
+# WebSocket Token Verification
+# =============================================================================
+
+
+async def verify_ws_token(token: str | None) -> dict | None:
+    """
+    Verify JWT token for WebSocket connections.
+
+    Unlike HTTP endpoints that raise exceptions, this returns None on failure
+    so the WebSocket handler can close the connection with a proper code.
+
+    Args:
+        token: JWT access token (from query parameter)
+
+    Returns:
+        User dict with user_id and token_type, or None if invalid
+    """
+    if not token:
+        return None
+    try:
+        payload = decode_token(token, expected_type="access")
+        # Check if token has been revoked
+        if payload.jti and await is_token_blacklisted(payload.jti):
+            return None
+        return {"user_id": payload.sub, "token_type": payload.type}
+    except (AuthenticationError, Exception):
+        return None

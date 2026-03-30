@@ -24,7 +24,9 @@ from src.api.websocket import (
     ws_manager,
     emit_system_notification,
 )
-from src.api.dependencies import get_db_session as get_db
+from src.api.dependencies import CurrentUser, get_db_session as get_db
+from src.api.routers.auth import get_current_superuser
+from src.common.auth import verify_ws_token
 from src.common.logging import get_logger
 from src.domain.models import (
     Deployment,
@@ -48,10 +50,15 @@ router = APIRouter()
 async def websocket_endpoint(
     websocket: WebSocket,
     client_id: str | None = Query(None),
+    token: str | None = Query(None),
 ):
     """
     Point d'entrée WebSocket principal.
-    
+
+    Query params:
+    - client_id: Identifiant client optionnel
+    - token: JWT access token pour l'authentification
+
     Protocole de messages:
     - {"action": "subscribe", "events": ["deployment.*", "vm.*"]}
     - {"action": "unsubscribe", "events": ["deployment.*"]}
@@ -59,7 +66,14 @@ async def websocket_endpoint(
     - {"action": "leave_room", "room": "deployment:123"}
     - {"action": "ping"} -> {"action": "pong"}
     """
-    client = await ws_manager.connect(websocket, client_id)
+    # Verify authentication — must accept first, then close if invalid
+    user = await verify_ws_token(token)
+    if not user:
+        await websocket.accept()
+        await websocket.close(code=1008, reason="Unauthorized")
+        return
+
+    client = await ws_manager.connect(websocket, client_id, user_id=user.get("user_id"))
     
     try:
         while True:
@@ -156,7 +170,9 @@ async def event_generator(
         if event_types is None or event.event_type.value in event_types:
             await queue.put(event)
     
-    # S'enregistrer pour recevoir les événements (via polling)
+    # Enregistrer le handler auprès du ws_manager pour recevoir les broadcasts
+    ws_manager.add_listener(event_handler)
+
     try:
         # Envoyer un événement de connexion
         yield f"event: connected\ndata: {json.dumps({'client_id': client_id})}\n\n"
@@ -185,10 +201,14 @@ async def event_generator(
     except asyncio.CancelledError:
         logger.debug("sse_connection_closed", client_id=client_id)
         raise
+    finally:
+        # Retirer le listener pour ne pas garder de référence stale
+        ws_manager.remove_listener(event_handler)
 
 
 @router.get("/sse")
 async def sse_endpoint(
+    current_user: CurrentUser,
     events: str | None = Query(None, description="Comma-separated event types to subscribe"),
 ):
     """
@@ -216,6 +236,7 @@ async def sse_endpoint(
 
 @router.get("/stats")
 async def get_dashboard_stats(
+    current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """
@@ -231,33 +252,33 @@ async def get_dashboard_stats(
         )
         total_hypervisors = hypervisor_result.scalar() or 0
         
-        # Compter les VMs par statut
-        vm_counts = {}
-        for status in VMStatus:
-            result = await db.execute(
-                select(func.count())
-                .select_from(VirtualMachine)
-                .where(VirtualMachine.status == status)
-            )
-            vm_counts[status.value] = result.scalar() or 0
-        
+        # Compter les VMs par statut (single GROUP BY query instead of N queries)
+        vm_result = await db.execute(
+            select(VirtualMachine.status, func.count())
+            .group_by(VirtualMachine.status)
+        )
+        vm_counts = {row[0].value: row[1] for row in vm_result.all()}
+        # Ensure all statuses are present in the dict
+        for s in VMStatus:
+            vm_counts.setdefault(s.value, 0)
+
         total_vms = sum(vm_counts.values())
-        
+
         # Compter les templates
         template_result = await db.execute(
             select(func.count()).select_from(OSTemplate)
         )
         total_templates = template_result.scalar() or 0
-        
-        # Compter les déploiements par statut
-        deployment_counts = {}
-        for status in DeploymentStatus:
-            result = await db.execute(
-                select(func.count())
-                .select_from(Deployment)
-                .where(Deployment.status == status)
-            )
-            deployment_counts[status.value] = result.scalar() or 0
+
+        # Compter les déploiements par statut (single GROUP BY query instead of N queries)
+        dep_result = await db.execute(
+            select(Deployment.status, func.count())
+            .group_by(Deployment.status)
+        )
+        deployment_counts = {row[0].value: row[1] for row in dep_result.all()}
+        # Ensure all statuses are present in the dict
+        for s in DeploymentStatus:
+            deployment_counts.setdefault(s.value, 0)
         
         total_deployments = sum(deployment_counts.values())
         
@@ -319,7 +340,7 @@ async def get_dashboard_stats(
 
 
 @router.get("/stats/websocket")
-async def get_websocket_stats() -> dict[str, Any]:
+async def get_websocket_stats(current_user: CurrentUser) -> dict[str, Any]:
     """Récupère les statistiques WebSocket."""
     return ws_manager.get_stats()
 
@@ -332,6 +353,7 @@ async def get_websocket_stats() -> dict[str, Any]:
 async def test_broadcast(
     event_type: str = Query(..., description="Event type"),
     message: str = Query("Test message", description="Message content"),
+    _current_user=Depends(get_current_superuser),
 ) -> dict[str, Any]:
     """
     Endpoint de test pour broadcaster un événement.

@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
-from src.api.dependencies import DbSession, Pagination
+from src.api.dependencies import CurrentUser, DbSession, Pagination
 from src.common.logging import get_logger
 from src.domain.models import SoftwareCategory, SoftwarePackage, OSFamily
 
@@ -192,6 +192,7 @@ class ProfileList(BaseModel):
 async def list_software(
     db: DbSession,
     pagination: Pagination,
+    current_user: CurrentUser,
     category: Annotated[str | None, Query(description="Filtrer par catégorie")] = None,
     os_family: Annotated[str | None, Query(description="Filtrer par OS (windows, linux)")] = None,
     search: Annotated[str | None, Query(description="Recherche par nom ou description")] = None,
@@ -309,7 +310,7 @@ async def list_software(
     summary="Lister les catégories",
     description="Retourne la liste des catégories avec le nombre de logiciels.",
 )
-async def list_categories(db: DbSession) -> list[CategoryInfo]:
+async def list_categories(db: DbSession, current_user: CurrentUser) -> list[CategoryInfo]:
     """Liste toutes les catégories de logiciels."""
     # Compter les logiciels par catégorie
     query = select(
@@ -342,7 +343,7 @@ async def list_categories(db: DbSession) -> list[CategoryInfo]:
     summary="Lister les profils",
     description="Retourne la liste des profils pré-configurés de logiciels.",
 )
-async def list_profiles() -> ProfileList:
+async def list_profiles(current_user: CurrentUser) -> ProfileList:
     """Liste tous les profils de logiciels disponibles."""
     profiles = []
     for profile_id, profile_data in SOFTWARE_PROFILES.items():
@@ -364,7 +365,7 @@ async def list_profiles() -> ProfileList:
     summary="Obtenir un profil",
     description="Retourne les détails d'un profil avec ses packages.",
 )
-async def get_profile(profile_name: str) -> ProfileInfo:
+async def get_profile(profile_name: str, current_user: CurrentUser) -> ProfileInfo:
     """Récupère un profil par son nom."""
     profile_data = SOFTWARE_PROFILES.get(profile_name)
     
@@ -390,6 +391,7 @@ async def get_profile(profile_name: str) -> ProfileInfo:
 async def get_software_by_name_endpoint(
     db: DbSession,
     name: str,
+    current_user: CurrentUser,
 ) -> SoftwareResponse:
     """Récupère un logiciel par son nom."""
     result = await db.execute(
@@ -438,6 +440,7 @@ async def get_software_by_name_endpoint(
 )
 async def list_featured(
     db: DbSession,
+    current_user: CurrentUser,
     limit: Annotated[int, Query(ge=1, le=50)] = 10,
 ) -> list[SoftwareResponse]:
     """Liste les logiciels en vedette."""
@@ -491,6 +494,7 @@ async def list_featured(
 async def get_software(
     db: DbSession,
     software_id: UUID,
+    current_user: CurrentUser,
 ) -> SoftwareResponse:
     """Récupère un logiciel par son ID."""
     result = await db.execute(
@@ -541,6 +545,7 @@ async def get_software(
 async def create_software(
     db: DbSession,
     data: SoftwareCreate,
+    current_user: CurrentUser,
 ) -> SoftwareResponse:
     """Crée un nouveau logiciel dans le catalogue."""
     logger.info("creating_software", name=data.name)
@@ -638,6 +643,7 @@ async def update_software(
     db: DbSession,
     software_id: UUID,
     data: SoftwareUpdate,
+    current_user: CurrentUser,
 ) -> SoftwareResponse:
     """Met à jour un logiciel existant."""
     result = await db.execute(
@@ -701,6 +707,7 @@ async def update_software(
 async def delete_software(
     db: DbSession,
     software_id: UUID,
+    current_user: CurrentUser,
 ) -> None:
     """Supprime un logiciel du catalogue."""
     result = await db.execute(
@@ -721,7 +728,7 @@ async def delete_software(
     summary="Initialiser le catalogue",
     description="Ajoute les logiciels par défaut au catalogue.",
 )
-async def seed_catalog(db: DbSession) -> dict[str, int]:
+async def seed_catalog(db: DbSession, current_user: CurrentUser) -> dict[str, int]:
     """Initialise le catalogue avec les logiciels par défaut."""
     from src.domain.software_catalog import DEFAULT_SOFTWARE_CATALOG
     
