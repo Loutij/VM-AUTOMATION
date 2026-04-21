@@ -26,11 +26,13 @@ import {
   FolderOpen,
   AlertTriangle,
   Terminal,
+  Copy,
+  Disc,
 } from 'lucide-react';
 import { Header } from '../components/layout';
 import { Button, Input, Select, Switch, Modal, useToast } from '../components/ui';
 import { hypervisorsApi, templatesApi, deploymentsApi, softwareApi } from '../services/api';
-import type { DeploymentConfig, SwitchType, SoftwareProfile, SoftwarePackage, ConfigField, StorageLocation } from '../types';
+import type { DeploymentConfig, DeploymentMethod, SwitchType, SoftwareProfile, SoftwarePackage, ConfigField, StorageLocation, VSphereTemplate } from '../types';
 
 // Import du composant Marketplace pour la sélection à la carte
 import { Marketplace } from './Marketplace';
@@ -51,6 +53,9 @@ interface DeploymentFormData {
   // Étape 1: Sélection hyperviseur et template
   hypervisor_id: string;
   os_template_id: string;
+  // Méthode de déploiement : iso (défaut) ou clone vSphere
+  deployment_method: DeploymentMethod;
+  vsphere_template_name: string;
   // Étape 2: Configuration VM
   vm_name: string;
   hostname: string;
@@ -91,16 +96,13 @@ interface DeploymentFormData {
   ssh_key: string;
   extra_packages: string;
   post_script: string;
-  // VMware/ESXi-specific
-  datastore: string;
-  resource_pool: string;
-  vm_folder: string;
-  disk_format: string; // "thin" | "thick" | "eagerzeroedthick"
 }
 
 const defaultFormData: DeploymentFormData = {
   hypervisor_id: '',
   os_template_id: '',
+  deployment_method: 'iso',
+  vsphere_template_name: '',
   vm_name: '',
   hostname: '',
   cpu_count: 2,
@@ -132,10 +134,6 @@ const defaultFormData: DeploymentFormData = {
   ssh_key: '',
   extra_packages: '',
   post_script: '',
-  datastore: '',
-  resource_pool: '',
-  vm_folder: '',
-  disk_format: 'thin',
 };
 
 const steps = [
@@ -217,28 +215,18 @@ export function NewDeployment() {
 
   const allSoftware: SoftwarePackage[] = allSoftwareData?.items || [];
 
-  // Fetch emplacements de stockage (dépend de l'hyperviseur sélectionné, Hyper-V uniquement)
-  const selectedHypervisor = hypervisors.find((h) => h.id === formData.hypervisor_id);
-  const isVMware = selectedHypervisor?.type === 'vmware';
-
+  // Fetch emplacements de stockage (dépend de l'hyperviseur sélectionné)
   const { data: storageLocations = [], isLoading: storageLoading } = useQuery({
     queryKey: ['storage-locations', formData.hypervisor_id],
     queryFn: () => hypervisorsApi.getStorageLocations(formData.hypervisor_id, 20),
-    enabled: !!formData.hypervisor_id && !isVMware,
+    enabled: !!formData.hypervisor_id,
   });
 
-  // VMware-specific: Fetch datastores
-  const { data: datastores = [], isLoading: datastoresLoading } = useQuery({
-    queryKey: ['datastores', formData.hypervisor_id],
-    queryFn: () => hypervisorsApi.listDatastores(formData.hypervisor_id),
-    enabled: !!formData.hypervisor_id && isVMware,
-  });
-
-  // VMware-specific: Fetch resource pools
-  const { data: resourcePools = [], isLoading: resourcePoolsLoading } = useQuery({
-    queryKey: ['resource-pools', formData.hypervisor_id],
-    queryFn: () => hypervisorsApi.listResourcePools(formData.hypervisor_id),
-    enabled: !!formData.hypervisor_id && isVMware,
+  // Fetch templates vSphere (uniquement si méthode = clone et hyperviseur sélectionné)
+  const { data: vsphereTemplates = [], isLoading: vsphereTemplatesLoading } = useQuery({
+    queryKey: ['vsphere-templates', formData.hypervisor_id],
+    queryFn: () => hypervisorsApi.listVSphereTemplates(formData.hypervisor_id),
+    enabled: !!formData.hypervisor_id && formData.deployment_method === 'clone',
   });
 
   // Mutation pour créer un switch
@@ -294,14 +282,6 @@ export function NewDeployment() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageLocations]);
 
-  // VMware: auto-sélectionner le premier datastore
-  useEffect(() => {
-    if (datastores.length > 0 && !formData.datastore && isVMware) {
-      setFormData((prev) => ({ ...prev, datastore: datastores[0].name }));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [datastores, isVMware]);
-
   // Mutation pour créer le déploiement
   const createMutation = useMutation({
     mutationFn: (data: {
@@ -328,7 +308,8 @@ export function NewDeployment() {
     },
   });
 
-  // Template et profil sélectionnés
+  // Hyperviseur et template sélectionnés
+  const selectedHypervisor = hypervisors.find((h) => h.id === formData.hypervisor_id);
   const selectedTemplate = templates.find((t) => t.id === formData.os_template_id);
   const selectedProfile = softwareProfiles.find((p) => p.name === formData.software_profile);
 
@@ -343,6 +324,9 @@ export function NewDeployment() {
       case 1:
         if (!formData.hypervisor_id) errors.push('Sélectionnez un hyperviseur');
         if (!formData.os_template_id) errors.push('Sélectionnez un template OS');
+        if (formData.deployment_method === 'clone' && !formData.vsphere_template_name) {
+          errors.push('Sélectionnez un template vSphere à cloner');
+        }
         break;
       case 2:
         if (!formData.vm_name) errors.push('Le nom de la VM est obligatoire');
@@ -432,6 +416,11 @@ export function NewDeployment() {
       hostname: formData.hostname || formData.vm_name,
       admin_password: formData.admin_password || undefined,
       network_switch: formData.network_switch || undefined,
+      // Méthode de déploiement
+      deployment_method: formData.deployment_method,
+      vsphere_template_name: formData.deployment_method === 'clone'
+        ? (formData.vsphere_template_name || undefined)
+        : undefined,
     };
 
     // Configuration IP
@@ -505,16 +494,6 @@ export function NewDeployment() {
       config.post_install_commands = formData.post_install_commands;
     }
 
-    // VMware/ESXi-specific config
-    if (isVMware) {
-      // Override vhdx_path since it's Hyper-V specific
-      delete config.vhdx_path;
-      (config as Record<string, unknown>).datastore = formData.datastore || undefined;
-      (config as Record<string, unknown>).resource_pool = formData.resource_pool || undefined;
-      (config as Record<string, unknown>).vm_folder = formData.vm_folder || undefined;
-      (config as Record<string, unknown>).disk_format = formData.disk_format || 'thin';
-    }
-
     createMutation.mutate({
       vm_name: formData.vm_name,
       hypervisor_id: formData.hypervisor_id,
@@ -533,6 +512,9 @@ export function NewDeployment() {
       cpu_count: template?.min_cpu || prev.cpu_count,
       ram_gb: template?.min_ram_gb || prev.ram_gb,
       disk_gb: template?.min_disk_gb || prev.disk_gb,
+      // Synchroniser la méthode de déploiement depuis le template
+      deployment_method: template?.deployment_method || 'iso',
+      vsphere_template_name: template?.vsphere_template_name || '',
       // Adapter les services selon l'OS
       enable_rdp: templateIsLinux ? false : true,
       enable_winrm: templateIsLinux ? false : true,
@@ -658,7 +640,7 @@ export function NewDeployment() {
                   Sélection de l'infrastructure
                 </h2>
                 <p className="text-gray-500 dark:text-dark-400">
-                  Choisissez l'hyperviseur et le template OS pour votre VM.
+                  Choisissez l'hyperviseur, le template OS et la méthode de déploiement.
                 </p>
               </div>
 
@@ -801,6 +783,146 @@ export function NewDeployment() {
                   )}
                 </div>
               </div>
+
+              {/* Sélecteur de méthode de déploiement */}
+              {formData.os_template_id && (
+                <div className="border border-light-300 dark:border-dark-600 rounded-lg p-4 space-y-4">
+                  <h3 className="text-sm font-medium text-gray-700 dark:text-dark-200 flex items-center gap-2">
+                    <Rocket size={16} />
+                    Méthode de déploiement
+                  </h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* Option ISO */}
+                    <label
+                      className={`flex items-center gap-3 p-4 rounded-lg border cursor-pointer transition-colors ${
+                        formData.deployment_method === 'iso'
+                          ? 'border-oto-500 bg-oto-500/10'
+                          : 'border-light-300 dark:border-dark-600 hover:border-oto-300 dark:hover:border-dark-500 bg-white dark:bg-dark-700/50'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="deployment_method"
+                        value="iso"
+                        checked={formData.deployment_method === 'iso'}
+                        onChange={() =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            deployment_method: 'iso',
+                            vsphere_template_name: '',
+                          }))
+                        }
+                        className="sr-only"
+                      />
+                      <div
+                        className={`w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${
+                          formData.deployment_method === 'iso'
+                            ? 'border-oto-500'
+                            : 'border-gray-300 dark:border-dark-500'
+                        }`}
+                      >
+                        {formData.deployment_method === 'iso' && (
+                          <div className="w-2 h-2 rounded-full bg-oto-500" />
+                        )}
+                      </div>
+                      <div className="w-9 h-9 rounded-lg bg-blue-500/20 flex items-center justify-center flex-shrink-0">
+                        <Disc size={18} className="text-blue-400" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-gray-900 dark:text-white">ISO</p>
+                        <p className="text-xs text-gray-500 dark:text-dark-400">
+                          Installation classique depuis un ISO
+                        </p>
+                      </div>
+                    </label>
+
+                    {/* Option Clone */}
+                    <label
+                      className={`flex items-center gap-3 p-4 rounded-lg border cursor-pointer transition-colors ${
+                        formData.deployment_method === 'clone'
+                          ? 'border-oto-500 bg-oto-500/10'
+                          : 'border-light-300 dark:border-dark-600 hover:border-oto-300 dark:hover:border-dark-500 bg-white dark:bg-dark-700/50'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="deployment_method"
+                        value="clone"
+                        checked={formData.deployment_method === 'clone'}
+                        onChange={() =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            deployment_method: 'clone',
+                          }))
+                        }
+                        className="sr-only"
+                      />
+                      <div
+                        className={`w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${
+                          formData.deployment_method === 'clone'
+                            ? 'border-oto-500'
+                            : 'border-gray-300 dark:border-dark-500'
+                        }`}
+                      >
+                        {formData.deployment_method === 'clone' && (
+                          <div className="w-2 h-2 rounded-full bg-oto-500" />
+                        )}
+                      </div>
+                      <div className="w-9 h-9 rounded-lg bg-purple-500/20 flex items-center justify-center flex-shrink-0">
+                        <Copy size={18} className="text-purple-400" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-gray-900 dark:text-white">Clone de template</p>
+                        <p className="text-xs text-gray-500 dark:text-dark-400">
+                          Cloner un template vSphere existant
+                        </p>
+                      </div>
+                    </label>
+                  </div>
+
+                  {/* Dropdown template vSphere (uniquement si clone) */}
+                  {formData.deployment_method === 'clone' && (
+                    <div className="pt-2">
+                      {!formData.hypervisor_id ? (
+                        <div className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg flex items-center gap-2 text-sm text-yellow-600 dark:text-yellow-400">
+                          <AlertTriangle size={16} />
+                          Sélectionnez d'abord un hyperviseur pour charger les templates vSphere.
+                        </div>
+                      ) : vsphereTemplatesLoading ? (
+                        <div className="flex items-center gap-2 text-gray-500 dark:text-dark-400 py-2">
+                          <Loader2 size={16} className="animate-spin" />
+                          Chargement des templates vSphere...
+                        </div>
+                      ) : vsphereTemplates.length === 0 ? (
+                        <div className="p-3 bg-light-200 dark:bg-dark-700 rounded-lg text-sm text-gray-500 dark:text-dark-400 flex items-center gap-2">
+                          <AlertTriangle size={16} />
+                          Aucun template vSphere trouvé sur cet hyperviseur.
+                        </div>
+                      ) : (
+                        <Select
+                          label="Template vSphere à cloner"
+                          value={formData.vsphere_template_name}
+                          onChange={(e) =>
+                            setFormData((prev) => ({
+                              ...prev,
+                              vsphere_template_name: e.target.value,
+                            }))
+                          }
+                          placeholder="Sélectionner un template vSphere..."
+                          options={vsphereTemplates.map((t: VSphereTemplate) => ({
+                            value: t.name,
+                            label: t.guest_os
+                              ? `${t.name} (${t.guest_os})`
+                              : t.name,
+                          }))}
+                          required
+                          helperText="La VM sera créée par clonage du template sélectionné."
+                        />
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -901,189 +1023,14 @@ export function NewDeployment() {
                 </div>
               </div>
 
-              {/* VMware: Datastore, Resource Pool, VM Folder, Disk Format */}
-              {isVMware ? (
-                <div className="space-y-6">
-                  {/* Datastore */}
-                  <div className="border border-light-300 dark:border-dark-600 rounded-lg p-4">
-                    <h3 className="text-sm font-medium text-gray-700 dark:text-dark-200 mb-4 flex items-center gap-2">
-                      <HardDrive size={16} />
-                      Datastore
-                    </h3>
-                    {datastoresLoading ? (
-                      <div className="flex items-center gap-2 text-gray-500 dark:text-dark-400 py-4">
-                        <Loader2 size={16} className="animate-spin" />
-                        Chargement des datastores...
-                      </div>
-                    ) : datastores.length > 0 ? (
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                        {datastores.map((ds) => {
-                          const isSelected = formData.datastore === ds.name;
-                          const usedGb = ds.capacity_gb - ds.free_gb;
-                          const usedPercent = ds.capacity_gb > 0 ? (usedGb / ds.capacity_gb) * 100 : 0;
-                          return (
-                            <label
-                              key={ds.name}
-                              className={`p-4 rounded-lg border cursor-pointer transition-all ${
-                                isSelected
-                                  ? 'border-oto-500 bg-oto-500/10 ring-1 ring-oto-500'
-                                  : 'border-light-300 dark:border-dark-600 hover:border-oto-300 dark:hover:border-dark-500 bg-white dark:bg-dark-700/30'
-                              }`}
-                            >
-                              <input
-                                type="radio"
-                                name="datastore"
-                                value={ds.name}
-                                checked={isSelected}
-                                onChange={() => setFormData({ ...formData, datastore: ds.name })}
-                                className="sr-only"
-                              />
-                              <div className="flex items-center gap-2 mb-2">
-                                <HardDrive size={18} className={isSelected ? 'text-oto-500' : 'text-gray-400 dark:text-dark-400'} />
-                                <span className="font-bold text-gray-900 dark:text-white">{ds.name}</span>
-                              </div>
-                              <span className="text-xs px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded">{ds.type}</span>
-
-                              {/* Barre de progression */}
-                              <div className="h-2 bg-light-200 dark:bg-dark-600 rounded-full overflow-hidden mb-2 mt-2">
-                                <div
-                                  className={`h-full rounded-full transition-all ${
-                                    usedPercent > 90 ? 'bg-red-500' :
-                                    usedPercent > 70 ? 'bg-yellow-500' :
-                                    'bg-oto-500'
-                                  }`}
-                                  style={{ width: `${usedPercent}%` }}
-                                />
-                              </div>
-
-                              <div className="flex justify-between text-xs">
-                                <span className="text-gray-500 dark:text-dark-400">
-                                  {usedGb.toFixed(1)} Go utilisés
-                                </span>
-                                <span className={`font-medium ${
-                                  ds.free_gb < 50 ? 'text-red-400' :
-                                  ds.free_gb < 100 ? 'text-yellow-400' :
-                                  'text-green-400'
-                                }`}>
-                                  {ds.free_gb.toFixed(1)} Go libres
-                                </span>
-                              </div>
-                              <p className="text-xs text-gray-400 dark:text-dark-500 mt-1">
-                                Capacité : {ds.capacity_gb.toFixed(1)} Go
-                              </p>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <p className="text-sm text-gray-500 dark:text-dark-400">Aucun datastore disponible.</p>
-                    )}
-                  </div>
-
-                  {/* Resource Pool (optional) */}
-                  <div className="border border-light-300 dark:border-dark-600 rounded-lg p-4">
-                    <h3 className="text-sm font-medium text-gray-700 dark:text-dark-200 mb-4 flex items-center gap-2">
-                      <Server size={16} />
-                      Resource Pool (optionnel)
-                    </h3>
-                    {resourcePoolsLoading ? (
-                      <div className="flex items-center gap-2 text-gray-500 dark:text-dark-400 py-4">
-                        <Loader2 size={16} className="animate-spin" />
-                        Chargement des resource pools...
-                      </div>
-                    ) : resourcePools.length > 0 ? (
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                        {/* Option aucun */}
-                        <label
-                          className={`p-3 rounded-lg border cursor-pointer transition-colors ${
-                            !formData.resource_pool
-                              ? 'border-oto-500 bg-oto-500/10'
-                              : 'border-light-300 dark:border-dark-600 hover:border-oto-300 dark:hover:border-dark-500'
-                          }`}
-                        >
-                          <input
-                            type="radio"
-                            name="resource_pool"
-                            value=""
-                            checked={!formData.resource_pool}
-                            onChange={() => setFormData({ ...formData, resource_pool: '' })}
-                            className="sr-only"
-                          />
-                          <p className="font-medium text-gray-900 dark:text-white">Par défaut</p>
-                          <p className="text-xs text-gray-500 dark:text-dark-400 mt-1">Pas de resource pool spécifique</p>
-                        </label>
-                        {resourcePools.map((rp) => (
-                          <label
-                            key={rp.name}
-                            className={`p-3 rounded-lg border cursor-pointer transition-colors ${
-                              formData.resource_pool === rp.name
-                                ? 'border-oto-500 bg-oto-500/10'
-                                : 'border-light-300 dark:border-dark-600 hover:border-oto-300 dark:hover:border-dark-500'
-                            }`}
-                          >
-                            <input
-                              type="radio"
-                              name="resource_pool"
-                              value={rp.name}
-                              checked={formData.resource_pool === rp.name}
-                              onChange={() => setFormData({ ...formData, resource_pool: rp.name })}
-                              className="sr-only"
-                            />
-                            <p className="font-medium text-gray-900 dark:text-white">{rp.name}</p>
-                            <div className="text-xs text-gray-500 dark:text-dark-400 mt-1">
-                              {rp.cpu_limit != null && <span>CPU: {rp.cpu_limit} MHz</span>}
-                              {rp.cpu_limit != null && rp.memory_limit_gb != null && <span> / </span>}
-                              {rp.memory_limit_gb != null && <span>RAM: {rp.memory_limit_gb} Go</span>}
-                            </div>
-                          </label>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-sm text-gray-500 dark:text-dark-400">Aucun resource pool disponible.</p>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* VM Folder (optional) */}
-                    <Input
-                      label="Dossier VM (optionnel)"
-                      value={formData.vm_folder}
-                      onChange={(e) => setFormData({ ...formData, vm_folder: e.target.value })}
-                      placeholder="Production/WebServers"
-                      helperText="Dossier dans l'inventaire vSphere"
-                    />
-
-                    {/* Disk Format */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-dark-200 mb-2">
-                        <HardDrive size={16} className="inline mr-2" />
-                        Format de disque
-                      </label>
-                      <Select
-                        value={formData.disk_format}
-                        onChange={(e) =>
-                          setFormData({ ...formData, disk_format: e.target.value })
-                        }
-                        options={[
-                          { value: 'thin', label: 'Thin Provisioning' },
-                          { value: 'thick', label: 'Thick (Lazy Zeroed)' },
-                          { value: 'eagerzeroedthick', label: 'Thick (Eager Zeroed)' },
-                        ]}
-                      />
-                      <p className="text-xs text-gray-500 dark:text-dark-400 mt-1">
-                        Thin Provisioning alloue l'espace au fur et à mesure
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-              /* Hyper-V: Emplacement du disque virtuel */
+              {/* Emplacement du disque virtuel — masqué en mode clone (géré par vSphere) */}
+              {formData.deployment_method !== 'clone' && (
               <div className="border border-light-300 dark:border-dark-600 rounded-lg p-4">
                 <h3 className="text-sm font-medium text-gray-700 dark:text-dark-200 mb-4 flex items-center gap-2">
                   <FolderOpen size={16} />
                   Emplacement du disque virtuel
                 </h3>
-
+                
                 {/* Sélecteur de disque visuel */}
                 {storageLoading ? (
                   <div className="flex items-center gap-2 text-gray-500 dark:text-dark-400 py-4">
@@ -1128,10 +1075,10 @@ export function NewDeployment() {
                                 )}
                               </div>
                             </div>
-
+                            
                             {/* Barre de progression */}
                             <div className="h-2 bg-light-200 dark:bg-dark-600 rounded-full overflow-hidden mb-2">
-                              <div
+                              <div 
                                 className={`h-full rounded-full transition-all ${
                                   usedPercent > 90 ? 'bg-red-500' :
                                   usedPercent > 70 ? 'bg-yellow-500' :
@@ -1140,7 +1087,7 @@ export function NewDeployment() {
                                 style={{ width: `${usedPercent}%` }}
                               />
                             </div>
-
+                            
                             <div className="flex justify-between text-xs">
                               <span className="text-gray-500 dark:text-dark-400">
                                 {storage.used_gb.toFixed(1)} Go utilisés
@@ -1157,7 +1104,7 @@ export function NewDeployment() {
                           </label>
                         );
                       })}
-
+                      
                       {/* Option chemin personnalisé */}
                       <label
                         className={`p-4 rounded-lg border border-dashed cursor-pointer transition-all ${
@@ -1181,7 +1128,7 @@ export function NewDeployment() {
                         <p className="text-xs text-gray-500 dark:text-dark-400">Spécifier un chemin manuel</p>
                       </label>
                     </div>
-
+                    
                     {/* Champ chemin personnalisé */}
                     {(formData.vhdx_path === '' || !storageLocations.some((s: StorageLocation) => s.path === formData.vhdx_path)) && (
                       <Input
@@ -1205,7 +1152,7 @@ export function NewDeployment() {
                     />
                   </div>
                 )}
-
+                
                 <div className="mt-3 p-3 bg-light-100 dark:bg-dark-700/50 rounded-lg">
                   <p className="text-xs text-gray-500 dark:text-dark-400">
                     <strong className="text-gray-600 dark:text-dark-300">Fichier créé :</strong>{' '}
@@ -1215,6 +1162,21 @@ export function NewDeployment() {
                   </p>
                 </div>
               </div>
+              )}
+              {/* Bannière informationnelle en mode clone */}
+              {formData.deployment_method === 'clone' && (
+                <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-lg flex items-start gap-3">
+                  <Copy size={18} className="text-purple-400 flex-shrink-0 mt-0.5" />
+                  <div className="text-sm">
+                    <p className="font-medium text-purple-400">Mode clone vSphere</p>
+                    <p className="text-gray-500 dark:text-dark-400 mt-1">
+                      L'emplacement du disque virtuel sera géré automatiquement par vSphere lors du clonage.
+                      {formData.vsphere_template_name && (
+                        <> Template source : <strong className="text-purple-300">{formData.vsphere_template_name}</strong></>
+                      )}
+                    </p>
+                  </div>
+                </div>
               )}
             </div>
           )}
@@ -1769,11 +1731,6 @@ export function NewDeployment() {
                       <span className="text-gray-600 dark:text-dark-300">Hyperviseur</span>
                       <span className="text-gray-900 dark:text-white font-medium">
                         {selectedHypervisor?.name || '-'}
-                        {selectedHypervisor && (
-                          <span className="ml-1 text-xs text-gray-500 dark:text-dark-400">
-                            ({selectedHypervisor.type === 'vmware' ? 'VMware' : 'Hyper-V'})
-                          </span>
-                        )}
                       </span>
                     </div>
                     <div className="flex justify-between">
@@ -1782,6 +1739,28 @@ export function NewDeployment() {
                         {selectedTemplate?.name || '-'}
                       </span>
                     </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600 dark:text-dark-300">Déploiement</span>
+                      <span className={`font-medium flex items-center gap-1 ${
+                        formData.deployment_method === 'clone'
+                          ? 'text-purple-400'
+                          : 'text-blue-400'
+                      }`}>
+                        {formData.deployment_method === 'clone' ? (
+                          <><Copy size={12} /> Clone vSphere</>
+                        ) : (
+                          <><Disc size={12} /> ISO</>
+                        )}
+                      </span>
+                    </div>
+                    {formData.deployment_method === 'clone' && formData.vsphere_template_name && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600 dark:text-dark-300">Template vSphere</span>
+                        <span className="text-purple-400 font-medium text-xs">
+                          {formData.vsphere_template_name}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -1802,34 +1781,6 @@ export function NewDeployment() {
                         {formData.cpu_count} vCPU / {formData.ram_gb} Go / {formData.disk_gb} Go
                       </span>
                     </div>
-                    {isVMware && formData.datastore && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-600 dark:text-dark-300">Datastore</span>
-                        <span className="text-gray-900 dark:text-white font-medium">{formData.datastore}</span>
-                      </div>
-                    )}
-                    {isVMware && formData.resource_pool && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-600 dark:text-dark-300">Resource Pool</span>
-                        <span className="text-gray-900 dark:text-white font-medium">{formData.resource_pool}</span>
-                      </div>
-                    )}
-                    {isVMware && formData.vm_folder && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-600 dark:text-dark-300">Dossier VM</span>
-                        <span className="text-gray-900 dark:text-white font-medium">{formData.vm_folder}</span>
-                      </div>
-                    )}
-                    {isVMware && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-600 dark:text-dark-300">Format disque</span>
-                        <span className="text-gray-900 dark:text-white font-medium">
-                          {formData.disk_format === 'thin' ? 'Thin Provisioning' :
-                           formData.disk_format === 'thick' ? 'Thick (Lazy Zeroed)' :
-                           'Thick (Eager Zeroed)'}
-                        </span>
-                      </div>
-                    )}
                   </div>
                 </div>
 

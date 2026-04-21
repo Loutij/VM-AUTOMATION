@@ -13,6 +13,7 @@ import {
   Loader2,
   HardDrive,
   Languages,
+  Disc,
 } from 'lucide-react';
 import { Header } from '../components/layout';
 import {
@@ -27,7 +28,7 @@ import {
   Dropdown,
 } from '../components/ui';
 import { templatesApi, hypervisorsApi, type ISOInfo } from '../services/api';
-import type { OSTemplate, OSFamily, Hypervisor } from '../types';
+import type { OSTemplate, OSFamily, DeploymentMethod, Hypervisor } from '../types';
 
 // Liste des langues d'installation supportées
 const INSTALL_LOCALES = [
@@ -55,6 +56,8 @@ interface TemplateFormData {
   min_ram_gb: string;
   min_disk_gb: string;
   install_locale: string;
+  deployment_method: DeploymentMethod;
+  vsphere_template_name: string;
 }
 
 const defaultFormData: TemplateFormData = {
@@ -67,6 +70,8 @@ const defaultFormData: TemplateFormData = {
   min_ram_gb: '4',
   min_disk_gb: '60',
   install_locale: 'fr-FR',
+  deployment_method: 'iso',
+  vsphere_template_name: '',
 };
 
 export function Templates() {
@@ -154,6 +159,8 @@ export function Templates() {
         min_ram_gb: template.min_ram_gb.toString(),
         min_disk_gb: template.min_disk_gb.toString(),
         install_locale: template.install_locale || 'fr-FR',
+        deployment_method: template.deployment_method || 'iso',
+        vsphere_template_name: template.vsphere_template_name || '',
       });
     } else {
       setSelectedTemplate(null);
@@ -170,7 +177,7 @@ export function Templates() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const payload = {
+    const payload: Partial<OSTemplate> = {
       name: formData.name,
       os_family: formData.os_family,
       os_type: formData.os_type,
@@ -180,6 +187,11 @@ export function Templates() {
       min_ram_gb: parseInt(formData.min_ram_gb),
       min_disk_gb: parseInt(formData.min_disk_gb),
       install_locale: formData.install_locale,
+      deployment_method: formData.deployment_method,
+      vsphere_template_name:
+        formData.deployment_method === 'clone' && formData.vsphere_template_name
+          ? formData.vsphere_template_name
+          : undefined,
     };
 
     if (selectedTemplate) {
@@ -206,6 +218,8 @@ export function Templates() {
       min_ram_gb: template.min_ram_gb.toString(),
       min_disk_gb: template.min_disk_gb.toString(),
       install_locale: template.install_locale || 'fr-FR',
+      deployment_method: template.deployment_method || 'iso',
+      vsphere_template_name: template.vsphere_template_name || '',
     });
     setIsModalOpen(true);
   };
@@ -358,18 +372,37 @@ export function Templates() {
                 )}
 
                 {/* Default specs */}
-                <div className="mt-4 pt-4 border-t border-light-200 dark:border-dark-700 flex items-center justify-between text-xs text-gray-500 dark:text-dark-400">
-                  <div className="flex items-center gap-4">
-                    <span>{template.min_cpu} vCPU</span>
-                    <span>{template.min_ram_gb} Go</span>
-                    <span>{template.min_disk_gb} Go</span>
-                  </div>
-                  {template.install_locale && (
-                    <div className="flex items-center gap-1.5 text-gray-600 dark:text-dark-300">
-                      <Languages size={12} />
-                      <span>{template.install_locale}</span>
+                <div className="mt-4 pt-4 border-t border-light-200 dark:border-dark-700 space-y-2">
+                  <div className="flex items-center justify-between text-xs text-gray-500 dark:text-dark-400">
+                    <div className="flex items-center gap-4">
+                      <span>{template.min_cpu} vCPU</span>
+                      <span>{template.min_ram_gb} Go</span>
+                      <span>{template.min_disk_gb} Go</span>
                     </div>
-                  )}
+                    {template.install_locale && (
+                      <div className="flex items-center gap-1.5 text-gray-600 dark:text-dark-300">
+                        <Languages size={12} />
+                        <span>{template.install_locale}</span>
+                      </div>
+                    )}
+                  </div>
+                  {/* Badge méthode de déploiement */}
+                  <div className="flex items-center gap-2">
+                    {template.deployment_method === 'clone' ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-500/20 text-purple-400 text-xs rounded-full">
+                        <Copy size={10} />
+                        Clone vSphere
+                        {template.vsphere_template_name && (
+                          <span className="ml-1 opacity-70">· {template.vsphere_template_name}</span>
+                        )}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-500/20 text-blue-400 text-xs rounded-full">
+                        <Disc size={10} />
+                        ISO
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
@@ -444,6 +477,77 @@ export function Templates() {
               rows={3}
             />
 
+            {/* Méthode de déploiement */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-dark-200 mb-2">
+                Méthode de déploiement par défaut
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <label
+                  className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                    formData.deployment_method === 'iso'
+                      ? 'border-oto-500 bg-oto-500/10'
+                      : 'border-light-300 dark:border-dark-600 hover:border-oto-300 dark:hover:border-dark-500'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="deployment_method"
+                    value="iso"
+                    checked={formData.deployment_method === 'iso'}
+                    onChange={() =>
+                      setFormData({ ...formData, deployment_method: 'iso', vsphere_template_name: '' })
+                    }
+                    className="sr-only"
+                  />
+                  <div
+                    className={`w-3.5 h-3.5 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${
+                      formData.deployment_method === 'iso'
+                        ? 'border-oto-500'
+                        : 'border-gray-300 dark:border-dark-500'
+                    }`}
+                  >
+                    {formData.deployment_method === 'iso' && (
+                      <div className="w-2 h-2 rounded-full bg-oto-500" />
+                    )}
+                  </div>
+                  <Disc size={16} className="text-blue-400 flex-shrink-0" />
+                  <span className="text-sm font-medium text-gray-900 dark:text-white">ISO</span>
+                </label>
+                <label
+                  className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                    formData.deployment_method === 'clone'
+                      ? 'border-oto-500 bg-oto-500/10'
+                      : 'border-light-300 dark:border-dark-600 hover:border-oto-300 dark:hover:border-dark-500'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="deployment_method"
+                    value="clone"
+                    checked={formData.deployment_method === 'clone'}
+                    onChange={() => setFormData({ ...formData, deployment_method: 'clone' })}
+                    className="sr-only"
+                  />
+                  <div
+                    className={`w-3.5 h-3.5 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${
+                      formData.deployment_method === 'clone'
+                        ? 'border-oto-500'
+                        : 'border-gray-300 dark:border-dark-500'
+                    }`}
+                  >
+                    {formData.deployment_method === 'clone' && (
+                      <div className="w-2 h-2 rounded-full bg-oto-500" />
+                    )}
+                  </div>
+                  <Copy size={16} className="text-purple-400 flex-shrink-0" />
+                  <span className="text-sm font-medium text-gray-900 dark:text-white">Clone vSphere</span>
+                </label>
+              </div>
+            </div>
+
+            {/* Chemin ISO — affiché uniquement en mode ISO */}
+            {formData.deployment_method === 'iso' && (
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-dark-200 mb-2">
                 Chemin ISO
@@ -473,6 +577,25 @@ export function Templates() {
                 Chemin vers le fichier ISO sur l'hyperviseur
               </p>
             </div>
+            )}
+
+            {/* Nom du template vSphere — affiché uniquement en mode clone */}
+            {formData.deployment_method === 'clone' && (
+            <div>
+              <Input
+                label="Nom du template vSphere"
+                value={formData.vsphere_template_name}
+                onChange={(e) =>
+                  setFormData({ ...formData, vsphere_template_name: e.target.value })
+                }
+                placeholder="template-windows-2022"
+                helperText="Nom exact du template dans vSphere/vCenter (sera pré-sélectionné lors du déploiement)"
+              />
+              <p className="mt-1 text-xs text-gray-500 dark:text-dark-400">
+                Lors du déploiement, ce template sera proposé par défaut dans le dropdown vSphere.
+              </p>
+            </div>
+            )}
 
             <div className="grid grid-cols-3 gap-4">
               <Input

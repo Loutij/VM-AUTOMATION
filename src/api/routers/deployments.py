@@ -27,29 +27,12 @@ from src.domain.models import (
     Deployment,
     DeploymentLog,
     DeploymentStatus,
-    Hypervisor,
-    HypervisorType,
     VirtualMachine,
 )
 
 logger = get_logger(__name__)
 
 router = APIRouter()
-
-
-async def _get_deployment_service(db: AsyncSession, hypervisor_id) -> DeploymentService:
-    """Factory : retourne le bon service de déploiement selon le type d'hyperviseur."""
-    result = await db.execute(
-        select(Hypervisor).where(Hypervisor.id == hypervisor_id)
-    )
-    hypervisor = result.scalar_one_or_none()
-
-    if hypervisor and hypervisor.type == HypervisorType.VMWARE:
-        from src.domain.esxi_deployment_service import ESXiDeploymentService
-        return ESXiDeploymentService(db)
-
-    # Par défaut : Hyper-V
-    return DeploymentService(db)
 
 
 # =============================================================================
@@ -122,6 +105,16 @@ class DeploymentCreate(BaseModel):
     # Post-install
     post_install_commands: list[str] | None = Field(None, description="Commandes post-install personnalisées")
     auto_start: bool = Field(default=True, description="Démarrer automatiquement")
+    # Méthode de déploiement (clone de template vSphere)
+    deployment_method: str = Field(
+        default="iso",
+        pattern="^(iso|clone)$",
+        description="Méthode de déploiement: 'iso' (par défaut) ou 'clone' d'une template vSphere"
+    )
+    vsphere_template_name: str | None = Field(
+        None,
+        description="Nom de la template vSphere à cloner (requis si deployment_method='clone')"
+    )
 
 
 class DeploymentResponse(BaseModel):
@@ -485,10 +478,10 @@ async def approve_deployment(
         deployment.started_at = datetime.now(timezone.utc)
         await db.commit()
 
-        async def run_approve_start(dep_id, hyp_id):
+        async def run_approve_start(dep_id):
             try:
                 async with db_session() as session:
-                    bg_service = await _get_deployment_service(session, hyp_id)
+                    bg_service = DeploymentService(session)
                     await bg_service.start_deployment(dep_id)
                     await session.commit()
                     logger.info("approved_deployment_started", deployment_id=str(dep_id))
@@ -527,7 +520,7 @@ async def approve_deployment(
                 except Exception as db_error:
                     logger.error("failed_to_mark_deployment_failed", error=str(db_error))
 
-        asyncio.create_task(run_approve_start(deployment.id, deployment.hypervisor_id))
+        asyncio.create_task(run_approve_start(deployment.id))
 
     return _build_response(deployment)
 
@@ -606,9 +599,8 @@ async def create_deployment(
         hypervisor_id=str(deployment.hypervisor_id),
         template_id=str(deployment.os_template_id),
     )
-
-    # Sélectionner le bon service selon le type d'hyperviseur (Hyper-V ou VMware)
-    service = await _get_deployment_service(db, deployment.hypervisor_id)
+    
+    service = DeploymentService(db)
     
     # Vérifier unicité du nom de VM
     existing_vm = await db.execute(
@@ -637,6 +629,13 @@ async def create_deployment(
             detail=f"Un déploiement pour '{deployment.vm_name}' est déjà en cours",
         )
     
+    # Valider la cohérence deployment_method / vsphere_template_name
+    if deployment.deployment_method == "clone" and not deployment.vsphere_template_name:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="vsphere_template_name est requis quand deployment_method='clone'",
+        )
+
     # Préparer la config IP
     ip_config = None
     if deployment.ip_config:
@@ -678,6 +677,8 @@ async def create_deployment(
         package_configs=deployment.package_configs,
         enable_windows_update=deployment.enable_windows_update,
         post_install_commands=deployment.post_install_commands,
+        deployment_method=deployment.deployment_method,
+        vsphere_template_name=deployment.vsphere_template_name,
     )
 
     # Enregistrer qui a créé le déploiement
@@ -708,11 +709,11 @@ async def create_deployment(
         
         await db.commit()
         
-        async def run_deployment_background(deployment_id, hyp_id):
-            """Exécute le déploiement en arrière-plan (Hyper-V ou VMware)."""
+        async def run_deployment_background(deployment_id):
+            """Exécute le déploiement DISM en arrière-plan."""
             try:
                 async with db_session() as session:
-                    bg_service = await _get_deployment_service(session, hyp_id)
+                    bg_service = DeploymentService(session)
                     await bg_service.start_deployment(deployment_id)
                     await session.commit()
                     logger.info("background_deployment_completed", deployment_id=str(deployment_id))
@@ -758,10 +759,10 @@ async def create_deployment(
                     logger.error("failed_to_mark_deployment_failed", error=str(db_error))
 
         # Lancer en arrière-plan
-        asyncio.create_task(run_deployment_background(created.id, deployment.hypervisor_id))
+        asyncio.create_task(run_deployment_background(created.id))
     else:
         await db.commit()
-
+    
     return _build_response(created)
 
 
@@ -820,10 +821,10 @@ async def start_deployment(
     await db.commit()
 
     # Lancer en arrière-plan (le déploiement peut prendre 30+ min)
-    async def run_start_background(dep_id, hyp_id):
+    async def run_start_background(dep_id):
         try:
             async with db_session() as session:
-                bg_service = await _get_deployment_service(session, hyp_id)
+                bg_service = DeploymentService(session)
                 await bg_service.start_deployment(dep_id)
                 await session.commit()
                 logger.info("start_deployment_completed", deployment_id=str(dep_id))
@@ -866,7 +867,7 @@ async def start_deployment(
             except Exception as db_error:
                 logger.error("failed_to_mark_deployment_failed", error=str(db_error))
 
-    asyncio.create_task(run_start_background(deployment.id, deployment.hypervisor_id))
+    asyncio.create_task(run_start_background(deployment.id))
 
     return _build_response(deployment)
 

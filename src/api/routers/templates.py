@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import CurrentUser, DbSession, Pagination, RequireAdmin
 from src.common.logging import get_logger
-from src.domain.models import OSTemplate, OSFamily, Architecture
+from src.domain.models import OSTemplate, OSFamily, Architecture, DeploymentMethod
 
 logger = get_logger(__name__)
 
@@ -45,6 +45,16 @@ class OSTemplateBase(BaseModel):
         pattern="^[a-z]{2}-[A-Z]{2}$",
         description="Langue d'installation (ex: fr-FR, en-US)"
     )
+    deployment_method: str = Field(
+        default="iso",
+        pattern="^(iso|clone)$",
+        description="Méthode de déploiement: 'iso' (par défaut) ou 'clone' d'une template vSphere"
+    )
+    vsphere_template_name: str | None = Field(
+        None,
+        max_length=255,
+        description="Nom de la template vSphere à cloner (requis si deployment_method=clone)"
+    )
 
 
 class OSTemplateCreate(OSTemplateBase):
@@ -69,6 +79,16 @@ class OSTemplateUpdate(BaseModel):
     )
     unattend_template: str | None = None
     is_active: bool | None = None
+    deployment_method: str | None = Field(
+        None,
+        pattern="^(iso|clone)$",
+        description="Méthode de déploiement: 'iso' ou 'clone'"
+    )
+    vsphere_template_name: str | None = Field(
+        None,
+        max_length=255,
+        description="Nom de la template vSphere à cloner"
+    )
 
 
 class OSTemplateResponse(OSTemplateBase):
@@ -76,6 +96,8 @@ class OSTemplateResponse(OSTemplateBase):
 
     id: UUID
     install_locale: str
+    deployment_method: str
+    vsphere_template_name: str | None = None
     is_active: bool
     created_at: datetime
     updated_at: datetime | None
@@ -170,6 +192,8 @@ def _template_to_response(template: OSTemplate) -> OSTemplateResponse:
         min_ram_gb=template.min_ram_gb,
         min_disk_gb=template.min_disk_gb,
         install_locale=template.install_locale,
+        deployment_method=template.deployment_method.value if template.deployment_method else "iso",
+        vsphere_template_name=template.vsphere_template_name,
         is_active=template.is_active,
         created_at=template.created_at.isoformat() if template.created_at else "",
         updated_at=template.updated_at.isoformat() if template.updated_at else None,
@@ -210,12 +234,20 @@ async def create_template(
     try:
         os_family_enum = OSFamily(template.os_family)
         arch_enum = Architecture(template.architecture)
+        deploy_method_enum = DeploymentMethod(template.deployment_method)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Valeur invalide: {e}",
         )
-    
+
+    # Validation : vsphere_template_name requis si méthode=clone
+    if deploy_method_enum == DeploymentMethod.CLONE and not template.vsphere_template_name:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="vsphere_template_name est requis quand deployment_method='clone'",
+        )
+
     db_template = OSTemplate(
         name=template.name,
         os_family=os_family_enum,
@@ -227,6 +259,8 @@ async def create_template(
         min_ram_gb=template.min_ram_gb,
         min_disk_gb=template.min_disk_gb,
         install_locale=template.install_locale,
+        deployment_method=deploy_method_enum,
+        vsphere_template_name=template.vsphere_template_name,
     )
     
     db.add(db_template)
@@ -298,10 +332,28 @@ async def update_template(
     
     # Mettre à jour les champs fournis
     update_data = template.model_dump(exclude_unset=True)
+
+    # Valider la cohérence deployment_method / vsphere_template_name
+    new_method = update_data.get("deployment_method")
+    new_vsphere_name = update_data.get("vsphere_template_name")
+    effective_method = new_method or (db_template.deployment_method.value if db_template.deployment_method else "iso")
+    effective_vsphere_name = new_vsphere_name if "vsphere_template_name" in update_data else db_template.vsphere_template_name
+
+    if effective_method == "clone" and not effective_vsphere_name:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="vsphere_template_name est requis quand deployment_method='clone'",
+        )
+
     for field, value in update_data.items():
-        if value is not None:
+        if field == "deployment_method" and value is not None:
+            try:
+                setattr(db_template, field, DeploymentMethod(value))
+            except ValueError as e:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Valeur invalide pour deployment_method: {e}")
+        elif value is not None:
             setattr(db_template, field, value)
-    
+
     await db.commit()
     await db.refresh(db_template)
     

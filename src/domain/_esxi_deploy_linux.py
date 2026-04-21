@@ -212,6 +212,24 @@ class ESXiLinuxDeployMixin:
             # Non bloquant — la VM peut déjà être configurée pour booter sur CD
             logger.warning("esxi_linux_boot_order_failed", error=str(e))
 
+        # ── 6b. Configurer les paramètres kernel pour autoinstall ──
+        if config_type == "autoinstall":
+            try:
+                await self._set_autoinstall_boot_params(client, vm_id)
+                await self._log_step(
+                    deployment,
+                    DeploymentStep.MOUNTING_ISO,
+                    "Paramètres kernel autoinstall configurés (ds=nocloud)",
+                )
+            except Exception as e:
+                logger.warning("esxi_linux_autoinstall_params_failed", error=str(e))
+                await self._log_step(
+                    deployment,
+                    DeploymentStep.MOUNTING_ISO,
+                    f"Avertissement : paramètres autoinstall non configurés ({e})",
+                    "warning",
+                )
+
         # ── 7. Démarrer la VM ──
         await self._update_deployment_status(
             deployment,
@@ -329,6 +347,56 @@ class ESXiLinuxDeployMixin:
                 f"Avertissement : impossible de désactiver Secure Boot ({e})",
                 "warning",
             )
+
+    # =========================================================================
+    # Autoinstall boot parameters (Ubuntu)
+    # =========================================================================
+
+    async def _set_autoinstall_boot_params(
+        self, client: Any, vm_id: str
+    ) -> None:
+        """
+        Configure les paramètres kernel pour Ubuntu autoinstall via extraConfig.
+
+        Ubuntu Subiquity nécessite le paramètre kernel 'autoinstall' et
+        'ds=nocloud' pour détecter automatiquement le seed ISO cidata.
+        On utilise les extraConfig VMX pour injecter ces paramètres.
+        """
+
+        def _configure() -> None:
+            from pyVmomi import vim
+
+            vm_obj = client._get_vm_by_id(vm_id)
+            if vm_obj is None:
+                return
+
+            config_spec = vim.vm.ConfigSpec()
+            # bios.bootDeviceClasses = "allow:cdrom,hd" pour forcer boot CD
+            # guestinfo.* pour passer des paramètres
+            config_spec.extraConfig = [
+                vim.option.OptionValue(
+                    key="bios.bootDeviceClasses",
+                    value="allow:cdrom,hd",
+                ),
+                vim.option.OptionValue(
+                    key="guestinfo.metadata",
+                    value="",
+                ),
+                vim.option.OptionValue(
+                    key="guestinfo.userdata",
+                    value="",
+                ),
+            ]
+
+            # Modifier le boot delay pour laisser le temps au CD-ROM
+            boot_options = vim.vm.BootOptions()
+            boot_options.bootDelay = 3000  # 3 secondes
+            config_spec.bootOptions = boot_options
+
+            task = vm_obj.ReconfigVM_Task(spec=config_spec)
+            client._wait_for_task(task)
+
+        await asyncio.to_thread(_configure)
 
     # =========================================================================
     # Détection du type de configuration
@@ -621,7 +689,7 @@ class ESXiLinuxDeployMixin:
 
         # Label de l'ISO selon le type de config
         label_map = {
-            "autoinstall": "AUTOINSTALL",
+            "autoinstall": "cidata",  # Ubuntu Subiquity détecte NoCloud via ce label
             "preseed": "PRESEED",
             "kickstart": "OEMDRV",  # RHEL/Rocky cherche ce label
             "cloud-init": "cidata",  # Convention NoCloud

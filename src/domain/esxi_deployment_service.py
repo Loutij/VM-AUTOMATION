@@ -43,6 +43,7 @@ from src.domain.deployment_service import DeploymentStep
 from src.domain.models import (
     Deployment,
     DeploymentLog,
+    DeploymentMethod,
     DeploymentStatus,
     Hypervisor,
     HypervisorType,
@@ -60,6 +61,7 @@ from src.domain._esxi_deploy_windows import ESXiWindowsDeployMixin
 from src.domain._esxi_deploy_linux import ESXiLinuxDeployMixin
 from src.domain._esxi_deploy_guest_ops import ESXiGuestOpsMixin
 from src.domain._esxi_deploy_finalize import ESXiFinalizeMixin
+from src.domain._esxi_deploy_clone import ESXiCloneDeployMixin
 
 logger = get_logger(__name__)
 
@@ -70,6 +72,7 @@ class ESXiDeploymentService(
     ESXiLinuxDeployMixin,
     ESXiGuestOpsMixin,
     ESXiFinalizeMixin,
+    ESXiCloneDeployMixin,
 ):
     """
     Service de déploiement pour ESXi/vSphere.
@@ -249,8 +252,30 @@ class ESXiDeploymentService(
             )
             return
 
-        # 2. Dispatch vers le workflow spécifique à l'OS
-        if os_family == "linux":
+        # 2. Détecter la méthode de déploiement (iso ou clone)
+        deployment_method = template_config.get("deployment_method", "iso")
+        # Normaliser : peut être un enum DeploymentMethod ou une string
+        if hasattr(deployment_method, "value"):
+            deployment_method = deployment_method.value
+        deployment_method = str(deployment_method).lower()
+
+        # Vérifier aussi sur le template OS chargé en base
+        if deployment_method == "iso" and deployment.os_template:
+            os_template_method = deployment.os_template.deployment_method
+            if hasattr(os_template_method, "value"):
+                os_template_method = os_template_method.value
+            if str(os_template_method).lower() == DeploymentMethod.CLONE.value:
+                deployment_method = DeploymentMethod.CLONE.value
+
+        # 3. Dispatch vers le workflow spécifique
+        if deployment_method == DeploymentMethod.CLONE.value:
+            await self._log_step(
+                deployment,
+                DeploymentStep.CREATING_VM,
+                "Méthode de déploiement : clone de template VMware",
+            )
+            await self._execute_clone_deployment(deployment)
+        elif os_family == "linux":
             await self._execute_linux_deployment(deployment)
         else:
             await self._execute_windows_deployment(deployment)

@@ -25,6 +25,26 @@ dependencies = [
     "paramiko~=3.4.0",
 ]
 
+[project.optional-dependencies]
+# Drivers DB async/sync (non inclus dans les deps de base pour flexibilité)
+asyncpg = ["asyncpg~=0.29.0"]
+psycopg2 = ["psycopg2-binary~=2.9.0"]
+# Dépendances runtime manquantes dans les deps de base
+extras = [
+    "python-multipart~=0.0.9",   # parsing multipart/form-data (FastAPI file uploads)
+    "slowapi~=0.1.9",            # rate limiting FastAPI
+]
+# Monitoring Celery
+monitoring = ["flower~=2.0.0"]
+# Toutes les dépendances optionnelles groupées (dev / CI)
+dev = [
+    "asyncpg~=0.29.0",
+    "psycopg2-binary~=2.9.0",
+    "python-multipart~=0.0.9",
+    "slowapi~=0.1.9",
+    "flower~=2.0.0",
+]
+
 [tool.black]
 line-length = 100
 target-version = ["py311"]

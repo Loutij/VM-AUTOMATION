@@ -69,6 +69,13 @@ class Architecture(str, enum.Enum):
     ARM64 = "arm64"
 
 
+class DeploymentMethod(str, enum.Enum):
+    """Méthode de déploiement d'un OS template."""
+
+    ISO = "iso"
+    CLONE = "clone"
+
+
 class VMStatus(str, enum.Enum):
     """États internes de gestion d'une VM."""
 
@@ -174,23 +181,6 @@ class Hypervisor(Base, TimestampMixin):
     username: Mapped[str] = mapped_column(String(100), nullable=False)
     password_encrypted: Mapped[str] = mapped_column(String(500), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    # Champs spécifiques VMware/vSphere
-    datacenter: Mapped[str | None] = mapped_column(
-        String(100), nullable=True,
-        comment="Datacenter VMware vSphere",
-    )
-    cluster: Mapped[str | None] = mapped_column(
-        String(100), nullable=True,
-        comment="Cluster VMware vSphere",
-    )
-    default_datastore: Mapped[str | None] = mapped_column(
-        String(200), nullable=True,
-        comment="Datastore par défaut pour le stockage VMware",
-    )
-    default_resource_pool: Mapped[str | None] = mapped_column(
-        String(200), nullable=True,
-        comment="Pool de ressources par défaut VMware",
-    )
 
     # Relations
     virtual_machines: Mapped[list["VirtualMachine"]] = relationship(
@@ -239,6 +229,16 @@ class OSTemplate(Base, TimestampMixin):
     install_locale: Mapped[str] = mapped_column(
         String(10), default="fr-FR", nullable=False,
         comment="Langue d'installation (ex: fr-FR, en-US)"
+    )
+    deployment_method: Mapped[DeploymentMethod] = mapped_column(
+        Enum(DeploymentMethod, values_callable=lambda x: [e.value for e in x]),
+        default=DeploymentMethod.ISO,
+        nullable=False,
+        comment="Méthode de déploiement: iso (par défaut) ou clone d'une template vSphere"
+    )
+    vsphere_template_name: Mapped[str | None] = mapped_column(
+        String(255), nullable=True,
+        comment="Nom de la template vSphere à cloner (requis si deployment_method=clone)"
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 

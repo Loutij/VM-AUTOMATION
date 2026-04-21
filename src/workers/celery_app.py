@@ -12,8 +12,8 @@ from src.common.config import settings
 # Créer l'application Celery
 celery_app = Celery(
     "vm_automation",
-    broker=settings.redis_url,
-    backend=settings.redis_url,
+    broker=settings.celery_broker_url,
+    backend=settings.celery_result_backend,
     include=["src.workers.tasks"],
 )
 

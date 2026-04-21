@@ -417,7 +417,7 @@ class DeploymentService:
                     logger.debug("email_hypervisor_lookup_failed", error=str(e))
 
             # Send in background to not block deployment
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
             if status == DeploymentStatus.COMPLETED:
                 await loop.run_in_executor(
@@ -2220,7 +2220,7 @@ menuentry "Ubuntu Server HWE Autoinstall" {{
                 return False
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             return await asyncio.wait_for(
                 loop.run_in_executor(None, _connect),
                 timeout=timeout + 5,
@@ -2322,7 +2322,7 @@ menuentry "Ubuntu Server HWE Autoinstall" {{
                 return None
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             return await asyncio.wait_for(
                 loop.run_in_executor(None, _exec),
                 timeout=timeout + 10,

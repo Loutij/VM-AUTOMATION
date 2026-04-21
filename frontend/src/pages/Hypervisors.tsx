@@ -33,11 +33,6 @@ interface HypervisorFormData {
   port: string;
   username: string;
   password: string;
-  // VMware-specific
-  datacenter: string;
-  cluster: string;
-  default_datastore: string;
-  default_resource_pool: string;
 }
 
 const defaultFormData: HypervisorFormData = {
@@ -47,15 +42,6 @@ const defaultFormData: HypervisorFormData = {
   port: '',
   username: '',
   password: '',
-  datacenter: '',
-  cluster: '',
-  default_datastore: 'datastore1',
-  default_resource_pool: '',
-};
-
-const DEFAULT_PORTS: Record<string, string> = {
-  hyperv: '5986',
-  vmware: '443',
 };
 
 export function Hypervisors() {
@@ -140,10 +126,6 @@ export function Hypervisors() {
         port: hypervisor.port?.toString() || '',
         username: hypervisor.username,
         password: '',
-        datacenter: hypervisor.datacenter || '',
-        cluster: hypervisor.cluster || '',
-        default_datastore: hypervisor.default_datastore || 'datastore1',
-        default_resource_pool: hypervisor.default_resource_pool || '',
       });
     } else {
       setSelectedHypervisor(null);
@@ -167,13 +149,6 @@ export function Hypervisors() {
       port: formData.port ? parseInt(formData.port) : undefined,
       username: formData.username,
       ...(formData.password && { password: formData.password }),
-      // VMware-specific fields
-      ...(formData.type === 'vmware' && {
-        datacenter: formData.datacenter || undefined,
-        cluster: formData.cluster || undefined,
-        default_datastore: formData.default_datastore || undefined,
-        default_resource_pool: formData.default_resource_pool || undefined,
-      }),
     };
 
     if (selectedHypervisor) {
@@ -211,9 +186,7 @@ export function Hypervisors() {
       header: 'Type',
       sortable: true,
       render: (h) => (
-        <span className="px-2 py-1 bg-light-200 dark:bg-dark-700 rounded text-sm text-gray-700 dark:text-gray-300">
-          {h.type === 'vmware' ? 'VMware ESXi' : 'Hyper-V'}
-        </span>
+        <span className="px-2 py-1 bg-light-200 dark:bg-dark-700 rounded text-sm capitalize text-gray-700 dark:text-gray-300">{h.type}</span>
       ),
     },
     {
@@ -363,17 +336,12 @@ export function Hypervisors() {
             <Select
               label="Type"
               value={formData.type}
-              onChange={(e) => {
-                const newType = e.target.value as 'hyperv' | 'vmware';
-                setFormData({
-                  ...formData,
-                  type: newType,
-                  port: DEFAULT_PORTS[newType] || '',
-                });
-              }}
+              onChange={(e) =>
+                setFormData({ ...formData, type: e.target.value as 'hyperv' | 'vmware' })
+              }
               options={[
                 { value: 'hyperv', label: 'Hyper-V' },
-                { value: 'vmware', label: 'VMware ESXi' },
+                { value: 'vmware', label: 'VMware vSphere' },
               ]}
               required
             />
@@ -381,7 +349,7 @@ export function Hypervisors() {
               label="Hôte"
               value={formData.host}
               onChange={(e) => setFormData({ ...formData, host: e.target.value })}
-              placeholder={formData.type === 'vmware' ? '192.168.1.100 ou vcenter.domain.local' : '192.168.1.100 ou hyperv.domain.local'}
+              placeholder="192.168.1.100 ou hyperv.domain.local"
               required
             />
             <Input
@@ -389,8 +357,8 @@ export function Hypervisors() {
               type="number"
               value={formData.port}
               onChange={(e) => setFormData({ ...formData, port: e.target.value })}
-              placeholder={formData.type === 'vmware' ? '443 (vSphere)' : '5986 (WinRM)'}
-              helperText={`Par défaut : ${formData.type === 'vmware' ? '443' : '5986'}`}
+              placeholder="5985 (WinRM) ou 443 (vSphere)"
+              helperText="Laissez vide pour utiliser le port par défaut"
             />
             <Input
               label="Utilisateur"
@@ -408,43 +376,6 @@ export function Hypervisors() {
               required={!selectedHypervisor}
               helperText={selectedHypervisor ? 'Laissez vide pour conserver le mot de passe actuel' : undefined}
             />
-
-            {/* VMware-specific fields */}
-            {formData.type === 'vmware' && (
-              <div className="space-y-4 pt-2 border-t border-gray-200 dark:border-dark-600">
-                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Configuration VMware
-                </p>
-                <Input
-                  label="Datacenter"
-                  value={formData.datacenter}
-                  onChange={(e) => setFormData({ ...formData, datacenter: e.target.value })}
-                  placeholder="ha-datacenter"
-                  helperText="Nom du datacenter vSphere"
-                />
-                <Input
-                  label="Cluster"
-                  value={formData.cluster}
-                  onChange={(e) => setFormData({ ...formData, cluster: e.target.value })}
-                  placeholder="MonCluster"
-                  helperText="Nom du cluster (optionnel pour ESXi standalone)"
-                />
-                <Input
-                  label="Datastore par défaut"
-                  value={formData.default_datastore}
-                  onChange={(e) => setFormData({ ...formData, default_datastore: e.target.value })}
-                  placeholder="datastore1"
-                  helperText="Datastore utilisé par défaut pour les VMs"
-                />
-                <Input
-                  label="Resource Pool"
-                  value={formData.default_resource_pool}
-                  onChange={(e) => setFormData({ ...formData, default_resource_pool: e.target.value })}
-                  placeholder="Resources"
-                  helperText="Resource pool (optionnel)"
-                />
-              </div>
-            )}
           </form>
         </Modal>
 

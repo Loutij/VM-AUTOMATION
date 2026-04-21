@@ -348,6 +348,14 @@ class VMService:
         client = await self._get_hypervisor_client(hypervisor_id)
         hypervisor = await self.get_hypervisor(hypervisor_id)
         
+        # Extraire les paramètres ESXi des kwargs (ne pas les passer au modèle ORM)
+        esxi_datastore = kwargs.pop("datastore", None)
+        esxi_resource_pool = kwargs.pop("resource_pool", None)
+        esxi_guest_os_id = kwargs.pop("guest_os_id", None)
+        esxi_disk_format = kwargs.pop("disk_format", "thin")
+        esxi_folder = kwargs.pop("folder", None)
+        esxi_iso_path = kwargs.pop("iso_path", None)
+
         # Préparer les specs
         specs = VMSpecs(
             name=name,
@@ -356,6 +364,13 @@ class VMService:
             disk_gb=disk_gb,
             network_switch=network_switch or settings.hyperv_default_switch,
             vhdx_path=vhdx_path,  # Emplacement personnalisé du disque virtuel
+            # Paramètres spécifiques ESXi/VMware
+            datastore=esxi_datastore,
+            resource_pool=esxi_resource_pool,
+            guest_os_id=esxi_guest_os_id,
+            disk_format=esxi_disk_format,
+            folder=esxi_folder,
+            iso_path=esxi_iso_path,
         )
         
         # Si template spécifié, récupérer les infos ISO

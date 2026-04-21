@@ -348,27 +348,35 @@ def process_pending_deployments() -> dict:
     # Utiliser session sync pour éviter les problèmes d'event loop
     db = get_sync_session()
     try:
-        # Trouver les déploiements PENDING
-        pending = db.query(Deployment).filter(
-            Deployment.status == DeploymentStatus.PENDING
-        ).order_by(Deployment.created_at).limit(5).all()
-        
+        # SELECT FOR UPDATE : verrou atomique pour éviter le double-start
+        # si deux workers Celery Beat tournent simultanément.
+        pending = (
+            db.query(Deployment)
+            .filter(Deployment.status == DeploymentStatus.PENDING)
+            .order_by(Deployment.created_at)
+            .limit(5)
+            .with_for_update(skip_locked=True)
+            .all()
+        )
+
         processed = 0
         for deployment in pending:
             logger.info(f"Queuing deployment: {deployment.id} ({deployment.vm_name})")
-            
-            # Marquer comme IN_PROGRESS pour éviter double traitement
+
+            # Marquer comme IN_PROGRESS et committer immédiatement
+            # pour libérer le verrou et rendre le changement visible
+            # avant de lancer la tâche Celery.
             deployment.status = DeploymentStatus.IN_PROGRESS
             deployment.started_at = datetime.now(timezone.utc)
-            
-            # Lancer la tâche de traitement
+            db.commit()
+
+            # Lancer la tâche de traitement après le commit
             process_deployment.delay(str(deployment.id))
             processed += 1
-        
-        db.commit()
+
         logger.info(f"Queued {processed} pending deployments")
         return {"processed": processed}
-        
+
     except Exception as e:
         db.rollback()
         logger.error(f"Error processing pending deployments: {e}")
@@ -726,7 +734,7 @@ def cleanup_vnc_sessions() -> dict:
     logger.info("Checking for expired VNC sessions...")
 
     try:
-        from src.api.routers.console import active_vnc_sessions
+        from src.api.routers.console import _active_consoles as active_vnc_sessions
     except ImportError:
         logger.debug("VNC console router not available, skipping cleanup")
         return {"cleaned": 0, "active": 0}

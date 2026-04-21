@@ -235,10 +235,11 @@ class ESXiClient(BaseHypervisor):
         """
         self._ensure_connected()
 
-        # Essayer d'abord par MoRef ID
-        if vm_id.startswith("vm-"):
+        # Essayer d'abord par MoRef ID (format "vm-123", juste "123", ou autre moRef)
+        moref_id = vm_id if (vm_id.startswith("vm-") or vm_id.isdigit()) else None
+        if moref_id:
             try:
-                vm = vim.VirtualMachine(vm_id, self._si._stub)
+                vm = vim.VirtualMachine(moref_id, self._si._stub)
                 # Vérifier que la VM existe en accédant à son nom
                 _ = vm.name
                 return vm

@@ -1,9 +1,26 @@
 """add_state_column_to_vm
 
 Revision ID: 889a3e192265
-Revises: 012_add_foreign_key_indexes
+Revises: 001_initial_schema
 Create Date: 2026-01-26 17:13:13.683702
 
+# =============================================================================
+# Chaîne de migration Alembic (ordre d'application) :
+#   001_initial_schema
+#     → 889a3e192265  (add_state_column_to_vm)   ← cette migration
+#       → 002_update_deployment
+#         → 003_software_marketplace
+#           → 004_extend_software_categories
+#             → 005_add_template_locale
+#               → 006_seed_linux_templates
+#                 → 007_seed_debian13_and_windows_templates
+#                   → 008_fix_template_iso_paths
+#                     → 009_add_missing_indexes
+#                       → 010_add_user_roles
+#                         → 011_deployment_approval_audit
+#                           → 012_add_foreign_key_indexes
+#                             → 013_add_esxi_fields  (HEAD)
+# =============================================================================
 """
 from typing import Sequence, Union
 

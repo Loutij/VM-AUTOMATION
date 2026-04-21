@@ -13,6 +13,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.common.auth import is_token_blacklisted
 from src.common.config import settings
 from src.common.database import get_db_session
 from src.common.exceptions import InvalidTokenError, TokenExpiredError
@@ -73,13 +74,22 @@ async def get_current_user(
         user_id: str | None = payload.get("sub")
         if user_id is None:
             raise InvalidTokenError()
-        
+
+        # Vérifier que le token n'est pas révoqué (blacklist post-logout)
+        jti: str | None = payload.get("jti")
+        if jti and await is_token_blacklisted(jti):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has been revoked",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
         return {
             "user_id": user_id,
             "username": payload.get("username", ""),
             "role": payload.get("role", "user"),
         }
-        
+
     except jwt.ExpiredSignatureError:
         logger.warning("token_expired")
         raise HTTPException(

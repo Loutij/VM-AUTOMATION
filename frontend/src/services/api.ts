@@ -25,6 +25,7 @@ import type {
   ResetPasswordRequest,
   AuditLogList,
   SoftwareInventory,
+  VSphereTemplate,
 } from '../types';
 
 // Configuration de base
@@ -109,11 +110,6 @@ interface HypervisorBackend {
   username: string;
   is_active: boolean;
   vm_count: number;
-  // VMware-specific
-  datacenter?: string;
-  cluster?: string;
-  default_datastore?: string;
-  default_resource_pool?: string;
   created_at: string;
   updated_at: string | null;
 }
@@ -129,11 +125,6 @@ function mapHypervisor(h: HypervisorBackend): Hypervisor {
     username: h.username,
     is_active: h.is_active,
     vm_count: h.vm_count ?? 0,
-    // VMware-specific
-    datacenter: h.datacenter,
-    cluster: h.cluster,
-    default_datastore: h.default_datastore,
-    default_resource_pool: h.default_resource_pool,
     created_at: h.created_at,
     updated_at: h.updated_at || h.created_at,
   };
@@ -151,23 +142,15 @@ export const hypervisorsApi = {
   },
 
   create: async (data: Partial<Hypervisor>): Promise<Hypervisor> => {
-    const defaultPort = data.type === 'vmware' ? 443 : 5985;
-    const payload: Record<string, unknown> = {
+    const payload = {
       name: data.name,
       type: data.type,
       host: data.host,
-      port: data.port || defaultPort,
-      use_ssl: data.type === 'vmware' ? true : false,
+      port: data.port || 5985,
+      use_ssl: false,
       username: data.username,
       password: (data as { password?: string }).password,
     };
-    // VMware-specific fields
-    if (data.type === 'vmware') {
-      if (data.datacenter) payload.datacenter = data.datacenter;
-      if (data.cluster) payload.cluster = data.cluster;
-      if (data.default_datastore) payload.default_datastore = data.default_datastore;
-      if (data.default_resource_pool) payload.default_resource_pool = data.default_resource_pool;
-    }
     const response = await apiClient.post<HypervisorBackend>('/hypervisors', payload);
     return mapHypervisor(response.data);
   },
@@ -175,19 +158,11 @@ export const hypervisorsApi = {
   update: async (id: string, data: Partial<Hypervisor>): Promise<Hypervisor> => {
     const payload: Record<string, unknown> = {};
     if (data.name) payload.name = data.name;
-    if (data.type) payload.type = data.type;
     if (data.host) payload.host = data.host;
     if (data.port) payload.port = data.port;
     if (data.username) payload.username = data.username;
     if ((data as { password?: string }).password) payload.password = (data as { password?: string }).password;
-    // VMware-specific fields
-    if (data.type === 'vmware') {
-      payload.datacenter = data.datacenter || undefined;
-      payload.cluster = data.cluster || undefined;
-      payload.default_datastore = data.default_datastore || undefined;
-      payload.default_resource_pool = data.default_resource_pool || undefined;
-    }
-
+    
     const response = await apiClient.patch<HypervisorBackend>(`/hypervisors/${id}`, payload);
     return mapHypervisor(response.data);
   },
@@ -279,14 +254,9 @@ export const hypervisorsApi = {
     return response.data;
   },
 
-  // VMware-specific endpoints
-  listDatastores: async (hypervisorId: string): Promise<{ name: string; capacity_gb: number; free_gb: number; type: string }[]> => {
-    const response = await apiClient.get(`/hypervisors/${hypervisorId}/datastores`);
-    return response.data;
-  },
-
-  listResourcePools: async (hypervisorId: string): Promise<{ name: string; cpu_limit?: number; memory_limit_gb?: number }[]> => {
-    const response = await apiClient.get(`/hypervisors/${hypervisorId}/resource-pools`);
+  // Lister les templates vSphere disponibles pour le clonage
+  listVSphereTemplates: async (id: string): Promise<VSphereTemplate[]> => {
+    const response = await apiClient.get<VSphereTemplate[]>(`/hypervisors/${id}/templates`);
     return response.data;
   },
 };
@@ -420,6 +390,8 @@ interface TemplateBackend {
   min_disk_gb: number;
   install_locale: string;
   is_active: boolean;
+  deployment_method?: 'iso' | 'clone';
+  vsphere_template_name?: string | null;
   created_at: string;
   updated_at: string | null;
 }
@@ -437,6 +409,8 @@ function mapTemplate(t: TemplateBackend): OSTemplate {
     min_ram_gb: t.min_ram_gb,
     min_disk_gb: t.min_disk_gb,
     install_locale: t.install_locale,
+    deployment_method: t.deployment_method || 'iso',
+    vsphere_template_name: t.vsphere_template_name || undefined,
     updated_at: t.updated_at || undefined,
     created_at: t.created_at,
   };
@@ -454,7 +428,7 @@ export const templatesApi = {
   },
 
   create: async (data: Partial<OSTemplate>): Promise<OSTemplate> => {
-    const payload = {
+    const payload: Record<string, unknown> = {
       name: data.name,
       os_family: data.os_family,
       os_type: data.os_type,
@@ -464,7 +438,11 @@ export const templatesApi = {
       min_ram_gb: data.min_ram_gb || 4,
       min_disk_gb: data.min_disk_gb || 60,
       install_locale: data.install_locale || 'fr-FR',
+      deployment_method: data.deployment_method || 'iso',
     };
+    if (data.vsphere_template_name) {
+      payload.vsphere_template_name = data.vsphere_template_name;
+    }
     const response = await apiClient.post<TemplateBackend>('/templates', payload);
     return mapTemplate(response.data);
   },
@@ -472,11 +450,16 @@ export const templatesApi = {
   update: async (id: string, data: Partial<OSTemplate>): Promise<OSTemplate> => {
     const payload: Record<string, unknown> = {};
     if (data.name) payload.name = data.name;
-    if (data.iso_path) payload.iso_path = data.iso_path;
+    if (data.iso_path !== undefined) payload.iso_path = data.iso_path;
     if (data.min_cpu) payload.min_cpu = data.min_cpu;
     if (data.min_ram_gb) payload.min_ram_gb = data.min_ram_gb;
     if (data.min_disk_gb) payload.min_disk_gb = data.min_disk_gb;
     if (data.install_locale) payload.install_locale = data.install_locale;
+    if (data.deployment_method) payload.deployment_method = data.deployment_method;
+    // vsphere_template_name peut être undefined (effacement) ou une string
+    if ('vsphere_template_name' in data) {
+      payload.vsphere_template_name = data.vsphere_template_name || null;
+    }
     
     const response = await apiClient.patch<TemplateBackend>(`/templates/${id}`, payload);
     return mapTemplate(response.data);
@@ -592,6 +575,9 @@ export const deploymentsApi = {
       enable_windows_update: data.config.enable_windows_update,
       // Commandes post-install personnalisées
       post_install_commands: data.config.post_install_commands,
+      // Méthode de déploiement (ISO ou clone vSphere)
+      deployment_method: data.config.deployment_method || 'iso',
+      vsphere_template_name: data.config.vsphere_template_name,
     };
     const response = await apiClient.post<DeploymentBackend>('/deployments', payload);
     return mapDeployment(response.data);

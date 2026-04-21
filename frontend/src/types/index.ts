@@ -8,11 +8,6 @@ export interface Hypervisor {
   username: string;
   is_active: boolean;
   vm_count?: number;
-  // VMware-specific fields
-  datacenter?: string;
-  cluster?: string;
-  default_datastore?: string;
-  default_resource_pool?: string;
   created_at: string;
   updated_at: string;
 }
@@ -31,11 +26,6 @@ export interface VirtualMachine {
   os_type?: string;
   ip_address?: string;
   network_switch?: string;
-  // VMware-specific fields
-  tools_status?: string;
-  tools_version?: string;
-  guest_os?: string;
-  datastore?: string;
   vlan_id?: number;
   created_at: string;
   updated_at: string;
@@ -125,6 +115,9 @@ export interface VMScreenshot {
 // Types pour les templates OS
 export type OSFamily = 'windows' | 'linux';
 
+// Méthode de déploiement : via ISO ou clonage d'un template vSphere
+export type DeploymentMethod = 'iso' | 'clone';
+
 export interface OSTemplate {
   id: string;
   name: string;
@@ -137,6 +130,9 @@ export interface OSTemplate {
   min_ram_gb: number;  // Aligned with backend (was default_memory_mb)
   min_disk_gb: number; // Aligned with backend (was default_disk_gb)
   install_locale?: string;  // Langue d'installation (ex: fr-FR, en-US)
+  // Déploiement par clone vSphere
+  deployment_method?: DeploymentMethod;   // 'iso' (défaut) ou 'clone'
+  vsphere_template_name?: string;         // Nom du template vSphere à cloner
   updated_at?: string;
   created_at: string;
 }
@@ -206,6 +202,15 @@ export interface AuditLogList {
   page_size: number;
 }
 
+// Template vSphere disponible pour le clonage
+export interface VSphereTemplate {
+  name: string;
+  guest_os?: string;
+  num_cpu?: number;
+  memory_mb?: number;
+  path?: string;
+}
+
 export interface DeploymentConfig {
   vm_name: string;
   cpu_count: number;
@@ -213,6 +218,9 @@ export interface DeploymentConfig {
   disk_gb: number; // Aligned with backend (was disk_size_gb)
   vhdx_path?: string; // Emplacement personnalisé du disque virtuel
   network_switch?: string;
+  // Méthode de déploiement
+  deployment_method?: DeploymentMethod;    // 'iso' (défaut) ou 'clone'
+  vsphere_template_name?: string;          // Template vSphere à cloner (si clone)
   hostname?: string;
   admin_password?: string;
   domain_join?: {

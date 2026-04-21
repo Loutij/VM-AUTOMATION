@@ -34,7 +34,7 @@ def generate_callback_token(vm_name: str, secret: str) -> str:
     This token should be embedded in VM installation scripts so the VM
     can authenticate its callbacks without knowing the raw API secret.
     """
-    return hmac.new(secret.encode(), vm_name.encode(), hashlib.sha256).hexdigest()
+    return hmac.HMAC(secret.encode(), vm_name.encode(), hashlib.sha256).hexdigest()
 
 
 async def verify_callback_token(

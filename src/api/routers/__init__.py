@@ -17,6 +17,7 @@ from src.api.routers import (
     settings,
     software_catalog,
     templates,
+    terminal,
     vms,
     vnc,
 )
@@ -33,6 +34,7 @@ __all__ = [
     "settings",
     "software_catalog",
     "templates",
+    "terminal",
     "vms",
     "vnc",
 ]
